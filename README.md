@@ -1,10 +1,3 @@
-# badminton-app
-Ứng dụng đặt lịch sân cầu lông theo thời gian thực.
+# flutter_application_1
 
-## Projects
-- mobile_app: Flutter mobile application
-- web_app: Customer website
-- admin_web: Admin website
-- backend: Node.js API
-- database: MySQL scripts
-- docs: Project documentation
+A new Flutter project.
