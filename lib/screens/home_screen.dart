@@ -84,7 +84,7 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Tìm sân cầu lông\\nphù hợp với bạn',
+                'Tìm sân cầu lông\nphù hợp với bạn',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 25,
