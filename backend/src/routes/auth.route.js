@@ -1,4 +1,4 @@
-// routes/auth.routes.js
+// routes/auth.route.js
 const r = require('express').Router();
 const c = require('../controllers/auth.controller');
 r.post('/register', c.register);
