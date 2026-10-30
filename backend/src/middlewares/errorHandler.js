@@ -1,22 +1,30 @@
 const AppError = require('../utils/AppError');
-const env = require('../config/env');
+const cauHinh = require('../config/env');
 
-const notFound = (req, _res, next) => next(AppError.notFound(`Không có route ${req.method} ${req.originalUrl}`));
+const khongTimThayDuongDan = (yeuCau, _phanHoi, goiTiep) => {
+  goiTiep(AppError.khongTimThay(`Không tìm thấy đường dẫn ${yeuCau.method} ${yeuCau.originalUrl}`));
+};
 
-// eslint-disable-next-line no-unused-vars
-const errorHandler = (err, _req, res, _next) => {
-  let e = err;
-  if (err.code === 'ER_DUP_ENTRY') e = AppError.conflict('Dữ liệu đã tồn tại');
-  else if (err.code === 'LIMIT_FILE_SIZE') e = AppError.badRequest('File quá lớn (tối đa 5MB)');
-  else if (err.type === 'entity.parse.failed') e = AppError.badRequest('JSON không hợp lệ');
-  if (!(e instanceof AppError)) {
-    console.error(err);
-    e = new AppError(500, 'Lỗi máy chủ', 'INTERNAL');
+const xuLyLoi = (loi, _yeuCau, phanHoi, _goiTiep) => {
+  let loiHienThi = loi;
+  if (loi.code === 'ER_DUP_ENTRY') loiHienThi = AppError.biTrung('Dữ liệu đã tồn tại');
+  else if (loi.code === 'LIMIT_FILE_SIZE') loiHienThi = AppError.duLieuKhongHopLe('Tệp quá lớn (tối đa 5MB)');
+  else if (loi.type === 'entity.parse.failed') loiHienThi = AppError.duLieuKhongHopLe('JSON không hợp lệ');
+  if (!(loiHienThi instanceof AppError)) {
+    console.error(loi);
+    loiHienThi = new AppError(500, 'Lỗi máy chủ', 'INTERNAL');
   }
-  res.status(e.status).json({
-    success: false,
-    error: { code: e.code, message: e.message, details: e.details,
-      ...(env.nodeEnv !== 'production' && e.status === 500 ? { stack: err.stack } : {}) },
+  phanHoi.status(loiHienThi.maTrangThai).json({
+    thanhCong: false,
+    loi: {
+      maLoi: loiHienThi.maLoi,
+      thongBao: loiHienThi.message,
+      chiTiet: loiHienThi.chiTiet,
+      ...(cauHinh.moiTruong !== 'production' && loiHienThi.maTrangThai === 500
+        ? { nganXep: loi.stack }
+        : {}),
+    },
   });
 };
-module.exports = { notFound, errorHandler };
+
+module.exports = { khongTimThayDuongDan, xuLyLoi };

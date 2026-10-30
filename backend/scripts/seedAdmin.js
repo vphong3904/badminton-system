@@ -1,14 +1,25 @@
 // Dùng: ADMIN_USER=admin ADMIN_PASSWORD=xxx npm run seed:admin
 const bcrypt = require('bcryptjs');
-const { pool } = require('../src/config/db');
-(async () => {
-  const u = process.env.ADMIN_USER || 'admin';
-  const p = process.env.ADMIN_PASSWORD;
-  if (!p || p.length < 8) { console.error('Cần ADMIN_PASSWORD (>= 8 ký tự)'); process.exit(1); }
-  await pool.query(
-    `INSERT INTO users (role, username, password_hash, full_name, phone, email) VALUES ('admin',?,?,?,?,?)
-     ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)`,
-    [u, await bcrypt.hash(p, 10), 'Quản trị viên', '0900000000', `${u}@local.test`]);
-  console.log(`Đã tạo/cập nhật admin "${u}"`);
-  await pool.end();
-})().catch((e) => { console.error(e); process.exit(1); });
+const { hoBoi } = require('../src/config/db');
+
+async function taoTaiKhoanQuanTri() {
+  const tenDangNhap = process.env.ADMIN_USER || 'admin';
+  const matKhau = process.env.ADMIN_PASSWORD;
+  if (!matKhau || matKhau.length < 8) {
+    throw new Error('Cần ADMIN_PASSWORD (ít nhất 8 ký tự)');
+  }
+  const matKhauMaHoa = await bcrypt.hash(matKhau, 10);
+  await hoBoi.query(
+    `INSERT INTO NguoiDung (VaiTro, TenDangNhap, MatKhauMaHoa, HoTen, SoDienThoai, Email)
+     VALUES ('admin',?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE MatKhauMaHoa = VALUES(MatKhauMaHoa)`,
+    [tenDangNhap, matKhauMaHoa, 'Quản trị viên', '0900000000', `${tenDangNhap}@local.test`]);
+  console.log(`Đã tạo/cập nhật tài khoản quản trị "${tenDangNhap}"`);
+}
+
+taoTaiKhoanQuanTri()
+  .catch((loi) => {
+    console.error(loi);
+    process.exitCode = 1;
+  })
+  .finally(() => hoBoi.end());

@@ -1,8 +1,12 @@
 const mysql = require('mysql2/promise');
-const env = require('./env');
+const cauHinh = require('./env');
 
-const pool = mysql.createPool({
-  ...env.db,
+const hoBoi = mysql.createPool({
+  host: cauHinh.coSoDuLieu.mayChu,
+  port: cauHinh.coSoDuLieu.cong,
+  user: cauHinh.coSoDuLieu.nguoiDung,
+  password: cauHinh.coSoDuLieu.matKhau,
+  database: cauHinh.coSoDuLieu.ten,
   waitForConnections: true,
   connectionLimit: 10,
   timezone: '+07:00',
@@ -10,20 +14,19 @@ const pool = mysql.createPool({
   namedPlaceholders: true,
 });
 
-/** Chạy fn(conn) trong một transaction; tự commit/rollback. */
-async function withTransaction(fn) {
-  const conn = await pool.getConnection();
+async function thucHienGiaoDich(hamThucThi) {
+  const ketNoi = await hoBoi.getConnection();
   try {
-    await conn.beginTransaction();
-    const result = await fn(conn);
-    await conn.commit();
-    return result;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
+    await ketNoi.beginTransaction();
+    const ketQua = await hamThucThi(ketNoi);
+    await ketNoi.commit();
+    return ketQua;
+  } catch (loi) {
+    await ketNoi.rollback();
+    throw loi;
   } finally {
-    conn.release();
+    ketNoi.release();
   }
 }
 
-module.exports = { pool, withTransaction };
+module.exports = { hoBoi, thucHienGiaoDich };

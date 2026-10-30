@@ -1,176 +1,325 @@
-const { pool, withTransaction } = require('../config/db');
+const { hoBoi, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
-const { validatePriceSlots } = require('../utils/time');
+const { kiemTraKhungGia } = require('../utils/time');
 
-const EDITABLE = ['draft', 'rejected'];
+const TRANG_THAI_DUOC_SUA = ['draft', 'rejected'];
 
-async function getProfile(ownerId) {
-  const [[p]] = await pool.query('SELECT * FROM owner_profiles WHERE user_id = ?', [ownerId]);
-  return p;
+async function layHoSo(maChuSan) {
+  const [[hoSo]] = await hoBoi.query(
+    `SELECT MaNguoiDung AS maNguoiDung, TenDoanhNghiep AS tenDoanhNghiep,
+       TenNganHang AS tenNganHang, MaNganHang AS maNganHang, SoTaiKhoan AS soTaiKhoan,
+       ChuTaiKhoan AS chuTaiKhoan, TrangThaiDuyet AS trangThaiDuyet,
+       NgayGuiDuyet AS ngayGuiDuyet, NgayDuyet AS ngayDuyet,
+       MaQuanTriDuyet AS maQuanTriDuyet, LyDoTuChoi AS lyDoTuChoi
+     FROM HoSoChuSan WHERE MaNguoiDung = ?`,
+    [maChuSan]);
+  return hoSo;
 }
-async function getVenue(ownerId) {
-  const [[v]] = await pool.query('SELECT * FROM venues WHERE owner_id = ?', [ownerId]);
-  return v || null;
+
+async function layCoSo(maChuSan) {
+  const [[coSo]] = await hoBoi.query(
+    `SELECT cs.MaCoSo AS maCoSo, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo,
+       cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai, cs.Zalo AS zalo,
+       cs.LinkBanDo AS linkBanDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
+       cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
+       cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.GiaThapNhat AS giaThapNhat,
+       cs.TrangThai AS trangThai,
+       (SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo
+        ORDER BY LaAnhBia DESC, ThuTu, MaAnh LIMIT 1) AS duongDanAnh,
+       (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo) AS soSan
+     FROM CoSo cs WHERE cs.MaChuSan = ? ORDER BY cs.MaCoSo LIMIT 1`,
+    [maChuSan]);
+  return coSo || null;
 }
-async function mustVenue(ownerId) {
-  const v = await getVenue(ownerId);
-  if (!v) throw AppError.badRequest('Bạn chưa khai báo thông tin sân (bước 1)');
-  return v;
+
+async function layBangGia(maCoSo) {
+  const [khungGias] = await hoBoi.query(
+    `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc,
+       MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'walk_in' THEN GiaMoiGio END) AS giaNgayThuongKhachVangLai,
+       MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'fixed' THEN GiaMoiGio END) AS giaNgayThuongKhachCoDinh,
+       MAX(CASE WHEN LoaiNgay = 'weekend' AND LoaiKhach = 'walk_in' THEN GiaMoiGio END) AS giaCuoiTuanKhachVangLai,
+       MAX(CASE WHEN LoaiNgay = 'weekend' AND LoaiKhach = 'fixed' THEN GiaMoiGio END) AS giaCuoiTuanKhachCoDinh
+     FROM BangGia WHERE MaCoSo = ?
+     GROUP BY GioBatDau, GioKetThuc ORDER BY GioBatDau`,
+    [maCoSo]);
+  return khungGias.map((khungGia) => ({
+    ...khungGia,
+    gioBatDau: String(khungGia.gioBatDau).slice(0, 5),
+    gioKetThuc: String(khungGia.gioKetThuc).slice(0, 5),
+  }));
 }
-async function assertEditable(ownerId) {
-  const p = await getProfile(ownerId);
-  if (!EDITABLE.includes(p.approval_status)) {
-    throw AppError.conflict(p.approval_status === 'pending'
+
+async function batBuocCoSo(maChuSan) {
+  const coSo = await layCoSo(maChuSan);
+  if (!coSo) throw AppError.duLieuKhongHopLe('Bạn chưa khai báo thông tin sân (bước 1)');
+  return coSo;
+}
+
+async function xacNhanDuocSua(maChuSan) {
+  const hoSo = await layHoSo(maChuSan);
+  if (!TRANG_THAI_DUOC_SUA.includes(hoSo.trangThaiDuyet)) {
+    throw AppError.biTrung(hoSo.trangThaiDuyet === 'pending'
       ? 'Hồ sơ đang chờ duyệt, không thể chỉnh sửa' : 'Hồ sơ đã duyệt, hãy dùng chức năng chỉnh sửa sân');
   }
 }
 
-/* ---------- Onboarding ---------- */
-async function onboardingState(ownerId) {
-  const profile = await getProfile(ownerId);
-  const venue = await getVenue(ownerId);
-  const [slots] = venue ? await pool.query('SELECT * FROM price_slots WHERE venue_id = ? ORDER BY start_time', [venue.id]) : [[]];
+async function trangThaiDangKy(maChuSan) {
+  const hoSo = await layHoSo(maChuSan);
+  const coSo = await layCoSo(maChuSan);
+  const khungGias = coSo ? await layBangGia(coSo.maCoSo) : [];
   return {
-    approval_status: profile.approval_status,
-    reject_reason: profile.reject_reason,
-    submitted_at: profile.submitted_at,
-    steps: { venue: !!venue, prices: slots.length > 0, bank: !!profile.bank_account_no },
-    venue, price_slots: slots,
-    bank: { bank_name: profile.bank_name, bank_account_no: profile.bank_account_no, bank_account_name: profile.bank_account_name },
+    trangThaiDuyet: hoSo.trangThaiDuyet,
+    lyDoTuChoi: hoSo.lyDoTuChoi,
+    ngayGuiDuyet: hoSo.ngayGuiDuyet,
+    cacBuoc: { coSo: !!coSo, bangGia: khungGias.length > 0, nganHang: !!hoSo.soTaiKhoan },
+    coSo,
+    khungGias,
+    thongTinNganHang: {
+      tenNganHang: hoSo.tenNganHang,
+      soTaiKhoan: hoSo.soTaiKhoan,
+      chuTaiKhoan: hoSo.chuTaiKhoan,
+    },
   };
 }
 
-async function saveVenueStep(ownerId, d) {
-  await assertEditable(ownerId);
-  const existing = await getVenue(ownerId);
-  const cols = [d.name, d.address, d.province_id, d.district_id ?? null, d.phone, d.zalo ?? null, d.map_url,
-    d.description ?? null, d.court_count, d.open_time, d.close_time, d.min_booking_minutes];
-  if (existing) {
-    // Giờ mở cửa mới phải còn chứa các khung giá đã khai báo
-    const [slots] = await pool.query('SELECT start_time, end_time, fixed_price, walkin_price FROM price_slots WHERE venue_id = ?', [existing.id]);
-    validatePriceSlots(slots.map((s) => ({ ...s, start_time: s.start_time.slice(0, 5), end_time: s.end_time.slice(0, 5) })), d.open_time, d.close_time);
-    await pool.query(
-      `UPDATE venues SET name=?, address=?, province_id=?, district_id=?, phone=?, zalo=?, map_url=?, description=?,
-       court_count=?, open_time=?, close_time=?, min_booking_minutes=? WHERE id=?`, [...cols, existing.id]);
+async function luuBuocCoSo(maChuSan, duLieuCoSo) {
+  await xacNhanDuocSua(maChuSan);
+  const coSoHienTai = await layCoSo(maChuSan);
+  const duLieuLuu = [
+    duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai, duLieuCoSo.zalo ?? null,
+    duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh, duLieuCoSo.quanHuyen,
+    duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
+    duLieuCoSo.soPhutDatToiThieu,
+  ];
+
+  if (coSoHienTai) {
+    const khungGias = await layBangGia(coSoHienTai.maCoSo);
+    kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
+    await hoBoi.query(
+      `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
+       TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?
+       WHERE MaCoSo=?`,
+      [...duLieuLuu, coSoHienTai.maCoSo]);
   } else {
-    await pool.query(
-      `INSERT INTO venues (name, address, province_id, district_id, phone, zalo, map_url, description,
-       court_count, open_time, close_time, min_booking_minutes, owner_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [...cols, ownerId]);
+    await hoBoi.query(
+      `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
+       TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [maChuSan, ...duLieuLuu]);
   }
-  return onboardingState(ownerId);
+  return trangThaiDangKy(maChuSan);
 }
 
-/** Thay toàn bộ bảng giá (dùng cho cả onboarding lẫn chỉnh sửa sau khi duyệt). */
-async function replacePrices(ownerId, slots) {
-  const v = await mustVenue(ownerId);
-  validatePriceSlots(slots, v.open_time.slice(0, 5), v.close_time.slice(0, 5));
-  await withTransaction(async (conn) => {
-    await conn.query('DELETE FROM price_slots WHERE venue_id = ?', [v.id]);
-    await conn.query('INSERT INTO price_slots (venue_id, start_time, end_time, fixed_price, walkin_price) VALUES ?',
-      [slots.map((s) => [v.id, s.start_time, s.end_time, s.fixed_price, s.walkin_price])]);
+async function thayBangGia(maChuSan, khungGias) {
+  const coSo = await batBuocCoSo(maChuSan);
+  kiemTraKhungGia(khungGias, coSo.gioMoCua.slice(0, 5), coSo.gioDongCua.slice(0, 5));
+
+  const duLieuBangGia = khungGias.flatMap((khungGia) => [
+    [coSo.maCoSo, 'weekday', 'walk_in', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaNgayThuongKhachVangLai],
+    [coSo.maCoSo, 'weekday', 'fixed', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaNgayThuongKhachCoDinh],
+    [coSo.maCoSo, 'weekend', 'walk_in', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaCuoiTuanKhachVangLai],
+    [coSo.maCoSo, 'weekend', 'fixed', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaCuoiTuanKhachCoDinh],
+  ]);
+  const giaThapNhat = Math.min(...khungGias.flatMap((khungGia) => [
+    khungGia.giaNgayThuongKhachVangLai,
+    khungGia.giaCuoiTuanKhachVangLai,
+  ]));
+
+  await thucHienGiaoDich(async (ketNoi) => {
+    await ketNoi.query('DELETE FROM BangGia WHERE MaCoSo = ?', [coSo.maCoSo]);
+    await ketNoi.query(
+      `INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio)
+       VALUES ?`,
+      [duLieuBangGia]);
+    await ketNoi.query('UPDATE CoSo SET GiaThapNhat=? WHERE MaCoSo=?', [giaThapNhat, coSo.maCoSo]);
   });
-  const [rows] = await pool.query('SELECT * FROM price_slots WHERE venue_id = ? ORDER BY start_time', [v.id]);
-  return rows;
-}
-async function savePricesStep(ownerId, slots) {
-  await assertEditable(ownerId);
-  await replacePrices(ownerId, slots);
-  return onboardingState(ownerId);
+  return layBangGia(coSo.maCoSo);
 }
 
-async function saveBankStep(ownerId, b) {
-  await pool.query('UPDATE owner_profiles SET bank_name=?, bank_account_no=?, bank_account_name=? WHERE user_id=?',
-    [b.bank_name, b.bank_account_no, b.bank_account_name, ownerId]);
-  return onboardingState(ownerId);
+async function luuBuocBangGia(maChuSan, khungGias) {
+  await xacNhanDuocSua(maChuSan);
+  await thayBangGia(maChuSan, khungGias);
+  return trangThaiDangKy(maChuSan);
 }
 
-async function submitOnboarding(ownerId) {
-  await assertEditable(ownerId);
-  const s = await onboardingState(ownerId);
-  const missing = Object.entries({ 'thông tin sân': s.steps.venue, 'bảng giá': s.steps.prices, 'tài khoản ngân hàng': s.steps.bank })
-    .filter(([, ok]) => !ok).map(([k]) => k);
-  if (missing.length) throw AppError.badRequest(`Chưa hoàn thành: ${missing.join(', ')}`);
-  await pool.query(
-    `UPDATE owner_profiles SET approval_status='pending', submitted_at=NOW(), reject_reason=NULL,
-     reviewed_by=NULL, reviewed_at=NULL WHERE user_id=?`, [ownerId]);
-  return onboardingState(ownerId);
+async function luuBuocNganHang(maChuSan, thongTinNganHang) {
+  await hoBoi.query(
+    `UPDATE HoSoChuSan SET TenNganHang=?, SoTaiKhoan=?, ChuTaiKhoan=? WHERE MaNguoiDung=?`,
+    [thongTinNganHang.tenNganHang, thongTinNganHang.soTaiKhoan, thongTinNganHang.chuTaiKhoan, maChuSan]);
+  return trangThaiDangKy(maChuSan);
 }
 
-/* ---------- Sau khi được duyệt ---------- */
-async function updateVenue(ownerId, d) {
-  const v = await mustVenue(ownerId);
-  const [slots] = await pool.query('SELECT start_time, end_time FROM price_slots WHERE venue_id = ?', [v.id]);
-  validatePriceSlots(slots.map((s) => ({ start_time: s.start_time.slice(0, 5), end_time: s.end_time.slice(0, 5) })), d.open_time, d.close_time);
-  await pool.query(
-    `UPDATE venues SET name=?, address=?, province_id=?, district_id=?, phone=?, zalo=?, map_url=?, description=?,
-     court_count=?, open_time=?, close_time=?, min_booking_minutes=? WHERE id=?`,
-    [d.name, d.address, d.province_id, d.district_id ?? null, d.phone, d.zalo ?? null, d.map_url, d.description ?? null,
-      d.court_count, d.open_time, d.close_time, d.min_booking_minutes, v.id]);
-  return getVenue(ownerId);
+async function guiHoSoDuyet(maChuSan) {
+  await xacNhanDuocSua(maChuSan);
+  const trangThai = await trangThaiDangKy(maChuSan);
+  const mucConThieu = Object.entries({
+    'thông tin sân': trangThai.cacBuoc.coSo,
+    'bảng giá': trangThai.cacBuoc.bangGia,
+    'tài khoản ngân hàng': trangThai.cacBuoc.nganHang,
+  }).filter(([, hoanTat]) => !hoanTat).map(([tenMuc]) => tenMuc);
+  if (mucConThieu.length) throw AppError.duLieuKhongHopLe(`Chưa hoàn thành: ${mucConThieu.join(', ')}`);
+  await hoBoi.query(
+    `UPDATE HoSoChuSan SET TrangThaiDuyet='pending', NgayGuiDuyet=NOW(), LyDoTuChoi=NULL,
+       MaQuanTriDuyet=NULL, NgayDuyet=NULL WHERE MaNguoiDung=?`,
+    [maChuSan]);
+  return trangThaiDangKy(maChuSan);
 }
 
-async function setVenueImage(ownerId, url) {
-  const v = await mustVenue(ownerId);
-  await pool.query('UPDATE venues SET image_url = ? WHERE id = ?', [url, v.id]);
-  return { image_url: url };
+async function capNhatCoSo(maChuSan, duLieuCoSo) {
+  const coSo = await batBuocCoSo(maChuSan);
+  const khungGias = await layBangGia(coSo.maCoSo);
+  kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
+  await hoBoi.query(
+    `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
+       TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?
+     WHERE MaCoSo=?`,
+    [
+      duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai, duLieuCoSo.zalo ?? null,
+      duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh, duLieuCoSo.quanHuyen,
+      duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
+      duLieuCoSo.soPhutDatToiThieu, coSo.maCoSo,
+    ]);
+  return layCoSo(maChuSan);
 }
 
-async function listCourts(ownerId) {
-  const v = await mustVenue(ownerId);
-  const [rows] = await pool.query('SELECT * FROM courts WHERE venue_id = ? ORDER BY id', [v.id]);
-  return rows;
+async function capNhatAnhCoSo(maChuSan, duongDan) {
+  const coSo = await batBuocCoSo(maChuSan);
+  await thucHienGiaoDich(async (ketNoi) => {
+    await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=0 WHERE MaCoSo=?', [coSo.maCoSo]);
+    await ketNoi.query('INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia) VALUES (?,?,1)', [coSo.maCoSo, duongDan]);
+  });
+  return { duongDanAnh: duongDan };
 }
-async function createCourt(ownerId, d) {
-  const v = await mustVenue(ownerId);
-  const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM courts WHERE venue_id = ?', [v.id]);
-  if (n >= v.court_count) throw AppError.conflict(`Đã đủ ${v.court_count} sân đã khai báo; hãy tăng số sân trong thông tin sân`);
+
+async function lietKeSan(maChuSan) {
+  const coSo = await batBuocCoSo(maChuSan);
+  const [cacSan] = await hoBoi.query(
+    `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
+     FROM San WHERE MaCoSo=? ORDER BY MaSan`,
+    [coSo.maCoSo]);
+  return cacSan;
+}
+
+async function taoSan(maChuSan, duLieuSan) {
+  const coSo = await batBuocCoSo(maChuSan);
   try {
-    const [r] = await pool.query('INSERT INTO courts (venue_id, name, status) VALUES (?,?,?)', [v.id, d.name, d.status || 'active']);
-    return (await pool.query('SELECT * FROM courts WHERE id = ?', [r.insertId]))[0][0];
-  } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw AppError.conflict('Tên sân đã tồn tại'); throw e; }
+    const [ketQua] = await hoBoi.query(
+      'INSERT INTO San (MaCoSo, TenSan, TrangThai) VALUES (?,?,?)',
+      [coSo.maCoSo, duLieuSan.tenSan, duLieuSan.trangThai || 'active']);
+    const [[sanMoi]] = await hoBoi.query(
+      `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
+       FROM San WHERE MaSan=?`,
+      [ketQua.insertId]);
+    return sanMoi;
+  } catch (loi) {
+    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Tên sân đã tồn tại');
+    throw loi;
+  }
 }
-async function ownCourt(ownerId, courtId) {
-  const [[c]] = await pool.query(
-    'SELECT c.* FROM courts c JOIN venues v ON v.id = c.venue_id WHERE c.id = ? AND v.owner_id = ?', [courtId, ownerId]);
-  if (!c) throw AppError.notFound('Không tìm thấy sân');
-  return c;
+
+async function laySanCuaChu(maChuSan, maSan) {
+  const [[san]] = await hoBoi.query(
+    `SELECT s.MaSan AS maSan, s.MaCoSo AS maCoSo, s.TenSan AS tenSan, s.TrangThai AS trangThai
+     FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+     WHERE s.MaSan=? AND cs.MaChuSan=?`,
+    [maSan, maChuSan]);
+  if (!san) throw AppError.khongTimThay('Không tìm thấy sân');
+  return san;
 }
-async function updateCourt(ownerId, courtId, d) {
-  const c = await ownCourt(ownerId, courtId);
+
+async function capNhatSan(maChuSan, maSan, duLieuSan) {
+  const san = await laySanCuaChu(maChuSan, maSan);
   try {
-    await pool.query('UPDATE courts SET name=?, status=? WHERE id=?', [d.name ?? c.name, d.status ?? c.status, c.id]);
-  } catch (e) { if (e.code === 'ER_DUP_ENTRY') throw AppError.conflict('Tên sân đã tồn tại'); throw e; }
-  return ownCourt(ownerId, courtId);
+    await hoBoi.query(
+      'UPDATE San SET TenSan=?, TrangThai=? WHERE MaSan=?',
+      [duLieuSan.tenSan ?? san.tenSan, duLieuSan.trangThai ?? san.trangThai, san.maSan]);
+  } catch (loi) {
+    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Tên sân đã tồn tại');
+    throw loi;
+  }
+  return laySanCuaChu(maChuSan, maSan);
 }
 
-/* ---------- Court blocks ---------- */
-async function createBlock(ownerId, d) {
-  await ownCourt(ownerId, d.court_id);
-  const [[clash]] = await pool.query(
-    `SELECT bs.id FROM booking_slots bs WHERE bs.court_id = ? AND bs.is_active = 1
-     AND TIMESTAMP(bs.slot_date, bs.start_time) < ? AND TIMESTAMP(bs.slot_date, bs.end_time) > ? LIMIT 1`,
-    [d.court_id, d.end_at, d.start_at]);
-  if (clash) throw AppError.conflict('Khoảng giờ này đã có khách đặt, hãy hủy đơn trước khi khóa');
-  const [r] = await pool.query('INSERT INTO court_blocks (court_id, start_at, end_at, reason, created_by) VALUES (?,?,?,?,?)',
-    [d.court_id, d.start_at, d.end_at, d.reason ?? null, ownerId]);
-  return (await pool.query('SELECT * FROM court_blocks WHERE id = ?', [r.insertId]))[0][0];
-}
-async function listBlocks(ownerId, q) {
-  const v = await mustVenue(ownerId);
-  const params = [v.id];
-  let sql = `SELECT b.* FROM court_blocks b JOIN courts c ON c.id = b.court_id WHERE c.venue_id = ?`;
-  if (q.court_id) { sql += ' AND b.court_id = ?'; params.push(q.court_id); }
-  if (q.from) { sql += ' AND b.end_at >= ?'; params.push(q.from); }
-  if (q.to) { sql += ' AND b.start_at <= ?'; params.push(q.to); }
-  const [rows] = await pool.query(sql + ' ORDER BY b.start_at', params);
-  return rows;
-}
-async function deleteBlock(ownerId, id) {
-  const [r] = await pool.query(
-    `DELETE b FROM court_blocks b JOIN courts c ON c.id = b.court_id JOIN venues v ON v.id = c.venue_id
-     WHERE b.id = ? AND v.owner_id = ?`, [id, ownerId]);
-  if (!r.affectedRows) throw AppError.notFound('Không tìm thấy khóa giờ');
+async function taoKhoaSan(maChuSan, duLieuKhoa) {
+  await laySanCuaChu(maChuSan, duLieuKhoa.maSan);
+  const thoiGianBatDau = duLieuKhoa.thoiGianBatDau.replace('T', ' ');
+  const thoiGianKetThuc = duLieuKhoa.thoiGianKetThuc.replace('T', ' ');
+  const ngayBatDau = thoiGianBatDau.slice(0, 10);
+  const ngayKetThuc = thoiGianKetThuc.slice(0, 10);
+  const gioBatDau = thoiGianBatDau.slice(11);
+  const gioKetThuc = thoiGianKetThuc.slice(11);
+  if (ngayBatDau !== ngayKetThuc) {
+    throw AppError.duLieuKhongHopLe('Một lần khóa sân chỉ áp dụng trong cùng một ngày');
+  }
+
+  const [[donDatSan]] = await hoBoi.query(
+    `SELECT MaDatSan FROM DatSan
+     WHERE MaSan=? AND NgayChoi=? AND TrangThai IN ('pending_payment','confirmed')
+       AND GioBatDau < ? AND GioKetThuc > ? LIMIT 1`,
+    [duLieuKhoa.maSan, ngayBatDau, gioKetThuc, gioBatDau]);
+  if (donDatSan) throw AppError.biTrung('Khoảng giờ này đã có khách đặt, hãy hủy đơn trước khi khóa');
+
+  const [ketQua] = await hoBoi.query(
+    'INSERT INTO KhoaSan (MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUES (?,?,?,?,?)',
+    [duLieuKhoa.maSan, ngayBatDau, gioBatDau, gioKetThuc, duLieuKhoa.lyDo ?? null]);
+  return {
+    maKhoa: ketQua.insertId,
+    maSan: duLieuKhoa.maSan,
+    thoiGianBatDau: `${ngayBatDau} ${gioBatDau}`,
+    thoiGianKetThuc: `${ngayBatDau} ${gioKetThuc}`,
+    lyDo: duLieuKhoa.lyDo ?? null,
+  };
 }
 
-module.exports = { onboardingState, saveVenueStep, savePricesStep, saveBankStep, submitOnboarding,
-  updateVenue, replacePrices, setVenueImage, getVenue, listCourts, createCourt, updateCourt, createBlock, listBlocks, deleteBlock };
+async function lietKeKhoaSan(maChuSan, boLoc) {
+  const coSo = await batBuocCoSo(maChuSan);
+  const thamSo = [coSo.maCoSo];
+  let truyVan = `SELECT k.MaKhoa AS maKhoa, k.MaSan AS maSan,
+      CONCAT(DATE_FORMAT(k.NgayKhoa, '%Y-%m-%d'), ' ', TIME_FORMAT(k.GioBatDau, '%H:%i')) AS thoiGianBatDau,
+      CONCAT(DATE_FORMAT(k.NgayKhoa, '%Y-%m-%d'), ' ', TIME_FORMAT(k.GioKetThuc, '%H:%i')) AS thoiGianKetThuc,
+      k.LyDo AS lyDo
+    FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
+    WHERE s.MaCoSo=?`;
+  if (boLoc.maSan) {
+    truyVan += ' AND k.MaSan=?';
+    thamSo.push(boLoc.maSan);
+  }
+  if (boLoc.tuNgay) {
+    truyVan += ' AND TIMESTAMP(k.NgayKhoa, k.GioKetThuc) >= ?';
+    thamSo.push(boLoc.tuNgay);
+  }
+  if (boLoc.denNgay) {
+    truyVan += ' AND TIMESTAMP(k.NgayKhoa, k.GioBatDau) <= ?';
+    thamSo.push(boLoc.denNgay);
+  }
+  const [cacKhoaSan] = await hoBoi.query(`${truyVan} ORDER BY k.NgayKhoa, k.GioBatDau`, thamSo);
+  return cacKhoaSan;
+}
+
+async function xoaKhoaSan(maChuSan, maKhoa) {
+  const [ketQua] = await hoBoi.query(
+    `DELETE k FROM KhoaSan k
+     JOIN San s ON s.MaSan=k.MaSan
+     JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+     WHERE k.MaKhoa=? AND cs.MaChuSan=?`,
+    [maKhoa, maChuSan]);
+  if (!ketQua.affectedRows) throw AppError.khongTimThay('Không tìm thấy khóa giờ');
+}
+
+module.exports = {
+  trangThaiDangKy,
+  luuBuocCoSo,
+  luuBuocBangGia,
+  luuBuocNganHang,
+  guiHoSoDuyet,
+  capNhatCoSo,
+  thayBangGia,
+  capNhatAnhCoSo,
+  layCoSo,
+  lietKeSan,
+  taoSan,
+  capNhatSan,
+  taoKhoaSan,
+  lietKeKhoaSan,
+  xoaKhoaSan,
+};

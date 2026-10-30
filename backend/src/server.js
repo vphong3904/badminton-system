@@ -1,3 +1,3 @@
-const app = require('./app');
-const env = require('./config/env');
-app.listen(env.port, () => console.log(`API chạy tại http://localhost:${env.port}/api`));
+const ungDung = require('./app');
+const cauHinh = require('./config/env');
+ungDung.listen(cauHinh.cong, () => console.log(`API chạy tại http://localhost:${cauHinh.cong}/api`));

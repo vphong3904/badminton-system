@@ -1,15 +1,29 @@
-const svc = require('../services/authService');
-const asyncHandler = require('../utils/asyncHandler');
-const { ok, created } = require('../utils/response');
+const dichVu = require('../services/authService');
+const xuLyBatDongBo = require('../utils/asyncHandler');
+const { thanhCong, daTao } = require('../utils/response');
 
-exports.registerCustomer = asyncHandler(async (req, res) => created(res, await svc.register('customer', req.body)));
-exports.registerOwner = asyncHandler(async (req, res) => created(res, await svc.register('owner', req.body)));
-// Mobile chỉ cho customer; web cho owner/admin
-exports.loginMobile = asyncHandler(async (req, res) => ok(res, await svc.login(req.body.username, req.body.password, ['customer'])));
-exports.loginWeb = asyncHandler(async (req, res) => ok(res, await svc.login(req.body.username, req.body.password, ['owner', 'admin'])));
-exports.me = asyncHandler(async (req, res) => ok(res, await svc.getUser(req.user.id)));
-exports.updateMe = asyncHandler(async (req, res) => ok(res, await svc.updateMe(req.user.id, req.body)));
-exports.changePassword = asyncHandler(async (req, res) => {
-  await svc.changePassword(req.user.id, req.body.old_password, req.body.new_password);
-  ok(res, { message: 'Đổi mật khẩu thành công' });
+exports.dangKyKhachHang = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  daTao(phanHoi, await dichVu.dangKy('customer', yeuCau.body));
+});
+exports.dangKyChuSan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  daTao(phanHoi, await dichVu.dangKy('owner', yeuCau.body));
+});
+exports.dangNhapDiDong = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.dangNhap(
+    yeuCau.body.tenDangNhap, yeuCau.body.matKhau, ['customer']));
+});
+exports.dangNhapWeb = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.dangNhap(
+    yeuCau.body.tenDangNhap, yeuCau.body.matKhau, ['owner', 'admin']));
+});
+exports.layThongTinCaNhan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.layNguoiDung(yeuCau.nguoiDung.maNguoiDung));
+});
+exports.capNhatThongTinCaNhan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.capNhatThongTin(yeuCau.nguoiDung.maNguoiDung, yeuCau.body));
+});
+exports.doiMatKhau = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  await dichVu.doiMatKhau(
+    yeuCau.nguoiDung.maNguoiDung, yeuCau.body.matKhauCu, yeuCau.body.matKhauMoi);
+  thanhCong(phanHoi, { thongBao: 'Đổi mật khẩu thành công' });
 });

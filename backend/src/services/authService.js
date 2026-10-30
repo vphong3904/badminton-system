@@ -1,73 +1,121 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { pool, withTransaction } = require('../config/db');
-const env = require('../config/env');
+const { hoBoi, thucHienGiaoDich } = require('../config/db');
+const cauHinh = require('../config/env');
 const AppError = require('../utils/AppError');
 
-const publicUser = (u) => ({
-  id: u.id, role: u.role, username: u.username, full_name: u.full_name,
-  phone: u.phone, email: u.email, status: u.status,
-});
+function taoThongTinNguoiDung(nguoiDung) {
+  const thongTin = {
+    maNguoiDung: nguoiDung.maNguoiDung,
+    vaiTro: nguoiDung.vaiTro,
+    tenDangNhap: nguoiDung.tenDangNhap,
+    hoTen: nguoiDung.hoTen,
+    soDienThoai: nguoiDung.soDienThoai,
+    email: nguoiDung.email,
+    trangThai: nguoiDung.trangThai,
+  };
+  if (nguoiDung.vaiTro === 'owner') thongTin.trangThaiDuyet = nguoiDung.trangThaiDuyet;
+  return thongTin;
+}
 
-const signToken = (u) =>
-  jwt.sign({ sub: u.id, role: u.role }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
+function taoMaTruyCap(nguoiDung) {
+  return jwt.sign(
+    { sub: nguoiDung.maNguoiDung, vaiTro: nguoiDung.vaiTro },
+    cauHinh.khoaBiMat,
+    { expiresIn: cauHinh.thoiHanMaTruyCap });
+}
 
-async function register(role, data) {
-  const hash = await bcrypt.hash(data.password, 10);
+async function dangKy(vaiTro, duLieuDangKy) {
+  const matKhauMaHoa = await bcrypt.hash(duLieuDangKy.matKhau, 10);
   try {
-    const id = await withTransaction(async (conn) => {
-      const [r] = await conn.query(
-        'INSERT INTO users (role, username, password_hash, full_name, phone, email) VALUES (?,?,?,?,?,?)',
-        [role, data.username, hash, data.full_name, data.phone, data.email]);
-      if (role === 'owner') await conn.query('INSERT INTO owner_profiles (user_id) VALUES (?)', [r.insertId]);
-      return r.insertId;
+    const maNguoiDung = await thucHienGiaoDich(async (ketNoi) => {
+      const [ketQua] = await ketNoi.query(
+        `INSERT INTO NguoiDung (VaiTro, TenDangNhap, MatKhauMaHoa, HoTen, SoDienThoai, Email)
+         VALUES (?,?,?,?,?,?)`,
+        [
+          vaiTro, duLieuDangKy.tenDangNhap, matKhauMaHoa, duLieuDangKy.hoTen,
+          duLieuDangKy.soDienThoai, duLieuDangKy.email,
+        ]);
+      if (vaiTro === 'owner') {
+        await ketNoi.query('INSERT INTO HoSoChuSan (MaNguoiDung) VALUES (?)', [ketQua.insertId]);
+      }
+      return ketQua.insertId;
     });
-    return getUser(id).then((user) => ({ user, token: signToken(user) }));
-  } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') {
-      throw AppError.conflict(/email/i.test(e.message) ? 'Email đã được sử dụng' : 'Tên đăng nhập đã tồn tại');
+    const nguoiDung = await layNguoiDung(maNguoiDung);
+    return { nguoiDung, maTruyCap: taoMaTruyCap(nguoiDung) };
+  } catch (loi) {
+    if (loi.code === 'ER_DUP_ENTRY') {
+      throw AppError.biTrung(/email/i.test(loi.message) ? 'Email đã được sử dụng' : 'Tên đăng nhập đã tồn tại');
     }
-    throw e;
+    throw loi;
   }
 }
 
-async function login(username, password, allowedRoles) {
-  const [[u]] = await pool.query('SELECT * FROM users WHERE username = ?', [username]);
-  // So sánh hash kể cả khi không có user để tránh lộ timing
-  const ok = await bcrypt.compare(password, u ? u.password_hash : '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
-  if (!u || !ok) throw AppError.unauthorized('Sai tên đăng nhập hoặc mật khẩu');
-  if (u.status === 'locked') throw AppError.forbidden('Tài khoản đã bị khóa');
-  if (allowedRoles && !allowedRoles.includes(u.role)) throw AppError.forbidden('Tài khoản không dùng được ở nền tảng này');
-  const user = await getUser(u.id);
-  return { user, token: signToken(u) };
+async function dangNhap(tenDangNhap, matKhau, cacVaiTroDuocPhep) {
+  const [[nguoiDung]] = await hoBoi.query(
+    `SELECT MaNguoiDung AS maNguoiDung, TenDangNhap AS tenDangNhap,
+       HoTen AS hoTen, SoDienThoai AS soDienThoai, Email AS email,
+       MatKhauMaHoa AS matKhauMaHoa, VaiTro AS vaiTro, TrangThai AS trangThai
+     FROM NguoiDung WHERE TenDangNhap = ? OR Email = ? LIMIT 1`,
+    [tenDangNhap, tenDangNhap]);
+  const matKhauHopLe = await bcrypt.compare(
+    matKhau,
+    nguoiDung ? nguoiDung.matKhauMaHoa : '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
+  if (!nguoiDung || !matKhauHopLe) throw AppError.chuaDangNhap('Sai tên đăng nhập hoặc mật khẩu');
+  if (nguoiDung.trangThai === 'locked') throw AppError.khongDuQuyen('Tài khoản đã bị khóa');
+  if (cacVaiTroDuocPhep && !cacVaiTroDuocPhep.includes(nguoiDung.vaiTro)) {
+    throw AppError.khongDuQuyen('Tài khoản không dùng được ở nền tảng này');
+  }
+  const thongTinNguoiDungDayDu = await layNguoiDung(nguoiDung.maNguoiDung);
+  return {
+    nguoiDung: thongTinNguoiDungDayDu,
+    maTruyCap: taoMaTruyCap(nguoiDung),
+  };
 }
 
-/** Trả user kèm approval_status nếu là owner. */
-async function getUser(id) {
-  const [[u]] = await pool.query(
-    `SELECT u.*, op.approval_status FROM users u
-     LEFT JOIN owner_profiles op ON op.user_id = u.id WHERE u.id = ?`, [id]);
-  if (!u) throw AppError.notFound('Không tìm thấy người dùng');
-  const out = publicUser(u);
-  if (u.role === 'owner') out.approval_status = u.approval_status;
-  return out;
+async function layNguoiDung(maNguoiDung) {
+  const [[nguoiDung]] = await hoBoi.query(
+    `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro, nd.TenDangNhap AS tenDangNhap,
+       nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.Email AS email,
+       nd.TrangThai AS trangThai, hs.TrangThaiDuyet AS trangThaiDuyet
+     FROM NguoiDung nd
+     LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung = nd.MaNguoiDung
+     WHERE nd.MaNguoiDung = ?`,
+    [maNguoiDung]);
+  if (!nguoiDung) throw AppError.khongTimThay('Không tìm thấy người dùng');
+  return taoThongTinNguoiDung(nguoiDung);
 }
 
-async function updateMe(id, data) {
-  const keys = Object.keys(data);
+async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
+  const cotDuocCapNhat = {
+    hoTen: 'HoTen',
+    soDienThoai: 'SoDienThoai',
+    email: 'Email',
+  };
+  const cacTruongCapNhat = Object.keys(duLieuCapNhat)
+    .filter((truong) => cotDuocCapNhat[truong]);
   try {
-    await pool.query(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...keys.map((k) => data[k]), id]);
-  } catch (e) {
-    if (e.code === 'ER_DUP_ENTRY') throw AppError.conflict('Email đã được sử dụng');
-    throw e;
+    await hoBoi.query(
+      `UPDATE NguoiDung SET ${cacTruongCapNhat.map((truong) => `${cotDuocCapNhat[truong]} = ?`).join(', ')}
+       WHERE MaNguoiDung = ?`,
+      [...cacTruongCapNhat.map((truong) => duLieuCapNhat[truong]), maNguoiDung]);
+  } catch (loi) {
+    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Email đã được sử dụng');
+    throw loi;
   }
-  return getUser(id);
+  return layNguoiDung(maNguoiDung);
 }
 
-async function changePassword(id, oldPw, newPw) {
-  const [[u]] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [id]);
-  if (!(await bcrypt.compare(oldPw, u.password_hash))) throw AppError.badRequest('Mật khẩu cũ không đúng');
-  await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(newPw, 10), id]);
+async function doiMatKhau(maNguoiDung, matKhauCu, matKhauMoi) {
+  const [[nguoiDung]] = await hoBoi.query(
+    'SELECT MatKhauMaHoa AS matKhauMaHoa FROM NguoiDung WHERE MaNguoiDung = ?',
+    [maNguoiDung]);
+  if (!nguoiDung || !(await bcrypt.compare(matKhauCu, nguoiDung.matKhauMaHoa))) {
+    throw AppError.duLieuKhongHopLe('Mật khẩu cũ không đúng');
+  }
+  await hoBoi.query(
+    'UPDATE NguoiDung SET MatKhauMaHoa = ? WHERE MaNguoiDung = ?',
+    [await bcrypt.hash(matKhauMoi, 10), maNguoiDung]);
 }
 
-module.exports = { register, login, getUser, updateMe, changePassword };
+module.exports = { dangKy, dangNhap, layNguoiDung, capNhatThongTin, doiMatKhau };

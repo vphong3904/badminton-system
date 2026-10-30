@@ -1,15 +1,21 @@
 const AppError = require('../utils/AppError');
 
-/** validate({ body, query, params }) với schema zod. Gán kết quả đã parse lại vào req. */
-module.exports = (schemas) => (req, _res, next) => {
-  for (const key of ['body', 'query', 'params']) {
-    if (!schemas[key]) continue;
-    const r = schemas[key].safeParse(req[key]);
-    if (!r.success) {
-      const details = r.error.issues.map((i) => ({ field: i.path.join('.'), message: i.message }));
-      return next(AppError.badRequest('Dữ liệu không hợp lệ', details));
+module.exports = (cacLuocDo) => (req, _res, next) => {
+  for (const tenPhanDuLieu of ['body', 'query', 'params']) {
+    if (!cacLuocDo[tenPhanDuLieu]) continue;
+    const ketQua = cacLuocDo[tenPhanDuLieu].safeParse(req[tenPhanDuLieu]);
+    if (!ketQua.success) {
+      const chiTiet = ketQua.error.issues.map((loi) => ({
+        truong: loi.path.join('.'),
+        thongBao: loi.message,
+      }));
+      return next(AppError.duLieuKhongHopLe('Dữ liệu không hợp lệ', chiTiet));
     }
-    Object.defineProperty(req, key, { value: r.data, writable: true, configurable: true });
+    Object.defineProperty(req, tenPhanDuLieu, {
+      value: ketQua.data,
+      writable: true,
+      configurable: true,
+    });
   }
   next();
 };

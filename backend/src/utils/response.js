@@ -1,2 +1,3 @@
-exports.ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
-exports.created = (res, data) => exports.ok(res, data, 201);
+exports.thanhCong = (phanHoi, duLieu, maTrangThai = 200) =>
+  phanHoi.status(maTrangThai).json({ thanhCong: true, duLieu });
+exports.daTao = (phanHoi, duLieu) => exports.thanhCong(phanHoi, duLieu, 201);

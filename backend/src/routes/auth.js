@@ -1,14 +1,15 @@
-const router = require('express').Router();
-const c = require('../controllers/authController');
-const v = require('../validators/auth');
-const validate = require('../middlewares/validate');
-const { authenticate } = require('../middlewares/auth');
+const dinhTuyen = require('express').Router();
+const dieuKhien = require('../controllers/authController');
+const kiemTraDuLieu = require('../validators/auth');
+const kiemTraHopLe = require('../middlewares/validate');
+const { xacThucNguoiDung } = require('../middlewares/auth');
 
-router.post('/register', validate(v.register), c.registerCustomer);          // mobile - khách
-router.post('/register-owner', validate(v.register), c.registerOwner);       // web - chủ sân
-router.post('/login', validate(v.login), c.loginMobile);                     // mobile
-router.post('/login-web', validate(v.login), c.loginWeb);                    // web owner/admin
-router.get('/me', authenticate, c.me);
-router.patch('/me', authenticate, validate(v.updateMe), c.updateMe);
-router.post('/change-password', authenticate, validate(v.changePassword), c.changePassword);
-module.exports = router;
+dinhTuyen.post('/dang-ky', kiemTraHopLe(kiemTraDuLieu.dangKy), dieuKhien.dangKyKhachHang);
+dinhTuyen.post('/dang-ky-chu-san', kiemTraHopLe(kiemTraDuLieu.dangKy), dieuKhien.dangKyChuSan);
+dinhTuyen.post('/dang-nhap', kiemTraHopLe(kiemTraDuLieu.dangNhap), dieuKhien.dangNhapDiDong);
+dinhTuyen.post('/dang-nhap-web', kiemTraHopLe(kiemTraDuLieu.dangNhap), dieuKhien.dangNhapWeb);
+dinhTuyen.get('/ca-nhan', xacThucNguoiDung, dieuKhien.layThongTinCaNhan);
+dinhTuyen.patch('/ca-nhan', xacThucNguoiDung, kiemTraHopLe(kiemTraDuLieu.capNhatThongTinCaNhan), dieuKhien.capNhatThongTinCaNhan);
+dinhTuyen.post('/doi-mat-khau', xacThucNguoiDung, kiemTraHopLe(kiemTraDuLieu.doiMatKhau), dieuKhien.doiMatKhau);
+
+module.exports = dinhTuyen;
