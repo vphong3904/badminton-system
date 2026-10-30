@@ -1,16 +1,16 @@
 const mysql = require('mysql2/promise');
-require('dotenv').config();
+const env = require('./env');
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST, user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD, database: process.env.DB_NAME,
-  waitForConnections: true, connectionLimit: 10,
+  ...env.db,
+  waitForConnections: true,
+  connectionLimit: 10,
   timezone: '+07:00',
-  dateStrings: true,        // DATE/TIME/DATETIME trả về chuỗi, khỏi lo lệch múi giờ
+  dateStrings: true,
+  namedPlaceholders: true,
 });
 
-const query = async (sql, params) => (await pool.query(sql, params))[0];
-
+/** Chạy fn(conn) trong một transaction; tự commit/rollback. */
 async function withTransaction(fn) {
   const conn = await pool.getConnection();
   try {
@@ -18,11 +18,12 @@ async function withTransaction(fn) {
     const result = await fn(conn);
     await conn.commit();
     return result;
-  } catch (e) {
+  } catch (err) {
     await conn.rollback();
-    throw e;
+    throw err;
   } finally {
     conn.release();
   }
 }
-module.exports = { pool, query, withTransaction };
+
+module.exports = { pool, withTransaction };
