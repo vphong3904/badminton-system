@@ -4,9 +4,9 @@
 -- Giá trị ENUM và khóa trong CauHinhHeThong giữ nguyên tiếng Anh
 -- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực)
 -- =====================================================================
-CREATE DATABASE IF NOT EXISTS DatSanCauLong
+CREATE DATABASE IF NOT EXISTS db_sancaulong
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE DatSanCauLong;
+USE db_sancaulong;
 
 -- ---------------------------------------------------------------------
 -- 1. NguoiDung: dùng chung cho khách / chủ sân / admin, phân biệt bằng VaiTro
