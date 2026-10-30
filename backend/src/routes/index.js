@@ -10,6 +10,7 @@ router.get('/health/db', asyncHandler(async (_req, res) => {
 }));
 
 router.use('/auth', require('./auth'));
+router.use('/owner', require('./owner'));
 
 // Các nhóm sau sẽ được mount tại đây.
 module.exports = router;
