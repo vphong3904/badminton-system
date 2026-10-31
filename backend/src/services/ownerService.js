@@ -1,11 +1,11 @@
-const { hoBoi, thucHienGiaoDich } = require('../config/db');
+const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { kiemTraKhungGia } = require('../utils/time');
 
 const TRANG_THAI_DUOC_SUA = ['draft', 'rejected'];
 
 async function layHoSo(maChuSan) {
-  const [[hoSo]] = await hoBoi.query(
+  const [[hoSo]] = await pool.query(
     `SELECT MaNguoiDung AS maNguoiDung, TenDoanhNghiep AS tenDoanhNghiep,
        TenNganHang AS tenNganHang, MaNganHang AS maNganHang, SoTaiKhoan AS soTaiKhoan,
        ChuTaiKhoan AS chuTaiKhoan, TrangThaiDuyet AS trangThaiDuyet,
@@ -17,7 +17,7 @@ async function layHoSo(maChuSan) {
 }
 
 async function layCoSo(maChuSan) {
-  const [[coSo]] = await hoBoi.query(
+  const [[coSo]] = await pool.query(
     `SELECT cs.MaCoSo AS maCoSo, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo,
        cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai, cs.Zalo AS zalo,
        cs.LinkBanDo AS linkBanDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
@@ -33,7 +33,7 @@ async function layCoSo(maChuSan) {
 }
 
 async function layBangGia(maCoSo) {
-  const [khungGias] = await hoBoi.query(
+  const [khungGias] = await pool.query(
     `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc,
        MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'walk_in' THEN GiaMoiGio END) AS giaNgayThuongKhachVangLai,
        MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'fixed' THEN GiaMoiGio END) AS giaNgayThuongKhachCoDinh,
@@ -95,13 +95,13 @@ async function luuBuocCoSo(maChuSan, duLieuCoSo) {
   if (coSoHienTai) {
     const khungGias = await layBangGia(coSoHienTai.maCoSo);
     kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
-    await hoBoi.query(
+    await pool.query(
       `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
        TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?
        WHERE MaCoSo=?`,
       [...duLieuLuu, coSoHienTai.maCoSo]);
   } else {
-    await hoBoi.query(
+    await pool.query(
       `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
        TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -143,7 +143,7 @@ async function luuBuocBangGia(maChuSan, khungGias) {
 }
 
 async function luuBuocNganHang(maChuSan, thongTinNganHang) {
-  await hoBoi.query(
+  await pool.query(
     `UPDATE HoSoChuSan SET TenNganHang=?, SoTaiKhoan=?, ChuTaiKhoan=? WHERE MaNguoiDung=?`,
     [thongTinNganHang.tenNganHang, thongTinNganHang.soTaiKhoan, thongTinNganHang.chuTaiKhoan, maChuSan]);
   return trangThaiDangKy(maChuSan);
@@ -158,7 +158,7 @@ async function guiHoSoDuyet(maChuSan) {
     'tài khoản ngân hàng': trangThai.cacBuoc.nganHang,
   }).filter(([, hoanTat]) => !hoanTat).map(([tenMuc]) => tenMuc);
   if (mucConThieu.length) throw AppError.duLieuKhongHopLe(`Chưa hoàn thành: ${mucConThieu.join(', ')}`);
-  await hoBoi.query(
+  await pool.query(
     `UPDATE HoSoChuSan SET TrangThaiDuyet='pending', NgayGuiDuyet=NOW(), LyDoTuChoi=NULL,
        MaQuanTriDuyet=NULL, NgayDuyet=NULL WHERE MaNguoiDung=?`,
     [maChuSan]);
@@ -169,7 +169,7 @@ async function capNhatCoSo(maChuSan, duLieuCoSo) {
   const coSo = await batBuocCoSo(maChuSan);
   const khungGias = await layBangGia(coSo.maCoSo);
   kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
-  await hoBoi.query(
+  await pool.query(
     `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
        TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?
      WHERE MaCoSo=?`,
@@ -193,7 +193,7 @@ async function capNhatAnhCoSo(maChuSan, duongDan) {
 
 async function lietKeSan(maChuSan) {
   const coSo = await batBuocCoSo(maChuSan);
-  const [cacSan] = await hoBoi.query(
+  const [cacSan] = await pool.query(
     `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
      FROM San WHERE MaCoSo=? ORDER BY MaSan`,
     [coSo.maCoSo]);
@@ -203,10 +203,10 @@ async function lietKeSan(maChuSan) {
 async function taoSan(maChuSan, duLieuSan) {
   const coSo = await batBuocCoSo(maChuSan);
   try {
-    const [ketQua] = await hoBoi.query(
+    const [ketQua] = await pool.query(
       'INSERT INTO San (MaCoSo, TenSan, TrangThai) VALUES (?,?,?)',
       [coSo.maCoSo, duLieuSan.tenSan, duLieuSan.trangThai || 'active']);
-    const [[sanMoi]] = await hoBoi.query(
+    const [[sanMoi]] = await pool.query(
       `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
        FROM San WHERE MaSan=?`,
       [ketQua.insertId]);
@@ -218,7 +218,7 @@ async function taoSan(maChuSan, duLieuSan) {
 }
 
 async function laySanCuaChu(maChuSan, maSan) {
-  const [[san]] = await hoBoi.query(
+  const [[san]] = await pool.query(
     `SELECT s.MaSan AS maSan, s.MaCoSo AS maCoSo, s.TenSan AS tenSan, s.TrangThai AS trangThai
      FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
      WHERE s.MaSan=? AND cs.MaChuSan=?`,
@@ -230,7 +230,7 @@ async function laySanCuaChu(maChuSan, maSan) {
 async function capNhatSan(maChuSan, maSan, duLieuSan) {
   const san = await laySanCuaChu(maChuSan, maSan);
   try {
-    await hoBoi.query(
+    await pool.query(
       'UPDATE San SET TenSan=?, TrangThai=? WHERE MaSan=?',
       [duLieuSan.tenSan ?? san.tenSan, duLieuSan.trangThai ?? san.trangThai, san.maSan]);
   } catch (loi) {
@@ -241,7 +241,7 @@ async function capNhatSan(maChuSan, maSan, duLieuSan) {
 }
 
 async function taoKhoaSan(maChuSan, duLieuKhoa) {
-  await laySanCuaChu(maChuSan, duLieuKhoa.maSan);
+  const san = await laySanCuaChu(maChuSan, duLieuKhoa.maSan);
   const thoiGianBatDau = duLieuKhoa.thoiGianBatDau.replace('T', ' ');
   const thoiGianKetThuc = duLieuKhoa.thoiGianKetThuc.replace('T', ' ');
   const ngayBatDau = thoiGianBatDau.slice(0, 10);
@@ -252,16 +252,20 @@ async function taoKhoaSan(maChuSan, duLieuKhoa) {
     throw AppError.duLieuKhongHopLe('Một lần khóa sân chỉ áp dụng trong cùng một ngày');
   }
 
-  const [[donDatSan]] = await hoBoi.query(
-    `SELECT MaDatSan FROM DatSan
-     WHERE MaSan=? AND NgayChoi=? AND TrangThai IN ('pending_payment','confirmed')
-       AND GioBatDau < ? AND GioKetThuc > ? LIMIT 1`,
-    [duLieuKhoa.maSan, ngayBatDau, gioKetThuc, gioBatDau]);
-  if (donDatSan) throw AppError.biTrung('Khoảng giờ này đã có khách đặt, hãy hủy đơn trước khi khóa');
-
-  const [ketQua] = await hoBoi.query(
-    'INSERT INTO KhoaSan (MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUES (?,?,?,?,?)',
-    [duLieuKhoa.maSan, ngayBatDau, gioBatDau, gioKetThuc, duLieuKhoa.lyDo ?? null]);
+  const ketQua = await thucHienGiaoDich(async (ketNoi) => {
+    await ketNoi.query('SELECT MaSan FROM San WHERE MaSan=? FOR UPDATE', [san.maSan]);
+    const [[donDatSan]] = await ketNoi.query(
+      `SELECT MaDatSan FROM DatSan
+       WHERE MaSan=? AND NgayChoi=?
+         AND (TrangThai='confirmed' OR (TrangThai='pending_payment' AND HetHanGiuCho>NOW()))
+         AND GioBatDau < ? AND GioKetThuc > ? LIMIT 1 FOR UPDATE`,
+      [san.maSan, ngayBatDau, gioKetThuc, gioBatDau]);
+    if (donDatSan) throw AppError.biTrung('Khoảng giờ này đã có khách đặt, hãy hủy đơn trước khi khóa');
+    const [mucKhoa] = await ketNoi.query(
+      'INSERT INTO KhoaSan (MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUES (?,?,?,?,?)',
+      [san.maSan, ngayBatDau, gioBatDau, gioKetThuc, duLieuKhoa.lyDo ?? null]);
+    return mucKhoa;
+  });
   return {
     maKhoa: ketQua.insertId,
     maSan: duLieuKhoa.maSan,
@@ -292,12 +296,12 @@ async function lietKeKhoaSan(maChuSan, boLoc) {
     truyVan += ' AND TIMESTAMP(k.NgayKhoa, k.GioBatDau) <= ?';
     thamSo.push(boLoc.denNgay);
   }
-  const [cacKhoaSan] = await hoBoi.query(`${truyVan} ORDER BY k.NgayKhoa, k.GioBatDau`, thamSo);
+  const [cacKhoaSan] = await pool.query(`${truyVan} ORDER BY k.NgayKhoa, k.GioBatDau`, thamSo);
   return cacKhoaSan;
 }
 
 async function xoaKhoaSan(maChuSan, maKhoa) {
-  const [ketQua] = await hoBoi.query(
+  const [ketQua] = await pool.query(
     `DELETE k FROM KhoaSan k
      JOIN San s ON s.MaSan=k.MaSan
      JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo

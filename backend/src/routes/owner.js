@@ -4,6 +4,8 @@ const kiemTraDuLieu = require('../validators/owner');
 const kiemTraHopLe = require('../middlewares/validate');
 const { xacThucNguoiDung, kiemTraVaiTro, kiemTraChuSanDaDuyet } = require('../middlewares/auth');
 const { taiTep } = require('../middlewares/upload');
+const baoCao = require('../controllers/ownerReportController');
+const kiemTraBaoCao = require('../validators/ownerReport');
 
 dinhTuyen.use(xacThucNguoiDung, kiemTraVaiTro('owner'));
 
@@ -26,5 +28,11 @@ dinhTuyen.patch('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.capNhatSan), dieuKhien
 dinhTuyen.get('/khoa-san', kiemTraHopLe(kiemTraDuLieu.danhSachKhoaSan), dieuKhien.lietKeKhoaSan);
 dinhTuyen.post('/khoa-san', kiemTraHopLe(kiemTraDuLieu.khoaSan), dieuKhien.taoKhoaSan);
 dinhTuyen.delete('/khoa-san/:maKhoa', kiemTraHopLe(kiemTraDuLieu.maKhoaSan), dieuKhien.xoaKhoaSan);
+dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);
+dinhTuyen.get('/bao-cao/top-khach', kiemTraHopLe(kiemTraBaoCao.topKhach), baoCao.layTopKhach);
+dinhTuyen.get('/bao-cao/top-san', kiemTraHopLe(kiemTraBaoCao.topSan), baoCao.layTopSan);
+dinhTuyen.get('/bao-cao/cong-no', baoCao.layCongNo);
+dinhTuyen.get('/rut-tien/so-du', baoCao.laySoDuRutTien);
+dinhTuyen.post('/rut-tien', baoCao.taoYeuCauRutTien);
 
 module.exports = dinhTuyen;

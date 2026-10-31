@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { hoBoi, thucHienGiaoDich } = require('../config/db');
+const { pool, thucHienGiaoDich } = require('../config/db');
 const cauHinh = require('../config/env');
 const AppError = require('../utils/AppError');
 
@@ -52,7 +52,7 @@ async function dangKy(vaiTro, duLieuDangKy) {
 }
 
 async function dangNhap(tenDangNhap, matKhau, cacVaiTroDuocPhep) {
-  const [[nguoiDung]] = await hoBoi.query(
+  const [[nguoiDung]] = await pool.query(
     `SELECT MaNguoiDung AS maNguoiDung, TenDangNhap AS tenDangNhap,
        HoTen AS hoTen, SoDienThoai AS soDienThoai, Email AS email,
        MatKhauMaHoa AS matKhauMaHoa, VaiTro AS vaiTro, TrangThai AS trangThai
@@ -74,7 +74,7 @@ async function dangNhap(tenDangNhap, matKhau, cacVaiTroDuocPhep) {
 }
 
 async function layNguoiDung(maNguoiDung) {
-  const [[nguoiDung]] = await hoBoi.query(
+  const [[nguoiDung]] = await pool.query(
     `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro, nd.TenDangNhap AS tenDangNhap,
        nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.Email AS email,
        nd.TrangThai AS trangThai, hs.TrangThaiDuyet AS trangThaiDuyet
@@ -95,7 +95,7 @@ async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
   const cacTruongCapNhat = Object.keys(duLieuCapNhat)
     .filter((truong) => cotDuocCapNhat[truong]);
   try {
-    await hoBoi.query(
+    await pool.query(
       `UPDATE NguoiDung SET ${cacTruongCapNhat.map((truong) => `${cotDuocCapNhat[truong]} = ?`).join(', ')}
        WHERE MaNguoiDung = ?`,
       [...cacTruongCapNhat.map((truong) => duLieuCapNhat[truong]), maNguoiDung]);
@@ -107,13 +107,13 @@ async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
 }
 
 async function doiMatKhau(maNguoiDung, matKhauCu, matKhauMoi) {
-  const [[nguoiDung]] = await hoBoi.query(
+  const [[nguoiDung]] = await pool.query(
     'SELECT MatKhauMaHoa AS matKhauMaHoa FROM NguoiDung WHERE MaNguoiDung = ?',
     [maNguoiDung]);
   if (!nguoiDung || !(await bcrypt.compare(matKhauCu, nguoiDung.matKhauMaHoa))) {
     throw AppError.duLieuKhongHopLe('Mật khẩu cũ không đúng');
   }
-  await hoBoi.query(
+  await pool.query(
     'UPDATE NguoiDung SET MatKhauMaHoa = ? WHERE MaNguoiDung = ?',
     [await bcrypt.hash(matKhauMoi, 10), maNguoiDung]);
 }

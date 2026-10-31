@@ -1,7 +1,7 @@
 const mysql = require('mysql2/promise');
 const cauHinh = require('./env');
 
-const hoBoi = mysql.createPool({
+const pool = mysql.createPool({
   host: cauHinh.coSoDuLieu.mayChu,
   port: cauHinh.coSoDuLieu.cong,
   user: cauHinh.coSoDuLieu.nguoiDung,
@@ -15,7 +15,7 @@ const hoBoi = mysql.createPool({
 });
 
 async function thucHienGiaoDich(hamThucThi) {
-  const ketNoi = await hoBoi.getConnection();
+  const ketNoi = await pool.getConnection();
   try {
     await ketNoi.beginTransaction();
     const ketQua = await hamThucThi(ketNoi);
@@ -29,4 +29,4 @@ async function thucHienGiaoDich(hamThucThi) {
   }
 }
 
-module.exports = { hoBoi, thucHienGiaoDich };
+module.exports = { pool, thucHienGiaoDich };

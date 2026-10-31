@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const cauHinh = require('../config/env');
-const { hoBoi } = require('../config/db');
+const { pool } = require('../config/db');
 const AppError = require('../utils/AppError');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 
@@ -13,7 +13,7 @@ const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
   } catch {
     throw AppError.chuaDangNhap('Token không hợp lệ hoặc đã hết hạn');
   }
-  const [[nguoiDung]] = await hoBoi.query(
+  const [[nguoiDung]] = await pool.query(
     `SELECT MaNguoiDung AS maNguoiDung, VaiTro AS vaiTro, TrangThai AS trangThai
      FROM NguoiDung WHERE MaNguoiDung = ?`,
     [thongTinToken.sub]);
@@ -29,7 +29,7 @@ const kiemTraVaiTro = (...cacVaiTro) => (yeuCau, _phanHoi, goiTiep) =>
     : goiTiep(AppError.khongDuQuyen());
 
 const kiemTraChuSanDaDuyet = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
-  const [[hoSo]] = await hoBoi.query(
+  const [[hoSo]] = await pool.query(
     'SELECT TrangThaiDuyet AS trangThaiDuyet FROM HoSoChuSan WHERE MaNguoiDung = ?',
     [yeuCau.nguoiDung.maNguoiDung]);
   if (!hoSo || hoSo.trangThaiDuyet !== 'approved') {
