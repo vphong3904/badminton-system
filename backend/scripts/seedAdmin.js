@@ -1,6 +1,6 @@
 // Dùng: ADMIN_USER=admin ADMIN_PASSWORD=xxx npm run seed:admin
 const bcrypt = require('bcryptjs');
-const { hoBoi } = require('../src/config/db');
+const { pool } = require('../src/config/db');
 
 async function taoTaiKhoanQuanTri() {
   const tenDangNhap = process.env.ADMIN_USER || 'admin';
@@ -9,7 +9,7 @@ async function taoTaiKhoanQuanTri() {
     throw new Error('Cần ADMIN_PASSWORD (ít nhất 8 ký tự)');
   }
   const matKhauMaHoa = await bcrypt.hash(matKhau, 10);
-  await hoBoi.query(
+  await pool.query(
     `INSERT INTO NguoiDung (VaiTro, TenDangNhap, MatKhauMaHoa, HoTen, SoDienThoai, Email)
      VALUES ('admin',?,?,?,?,?)
      ON DUPLICATE KEY UPDATE MatKhauMaHoa = VALUES(MatKhauMaHoa)`,
@@ -22,4 +22,4 @@ taoTaiKhoanQuanTri()
     console.error(loi);
     process.exitCode = 1;
   })
-  .finally(() => hoBoi.end());
+  .finally(() => pool.end());

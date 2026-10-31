@@ -78,7 +78,7 @@ const ketNoiGia = {
 
 require('../src/config/db');
 require.cache[require.resolve('../src/config/db')].exports = {
-  hoBoi: ketNoiGia,
+  pool: ketNoiGia,
   thucHienGiaoDich: async (hamThucThi) => hamThucThi(ketNoiGia),
 };
 process.env.NODE_ENV = 'test';
