@@ -258,6 +258,30 @@ async function timCoSo(boLoc) {
     && ketThuc - batDau >= san.soPhutDatToiThieu);
 }
 
+async function layDanhSachCoSo() {
+  const [cacCoSo] = await pool.query(
+    `SELECT cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi,
+       cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen, cs.GiaThapNhat AS giaThapNhat,
+       cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
+       cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.TienIch AS tienIch,
+       cs.ViDo AS viDo, cs.KinhDo AS kinhDo,
+       cs.DiemTrungBinh AS diemTrungBinh, cs.SoDanhGia AS soDanhGia,
+       (SELECT COUNT(*) FROM San s WHERE s.MaCoSo=cs.MaCoSo AND s.TrangThai='active') AS soSan,
+       (SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo
+        ORDER BY a.LaAnhBia DESC, a.ThuTu, a.MaAnh LIMIT 1) AS duongDanAnh
+     FROM CoSo cs
+     WHERE cs.TrangThai='active'
+       AND EXISTS (SELECT 1 FROM San s WHERE s.MaCoSo=cs.MaCoSo AND s.TrangThai='active')
+     ORDER BY cs.DiemTrungBinh DESC, cs.MaCoSo`);
+  return cacCoSo.map((coSo) => {
+    let tienIch = coSo.tienIch;
+    if (typeof tienIch === 'string') {
+      try { tienIch = JSON.parse(tienIch); } catch { tienIch = []; }
+    }
+    return { ...coSo, tienIch: Array.isArray(tienIch) ? tienIch : [] };
+  });
+}
+
 async function layChiTietCoSo(maCoSo) {
   const [[coSo]] = await pool.query(
     `SELECT MaCoSo AS maCoSo, TenCoSo AS tenCoSo, DiaChi AS diaChi,
@@ -305,13 +329,77 @@ async function kiemTraTrong(maSan, boLoc) {
   return { maSan, ngay: boLoc.ngay, gioBatDau: boLoc.gioBatDau, gioKetThuc: boLoc.gioKetThuc, conTrong };
 }
 
+async function layLichNgay(maCoSo, ngay) {
+  kiemTraNgay(ngay);
+  const [[coSo]] = await pool.query(
+    `SELECT MaCoSo AS maCoSo, TenCoSo AS tenCoSo, DiaChi AS diaChi, SoDienThoai AS soDienThoai,
+       GioMoCua AS gioMoCua, GioDongCua AS gioDongCua, SoPhutDatToiThieu AS soPhutDatToiThieu
+     FROM CoSo WHERE MaCoSo=? AND TrangThai='active'`,
+    [maCoSo]);
+  if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở đang hoạt động');
+  const [cacSan] = await pool.query(
+    `SELECT MaSan AS maSan, TenSan AS tenSan FROM San
+     WHERE MaCoSo=? AND TrangThai='active' ORDER BY MaSan`,
+    [maCoSo]);
+  const [cacDon] = await pool.query(
+    `SELECT d.MaSan AS maSan, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc
+     FROM DatSan d JOIN San s ON s.MaSan=d.MaSan
+     WHERE s.MaCoSo=? AND d.NgayChoi=?
+       AND (d.TrangThai='confirmed' OR (d.TrangThai='pending_payment' AND d.HetHanGiuCho>NOW()))`,
+    [maCoSo, ngay]);
+  const [cacKhoa] = await pool.query(
+    `SELECT k.MaSan AS maSan, k.GioBatDau AS gioBatDau, k.GioKetThuc AS gioKetThuc
+     FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
+     WHERE s.MaCoSo=? AND k.NgayKhoa=?`,
+    [maCoSo, ngay]);
+  const loaiNgay = [0, 6].includes(new Date(`${ngay}T00:00:00Z`).getUTCDay()) ? 'weekend' : 'weekday';
+  const [bangGia] = await pool.query(
+    `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc, GiaMoiGio AS giaMoiGio
+     FROM BangGia WHERE MaCoSo=? AND LoaiNgay=? AND LoaiKhach='walk_in'
+     ORDER BY GioBatDau`,
+    [maCoSo, loaiNgay]);
+  const gioNgan = (gio) => String(gio).slice(0, 5);
+  const khungBan = (danhSach, loai, maSan) => danhSach
+    .filter((muc) => muc.maSan === maSan)
+    .map((muc) => ({ gioBatDau: gioNgan(muc.gioBatDau), gioKetThuc: gioNgan(muc.gioKetThuc), loai }));
+  return {
+    maCoSo: coSo.maCoSo,
+    tenCoSo: coSo.tenCoSo,
+    diaChi: coSo.diaChi,
+    soDienThoai: coSo.soDienThoai,
+    ngay,
+    gioMoCua: gioNgan(coSo.gioMoCua),
+    gioDongCua: gioNgan(coSo.gioDongCua),
+    soPhutDatToiThieu: coSo.soPhutDatToiThieu,
+    cacSan: cacSan.map((san) => ({
+      maSan: san.maSan,
+      tenSan: san.tenSan,
+      cacKhungBan: [
+        ...khungBan(cacDon, 'booked', san.maSan),
+        ...khungBan(cacKhoa, 'locked', san.maSan),
+      ],
+    })),
+    bangGia: bangGia.map((khung) => ({
+      gioBatDau: gioNgan(khung.gioBatDau),
+      gioKetThuc: gioNgan(khung.gioKetThuc),
+      giaMoiGio: Number(khung.giaMoiGio),
+    })),
+  };
+}
+
 async function lietKeDatSan(maNguoiDung) {
   await hetHanDatSan(maNguoiDung);
   const [cacDon] = await pool.query(
     `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaLichCoDinh AS maLichCoDinh,
        d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
-       d.TongTien AS tongTien, d.TrangThai AS trangThai, t.TrangThai AS trangThaiThanhToan
-     FROM DatSan d LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
+       d.TongTien AS tongTien, d.TrangThai AS trangThai, t.TrangThai AS trangThaiThanhToan,
+       d.TenKhach AS tenKhach, d.SoDienThoaiLienHe AS soDienThoaiLienHe,
+       s.MaSan AS maSan, s.TenSan AS tenSan,
+       cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi
+     FROM DatSan d
+     JOIN San s ON s.MaSan=d.MaSan
+     JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
        WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
      END
@@ -326,6 +414,7 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
     `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.NgayChoi AS ngay,
        d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc, d.TongTien AS tongTien,
        d.TrangThai AS trangThaiDatSan, d.HetHanGiuCho AS hetHanGiuCho,
+       TIMESTAMPDIFF(SECOND, NOW(), d.HetHanGiuCho) AS conLaiGiay,
        t.MaThanhToan AS maThanhToan, t.SoTien AS soTien, t.TrangThai AS trangThaiThanhToan,
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan, t.NoiDungQR AS noiDungQr
      FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
@@ -414,11 +503,40 @@ async function capNhatTaiKhoanHoan(maNguoiDung, maDatSan, thongTin) {
   return { daCapNhat: true };
 }
 
+async function layDanhSachYeuThich(maNguoiDung) {
+  const [cacDong] = await pool.query(
+    `SELECT MaCoSo AS maCoSo, NgayTao AS ngayTao FROM YeuThich
+     WHERE MaKhachHang=? ORDER BY NgayTao DESC`,
+    [maNguoiDung]);
+  return cacDong;
+}
+
+async function themYeuThich(maNguoiDung, maCoSo) {
+  const [[coSo]] = await pool.query(
+    "SELECT MaCoSo FROM CoSo WHERE MaCoSo=? AND TrangThai='active'", [maCoSo]);
+  if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở');
+  await pool.query(
+    'INSERT IGNORE INTO YeuThich (MaKhachHang, MaCoSo) VALUES (?, ?)',
+    [maNguoiDung, maCoSo]);
+  return { maCoSo: Number(maCoSo), yeuThich: true };
+}
+
+async function boYeuThich(maNguoiDung, maCoSo) {
+  await pool.query(
+    'DELETE FROM YeuThich WHERE MaKhachHang=? AND MaCoSo=?', [maNguoiDung, maCoSo]);
+  return { maCoSo: Number(maCoSo), yeuThich: false };
+}
+
 module.exports = {
+  layDanhSachYeuThich,
+  themYeuThich,
+  boYeuThich,
   timCoSo,
+  layDanhSachCoSo,
   layChiTietCoSo,
   layChiTietSan,
   kiemTraTrong,
+  layLichNgay,
   taoDatSan,
   lietKeDatSan,
   layHoaDonNhap,

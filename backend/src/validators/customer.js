@@ -26,7 +26,12 @@ exports.timCoSo = {
 };
 
 exports.maCoSo = { params: z.object({ maCoSo: maSo }) };
+exports.themYeuThich = { body: z.object({ maCoSo: maSo }) };
 exports.maSan = { params: z.object({ maSan: maSo }) };
+exports.lichNgay = {
+  params: z.object({ maCoSo: maSo }),
+  query: z.object({ ngay }),
+};
 exports.kiemTraTrong = {
   params: z.object({ maSan: maSo }),
   query: z.object(khungGio).refine((duLieu) => duLieu.gioKetThuc > duLieu.gioBatDau, {

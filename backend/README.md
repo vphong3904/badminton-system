@@ -12,7 +12,7 @@ Ung dung dat san cau long theo thoi gian thuc.
 ## API moi
 
 - Khach hang: `GET /api/khach/co-so`, `GET /api/khach/co-so/:maCoSo`,
-  `GET /api/khach/san/:maSan`, `GET /api/khach/san/:maSan/lich-trong`, `POST /api/khach/dat-san`,
+  `GET /api/khach/san/:maSan`, `GET /api/khach/san/:maSan/lich-trong`, `GET /api/khach/co-so/:maCoSo/lich-ngay?ngay=YYYY-MM-DD` (lich cac san trong ngay + bang gia, dung ve bang dat lich), `POST /api/khach/dat-san`,
   `POST /api/khach/dat-san/co-dinh`, `GET /api/khach/dat-san`,
   `GET /api/khach/dat-san/:maDatSan/hoa-don-nhap` va `POST /api/khach/dat-san/:maDatSan/huy`.
 - Thanh toan: `GET /api/thanh-toan/:maDatSan/qr`,

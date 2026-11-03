@@ -156,8 +156,17 @@ module.exports = {
         ],
       }),
     },
+    '/api/khach/co-so/danh-sach': {
+      get: endpoint('Danh sách tất cả cơ sở đang hoạt động (cho trang chủ)', 'Khách hàng'),
+    },
     '/api/khach/co-so/{maCoSo}': {
       get: endpoint('Xem chi tiết cơ sở', 'Khách hàng', { params: maCoSo }),
+    },
+    '/api/khach/co-so/{maCoSo}/lich-ngay': {
+      get: endpoint('Xem lịch các sân của cơ sở trong một ngày (khung đã đặt/bị khóa và bảng giá)', 'Khách hàng', {
+        params: maCoSo,
+        query: [thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD', true)],
+      }),
     },
     '/api/khach/san/{maSan}': {
       get: endpoint('Xem chi tiết sân và bảng giá', 'Khách hàng', { params: maSan }),

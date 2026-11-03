@@ -12,6 +12,9 @@ const pool = mysql.createPool({
   timezone: '+07:00',
   dateStrings: true,
   namedPlaceholders: true,
+  dateStrings: true,
+  decimalNumbers: true,   // thêm dòng này
+  namedPlaceholders: true,
 });
 
 async function thucHienGiaoDich(hamThucThi) {
