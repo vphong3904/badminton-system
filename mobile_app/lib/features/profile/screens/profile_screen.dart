@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter_application_1/core/state/auth_store.dart';
 import 'package:flutter_application_1/features/favorites/screens/favorites_screen.dart';
+<<<<<<< HEAD
 import 'package:flutter_application_1/features/profile/screens/change_password_screen.dart';
 import 'package:flutter_application_1/models/court_model.dart';
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 import 'package:flutter_application_1/features/notifications/screens/notifications_screen.dart';
 import 'package:flutter_application_1/features/auth/screens/login_screen.dart';
 import 'package:flutter_application_1/features/profile/screens/edit_profile_screen.dart';
@@ -31,10 +34,13 @@ import 'package:flutter_application_1/features/home/screens/feature_page.dart';
 class ProfileScreen extends StatelessWidget {
   final String role;
 
+<<<<<<< HEAD
   // Danh sách sân (từ API) và callback mở sân, dùng cho màn Sân yêu thích.
   final List<Court> courts;
   final ValueChanged<Court>? onBook;
 
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   // Callback mở màn hình lịch đặt sân.
   final VoidCallback? onOpenHistory;
 
@@ -48,6 +54,7 @@ class ProfileScreen extends StatelessWidget {
   final Future<bool> Function(bool initialRegister)? onAuthenticate;
   final VoidCallback? onLogout;
 
+<<<<<<< HEAD
   // Gọi sau khi lưu hồ sơ thành công để AppShell cập nhật thông tin hiển thị.
   final VoidCallback? onProfileChanged;
 
@@ -56,6 +63,11 @@ class ProfileScreen extends StatelessWidget {
     required this.role,
     this.courts = const [],
     this.onBook,
+=======
+  const ProfileScreen({
+    super.key,
+    required this.role,
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     this.onOpenHistory,
     this.isLoggedIn,
     this.displayName,
@@ -63,7 +75,10 @@ class ProfileScreen extends StatelessWidget {
     this.phone,
     this.onAuthenticate,
     this.onLogout,
+<<<<<<< HEAD
     this.onProfileChanged,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   });
 
   @override
@@ -228,6 +243,7 @@ class ProfileScreen extends StatelessWidget {
               if (loggedIn) ...[
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
+<<<<<<< HEAD
                   onPressed: () async {
                     final saved = await Navigator.push<bool>(
                       context,
@@ -240,6 +256,15 @@ class ProfileScreen extends StatelessWidget {
                       ),
                     );
                     if (saved == true) onProfileChanged?.call();
+=======
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const EditProfileScreen(),
+                      ),
+                    );
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                   },
                   icon: const Icon(Icons.edit_outlined),
                   label: const Text('Chỉnh sửa hồ sơ'),
@@ -289,7 +314,11 @@ class ProfileScreen extends StatelessWidget {
           context,
           Icons.favorite_border,
           'Sân yêu thích',
+<<<<<<< HEAD
           FavoritesScreen(courts: courts, onBook: onBook),
+=======
+          const FavoritesScreen(),
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
         ),
 
         // Thông báo.
@@ -305,7 +334,16 @@ class ProfileScreen extends StatelessWidget {
           context,
           Icons.lock_outline,
           'Đổi mật khẩu',
+<<<<<<< HEAD
           const ChangePasswordScreen(),
+=======
+          const FeaturePage(
+            title: 'Đổi mật khẩu',
+            icon: Icons.lock_outline,
+            description: 'Nhập mật khẩu hiện tại và mật khẩu mới.',
+            items: ['Mật khẩu mới cần đủ mạnh', 'Xác nhận mật khẩu mới'],
+          ),
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
         ),
 
         const SizedBox(height: 22),

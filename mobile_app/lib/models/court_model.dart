@@ -1,8 +1,11 @@
 class Court {
   final String id;
+<<<<<<< HEAD
 
   /// Mã cơ sở (`maCoSo`) trên backend. Để trống nếu sân chỉ là dữ liệu mẫu.
   final int? apiId;
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   final String name;
   final String address;
   final int pricePerHour;
@@ -23,7 +26,10 @@ class Court {
 
   const Court({
     required this.id,
+<<<<<<< HEAD
     this.apiId,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     required this.name,
     required this.address,
     required this.pricePerHour,
@@ -41,6 +47,7 @@ class Court {
     this.promoCount = 0,
   });
 
+<<<<<<< HEAD
 
   /// Tạo từ một phần tử của `GET /khach/co-so/danh-sach`.
   factory Court.fromApi(Map<String, dynamic> json) {
@@ -103,6 +110,8 @@ class Court {
   /// (khi dữ liệu sân được tải từ backend, `id` chính là `maCoSo`).
   int? get venueId => apiId ?? int.tryParse(id);
 
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   String get hoursLabel => '$openTime - $closeTime';
 
   int get openMinutes => _toMinutes(openTime);
@@ -132,7 +141,10 @@ class Court {
 
   Court copyWith({
     String? id,
+<<<<<<< HEAD
     int? apiId,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     String? name,
     String? address,
     int? pricePerHour,
@@ -151,7 +163,10 @@ class Court {
   }) {
     return Court(
       id: id ?? this.id,
+<<<<<<< HEAD
       apiId: apiId ?? this.apiId,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
       name: name ?? this.name,
       address: address ?? this.address,
       pricePerHour: pricePerHour ?? this.pricePerHour,

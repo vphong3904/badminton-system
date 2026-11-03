@@ -145,11 +145,15 @@ class VenueCard extends StatelessWidget {
                           ? const Color(0xFFFF5A1F)
                           : Colors.black87,
                       onTap: () {
+<<<<<<< HEAD
                         FavoritesStore.instance.toggle(
                           court.id,
                           (message) => ScaffoldMessenger.of(context)
                               .showSnackBar(SnackBar(content: Text(message))),
                         );
+=======
+                        FavoritesStore.instance.toggle(court.id);
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                       },
                     );
                   },

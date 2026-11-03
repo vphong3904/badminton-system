@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -30,10 +31,17 @@ class ApiException implements Exception {
 ///   thành công: `{ "thanhCong": true,  "duLieu": ... }`
 ///   thất bại:   `{ "thanhCong": false, "loi": { "maLoi", "thongBao" } }`
 /// Các hàm ở đây trả về phần `duLieu` hoặc ném [ApiException].
+=======
+import 'package:flutter_application_1/core/config/app_config.dart';
+
+/// Điểm tập trung để tích hợp API backend.
+/// Hiện tại ứng dụng vẫn dùng dữ liệu mẫu trong bộ nhớ.
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 class ApiClient {
   ApiClient._();
 
   static const String baseUrl = AppConfig.apiBaseUrl;
+<<<<<<< HEAD
   static const Duration _timeout = Duration(seconds: 20);
 
   static String? _token;
@@ -171,4 +179,6 @@ class ApiClient {
     }
     throw ApiException(message, code: code, statusCode: response.statusCode);
   }
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 }

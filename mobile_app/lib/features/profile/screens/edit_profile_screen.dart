@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+<<<<<<< HEAD
 import 'package:flutter_application_1/core/network/api_client.dart';
 import 'package:flutter_application_1/core/network/auth_api.dart';
 
@@ -16,12 +17,20 @@ class EditProfileScreen extends StatefulWidget {
     this.initialPhone = '',
     this.initialEmail = '',
   });
+=======
+
+const green = Color(0xFF16845B);
+
+class EditProfileScreen extends StatefulWidget {
+  const EditProfileScreen({super.key});
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
   @override
   State<EditProfileScreen> createState() => _EditProfileScreenState();
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
+<<<<<<< HEAD
   late final TextEditingController name;
   late final TextEditingController phone;
   late final TextEditingController email;
@@ -36,6 +45,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     phone = TextEditingController(text: widget.initialPhone);
     email = TextEditingController(text: widget.initialEmail);
   }
+=======
+  final name = TextEditingController(text: 'Người dùng demo');
+  final phone = TextEditingController(text: '09xx xxx xxx');
+  final email = TextEditingController(text: 'user@example.com');
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
   @override
   void dispose() {
@@ -45,6 +59,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
+<<<<<<< HEAD
   Future<void> _save() async {
     if (_saving) return;
 
@@ -92,6 +107,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     }
   }
 
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -131,6 +148,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               border: OutlineInputBorder(),
             ),
           ),
+<<<<<<< HEAD
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -149,6 +167,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   )
                 : const Text('Lưu thay đổi'),
+=======
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Demo: cần backend để lưu hồ sơ.'),
+                ),
+              );
+              Navigator.pop(context);
+            },
+            child: const Text('Lưu thay đổi'),
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
           ),
         ],
       ),

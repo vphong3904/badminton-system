@@ -39,6 +39,7 @@ String formatDistance(double meters) => meters < 1000
 /// Ví dụ: (5, 0) -> "05:00".
 String formatHm(int hour, int minute) =>
     '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+<<<<<<< HEAD
 
 /// Ví dụ: 1230 phút kể từ 00:00 -> "20h30", 540 -> "9h00".
 String formatHourLabel(int minutes) =>
@@ -49,3 +50,5 @@ String formatTotalHours(int minutes) => formatHourLabel(minutes);
 
 /// Ví dụ: 1230 -> "20:30".
 String formatMinutesAsHm(int minutes) => formatHm(minutes ~/ 60, minutes % 60);
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f

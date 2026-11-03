@@ -24,12 +24,15 @@ class Booking {
   final DateTime? paidAt;
   final String? paymentProof;
 
+<<<<<<< HEAD
   // Thông tin đơn trên backend (có khi đặt qua API).
   final int? apiId; // maDatSan
   final String? courtName; // tên sân con, vd "Sân 1"
   final String? contactName;
   final String? contactPhone;
 
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   const Booking({
     required this.id,
     required this.court,
@@ -43,10 +46,13 @@ class Booking {
     this.transactionId,
     this.paidAt,
     this.paymentProof,
+<<<<<<< HEAD
     this.apiId,
     this.courtName,
     this.contactName,
     this.contactPhone,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   });
 
   bool get isPaid => paymentStatus == 'Đã thanh toán';
@@ -66,10 +72,13 @@ class Booking {
     String? transactionId,
     DateTime? paidAt,
     String? paymentProof,
+<<<<<<< HEAD
     int? apiId,
     String? courtName,
     String? contactName,
     String? contactPhone,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   }) {
     return Booking(
       id: id ?? this.id,
@@ -84,10 +93,13 @@ class Booking {
       transactionId: transactionId ?? this.transactionId,
       paidAt: paidAt ?? this.paidAt,
       paymentProof: paymentProof ?? this.paymentProof,
+<<<<<<< HEAD
       apiId: apiId ?? this.apiId,
       courtName: courtName ?? this.courtName,
       contactName: contactName ?? this.contactName,
       contactPhone: contactPhone ?? this.contactPhone,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     );
   }
 }

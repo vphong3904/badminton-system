@@ -2,7 +2,11 @@ import '../models/court.dart';
 
 const sampleCourts = <Court>[
   Court(
+<<<<<<< HEAD
     id: '1',
+=======
+    id: 'C001',
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     name: 'Sân cầu lông Phú Thọ',
     address: 'Quận 11, TP. Hồ Chí Minh',
     pricePerHour: 80000,
@@ -11,7 +15,11 @@ const sampleCourts = <Court>[
     amenities: ['Bãi giữ xe', 'Phòng thay đồ', 'Căng tin', 'Điều hòa'],
   ),
   Court(
+<<<<<<< HEAD
     id: '2',
+=======
+    id: 'C002',
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     name: 'Sân cầu lông Tân Bình',
     address: 'Quận Tân Bình, TP. Hồ Chí Minh',
     pricePerHour: 70000,
@@ -20,7 +28,11 @@ const sampleCourts = <Court>[
     amenities: ['Bãi giữ xe', 'Nhà vệ sinh', 'Căng tin'],
   ),
   Court(
+<<<<<<< HEAD
     id: '3',
+=======
+    id: 'C003',
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     name: 'Sân cầu lông Bình Thạnh',
     address: 'Quận Bình Thạnh, TP. Hồ Chí Minh',
     pricePerHour: 90000,
@@ -29,7 +41,11 @@ const sampleCourts = <Court>[
     amenities: ['Bãi giữ xe', 'Phòng thay đồ', 'Điều hòa'],
   ),
   Court(
+<<<<<<< HEAD
     id: '4',
+=======
+    id: 'C004',
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     name: 'Sân cầu lông Gò Vấp',
     address: 'Quận Gò Vấp, TP. Hồ Chí Minh',
     pricePerHour: 65000,

@@ -1,22 +1,32 @@
 import 'package:flutter/foundation.dart';
 
+<<<<<<< HEAD
 import 'package:flutter_application_1/core/network/api_client.dart';
 import 'package:flutter_application_1/features/favorites/favorites_api.dart';
 
 /// Danh sách sân yêu thích. Dùng chung cho trang chủ, danh sách tìm kiếm và
 /// màn hình "Sân yêu thích". Được đồng bộ với máy chủ khi đã đăng nhập.
+=======
+/// Danh sách sân yêu thích (trong bộ nhớ). Dùng chung cho trang chủ,
+/// danh sách tìm kiếm và màn hình "Sân yêu thích".
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 class FavoritesStore extends ChangeNotifier {
   FavoritesStore._();
   static final FavoritesStore instance = FavoritesStore._();
 
+<<<<<<< HEAD
   final Set<String> _ids = <String>{};
 
   /// AppShell gắn vào để mở màn đăng nhập khi khách chưa đăng nhập mà bấm tim.
   Future<bool> Function()? ensureLogin;
+=======
+  final Set<String> _ids = {'C102'};
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
   Set<String> get ids => Set.unmodifiable(_ids);
   bool isFavorite(String id) => _ids.contains(id);
 
+<<<<<<< HEAD
   /// Tải danh sách yêu thích từ máy chủ (sau khi đăng nhập).
   Future<void> load() async {
     if (!ApiClient.hasToken) return;
@@ -72,4 +82,10 @@ class FavoritesStore extends ChangeNotifier {
       onError?.call(error is ApiException ? error.message : 'Không thể lưu sân yêu thích.');
     }
   }
+=======
+  void toggle(String id) {
+    if (!_ids.remove(id)) _ids.add(id);
+    notifyListeners();
+  }
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 }

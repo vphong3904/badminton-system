@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+<<<<<<< HEAD
 import 'package:flutter_application_1/features/favorites/favorites_store.dart';
 import 'package:flutter_application_1/models/court_model.dart';
 import 'package:flutter_application_1/shared/venue_card.dart';
@@ -10,6 +11,19 @@ class FavoritesScreen extends StatelessWidget {
   final ValueChanged<Court>? onBook;
 
   const FavoritesScreen({super.key, this.courts = const [], this.onBook});
+=======
+import 'package:flutter_application_1/core/utils/formatters.dart';
+import 'package:flutter_application_1/features/favorites/favorites_store.dart';
+import 'package:flutter_application_1/features/home/data/sample_data.dart';
+import 'package:flutter_application_1/models/court_model.dart';
+
+const green = Color(0xFF16845B);
+
+class FavoritesScreen extends StatelessWidget {
+  final List<Court> courts;
+
+  const FavoritesScreen({super.key, this.courts = sampleCourts});
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +35,7 @@ class FavoritesScreen extends StatelessWidget {
         final items = courts.where((c) => store.isFavorite(c.id)).toList();
 
         return Scaffold(
+<<<<<<< HEAD
           backgroundColor: const Color(0xFFF5F7F5),
           appBar: AppBar(title: Text('Sân yêu thích (${items.length})')),
           body: items.isEmpty
@@ -42,6 +57,45 @@ class FavoritesScreen extends StatelessWidget {
                       onOpen: () => onBook?.call(court),
                     );
                   },
+=======
+          appBar: AppBar(title: const Text('Sân yêu thích')),
+          body: items.isEmpty
+              ? const Center(
+                  child: Text(
+                    '♡\nBạn chưa có sân yêu thích',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 18),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: items
+                      .map(
+                        (court) => Card(
+                          color: Colors.white,
+                          child: ListTile(
+                            leading: const CircleAvatar(
+                              child: Icon(Icons.sports_tennis),
+                            ),
+                            title: Text(court.name),
+                            subtitle: Text(
+                              '${court.address}\n'
+                              '${formatMoney(court.pricePerHour)}/giờ',
+                            ),
+                            isThreeLine: true,
+                            trailing: IconButton(
+                              tooltip: 'Bỏ yêu thích',
+                              icon: const Icon(
+                                Icons.favorite,
+                                color: Colors.red,
+                              ),
+                              onPressed: () => store.toggle(court.id),
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                 ),
         );
       },

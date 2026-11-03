@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+<<<<<<< HEAD
 import 'package:flutter_application_1/core/network/api_client.dart';
 import 'package:flutter_application_1/core/network/auth_api.dart';
 import 'package:flutter_application_1/models/court_model.dart';
 import 'package:flutter_application_1/shared/venue_card.dart';
+=======
+import 'package:flutter_application_1/models/court_model.dart';
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
 // ======================================================
 // MODEL TÀI KHOẢN KHÁCH HÀNG DEMO
@@ -44,8 +48,11 @@ class AuthResult {
 // MỞ TRANG ĐĂNG NHẬP / ĐĂNG KÝ
 // ======================================================
 
+<<<<<<< HEAD
 /// Đăng nhập / đăng ký qua API backend (token lưu trong [ApiClient]).
 /// Tham số [accounts] là của bản demo cũ và không còn được dùng.
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 Future<AuthResult?> showAuthPage({
   required BuildContext context,
   required Map<String, CustomerAccount> accounts,
@@ -69,6 +76,7 @@ typedef AuthenticateCallback = Future<bool> Function(bool initialRegister);
 class HomeScreen extends StatefulWidget {
   final List<Court> courts;
 
+<<<<<<< HEAD
   /// Đang tải danh sách cơ sở từ API.
   final bool loading;
 
@@ -78,6 +86,8 @@ class HomeScreen extends StatefulWidget {
   /// Tải lại danh sách (nút "Thử lại" và kéo để làm mới).
   final Future<void> Function() onRefresh;
 
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   final VoidCallback onOpenSearch;
   final ValueChanged<Court> onBook;
 
@@ -91,9 +101,12 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.courts,
+<<<<<<< HEAD
     required this.loading,
     required this.errorMessage,
     required this.onRefresh,
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     required this.onOpenSearch,
     required this.onBook,
     required this.loggedInEmail,
@@ -112,6 +125,10 @@ class _HomeScreenState extends State<HomeScreen> {
   static const Color darkGreen = Color(0xFF075532);
   static const Color gold = Color(0xFFE9B526);
 
+<<<<<<< HEAD
+=======
+  final Set<String> _favoriteIds = {};
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
   bool get _isLoggedIn =>
       widget.loggedInEmail != null && widget.loggedInEmail!.isNotEmpty;
@@ -235,6 +252,34 @@ class _HomeScreenState extends State<HomeScreen> {
   // THÊM / XÓA YÊU THÍCH
   // ======================================================
 
+<<<<<<< HEAD
+=======
+  Future<void> _toggleFavorite(Court court) async {
+    final allowed = await _requireLogin();
+
+    if (!allowed || !mounted) {
+      return;
+    }
+
+    setState(() {
+      if (_favoriteIds.contains(court.id)) {
+        _favoriteIds.remove(court.id);
+      } else {
+        _favoriteIds.add(court.id);
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _favoriteIds.contains(court.id)
+              ? 'Đã thêm sân vào danh sách yêu thích.'
+              : 'Đã xóa sân khỏi danh sách yêu thích.',
+        ),
+      ),
+    );
+  }
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
 
   // ======================================================
   // ĐẶT LỊCH SÂN
@@ -297,11 +342,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7F5),
+<<<<<<< HEAD
       body: RefreshIndicator(
         onRefresh: widget.onRefresh,
         edgeOffset: 40,
         child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
+=======
+      body: CustomScrollView(
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
         slivers: [
           SliverToBoxAdapter(child: _buildHeader()),
 
@@ -313,6 +362,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           SliverToBoxAdapter(child: _buildSectionTitle(activeCourts.length)),
 
+<<<<<<< HEAD
           if (widget.loading && activeCourts.isEmpty)
             const SliverToBoxAdapter(
               child: Padding(
@@ -344,6 +394,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             )
           else if (activeCourts.isEmpty)
+=======
+          if (activeCourts.isEmpty)
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
             const SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.all(30),
@@ -364,17 +417,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 18),
+<<<<<<< HEAD
                     child: VenueCard(
                       court: court,
                       onOpen: () => widget.onBook(court),
                     ),
+=======
+                    child: _buildCourtCard(court, index),
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                   );
                 }, childCount: activeCourts.length),
               ),
             ),
         ],
       ),
+<<<<<<< HEAD
       ),
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     );
   }
 
@@ -718,6 +778,283 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ======================================================
+<<<<<<< HEAD
+=======
+  // THẺ SÂN CẦU LÔNG
+  // ======================================================
+
+  Widget _buildCourtCard(Court court, int index) {
+    final isFavorite = _favoriteIds.contains(court.id);
+
+    const gradients = [
+      [Color(0xFF102F28), Color(0xFF238466)],
+      [Color(0xFF14263D), Color(0xFF426B68)],
+      [Color(0xFF245448), Color(0xFF76A999)],
+    ];
+
+    final colors = gradients[index % gradients.length];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.09),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Stack(
+            children: [
+              Container(
+                height: 165,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: colors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.sports_tennis,
+                      color: Colors.white.withValues(alpha: 0.12),
+                      size: 130,
+                    ),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.sports_tennis,
+                          color: Colors.white,
+                          size: 42,
+                        ),
+                        const SizedBox(height: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
+                          child: Text(
+                            court.name.toUpperCase(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              Positioned(
+                top: 11,
+                left: 11,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.star, color: gold, size: 18),
+                      const SizedBox(width: 4),
+                      Text(
+                        court.rating.toStringAsFixed(1),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Positioned(
+                top: 11,
+                right: 11,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16C98B),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text(
+                    'Sân cầu lông',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 13, 13, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 55,
+                  height: 55,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE5F3EB),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.sports_tennis,
+                    color: green,
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        court.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: darkGreen,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        court.address,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          const Icon(Icons.access_time, color: green, size: 15),
+                          const SizedBox(width: 4),
+                          Text(
+                            court.hoursLabel,
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            color: green,
+                            size: 15,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _formatDistance(court.distanceMeters),
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '${_formatMoney(court.pricePerHour)} / giờ',
+                        style: const TextStyle(
+                          color: Color(0xFFD49D12),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(height: 1),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _actionButton(
+                    icon: isFavorite ? Icons.favorite : Icons.favorite_border,
+                    label: 'Yêu thích',
+                    color: isFavorite ? Colors.red : green,
+                    onTap: () {
+                      _toggleFavorite(court);
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: _actionButton(
+                    icon: Icons.visibility_outlined,
+                    label: 'Xem sân',
+                    color: green,
+                    onTap: () {
+                      _viewCourt(court);
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: _actionButton(
+                    icon: Icons.calendar_month_outlined,
+                    label: 'Đặt lịch',
+                    color: const Color(0xFFD39B0C),
+                    onTap: () {
+                      _bookCourt(court);
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: _actionButton(
+                    icon: Icons.share_outlined,
+                    label: 'Chia sẻ',
+                    color: green,
+                    onTap: () {
+                      _shareCourt(court);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ======================================================
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   // NÚT CHỨC NĂNG
   // ======================================================
 
@@ -785,7 +1122,10 @@ class _AuthPageState extends State<_AuthPage> {
   late bool _isRegister;
 
   bool _hidePassword = true;
+<<<<<<< HEAD
   bool _submitting = false;
+=======
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   String? _errorMessage;
 
   static const Color green = Color(0xFF07834D);
@@ -825,9 +1165,13 @@ class _AuthPageState extends State<_AuthPage> {
   // XỬ LÝ ĐĂNG KÝ / ĐĂNG NHẬP
   // ======================================================
 
+<<<<<<< HEAD
   Future<void> _submit() async {
     if (_submitting) return;
 
+=======
+  void _submit() {
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
     final formState = _formKey.currentState;
 
     if (formState == null || !formState.validate()) {
@@ -837,6 +1181,7 @@ class _AuthPageState extends State<_AuthPage> {
     final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text;
 
+<<<<<<< HEAD
     setState(() {
       _submitting = true;
       _errorMessage = null;
@@ -879,6 +1224,52 @@ class _AuthPageState extends State<_AuthPage> {
         });
       }
     }
+=======
+    if (_isRegister) {
+      if (widget.accounts.containsKey(email)) {
+        setState(() {
+          _errorMessage = 'Email này đã được đăng ký.';
+        });
+        return;
+      }
+
+      final account = CustomerAccount(
+        email: email,
+        password: password,
+        fullName: _nameController.text.trim(),
+        phone: _phoneController.text.trim(),
+      );
+
+      widget.accounts[email] = account;
+
+      Navigator.of(context).pop(
+        AuthResult(
+          email: account.email,
+          fullName: account.fullName,
+          phone: account.phone,
+        ),
+      );
+
+      return;
+    }
+
+    final account = widget.accounts[email];
+
+    if (account == null || account.password != password) {
+      setState(() {
+        _errorMessage = 'Email hoặc mật khẩu không chính xác.';
+      });
+      return;
+    }
+
+    Navigator.of(context).pop(
+      AuthResult(
+        email: account.email,
+        fullName: account.fullName,
+        phone: account.phone,
+      ),
+    );
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
   }
 
   // ======================================================
@@ -978,8 +1369,13 @@ class _AuthPageState extends State<_AuthPage> {
                         return 'Vui lòng nhập số điện thoại.';
                       }
 
+<<<<<<< HEAD
                       if (!AuthApi.isValidPhone(phone)) {
                         return 'Số điện thoại không hợp lệ (10–11 số, bắt đầu bằng 0).';
+=======
+                      if (!RegExp(r'^[0-9]{9,11}$').hasMatch(phone)) {
+                        return 'Số điện thoại phải có 9–11 chữ số.';
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                       }
 
                       return null;
@@ -1069,7 +1465,11 @@ class _AuthPageState extends State<_AuthPage> {
                 SizedBox(
                   height: 52,
                   child: ElevatedButton(
+<<<<<<< HEAD
                     onPressed: _submitting ? null : _submit,
+=======
+                    onPressed: _submit,
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                     style: ElevatedButton.styleFrom(
                       backgroundColor: green,
                       foregroundColor: Colors.white,
@@ -1077,6 +1477,7 @@ class _AuthPageState extends State<_AuthPage> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
+<<<<<<< HEAD
                     child: _submitting
                         ? const SizedBox(
                             width: 22,
@@ -1093,6 +1494,15 @@ class _AuthPageState extends State<_AuthPage> {
                               fontSize: 15,
                             ),
                           ),
+=======
+                    child: Text(
+                      _isRegister ? 'ĐĂNG KÝ' : 'ĐĂNG NHẬP',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+>>>>>>> fb6c54caa1e5a5dca2e3c3881790f15485a8541f
                   ),
                 ),
 
