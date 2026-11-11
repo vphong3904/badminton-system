@@ -17,8 +17,11 @@ class AppError extends Error {
   static khongTimThay(thongBao = 'Không tìm thấy') {
     return new AppError(404, thongBao, 'NOT_FOUND');
   }
-  static biTrung(thongBao = 'Dữ liệu bị trùng') {
-    return new AppError(409, thongBao, 'CONFLICT');
+  static biTrung(thongBao = 'Dữ liệu bị trùng', maLoi = 'CONFLICT') {
+    return new AppError(409, thongBao, maLoi);
+  }
+  static khongSanSang(thongBao = 'Hệ thống đang bảo trì hoặc quá tải. Vui lòng thử lại sau ít phút.', maLoi = 'DB_UNAVAILABLE') {
+    return new AppError(503, thongBao, maLoi);
   }
 }
 module.exports = AppError;

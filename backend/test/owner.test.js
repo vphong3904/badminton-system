@@ -51,3 +51,10 @@ test('Chap nhan ten truong tieng Viet khong dau cho san va khung khoa', () => {
     lyDo: 'Bao tri',
   }).success, true);
 });
+
+test('Buoc ngan hang bat buoc co maNganHang de rut tien duoc', () => {
+  const hopLe = { tenNganHang: 'Vietcombank', maNganHang: 'VCB', soTaiKhoan: '0123456789', chuTaiKhoan: 'NGUYEN VAN A' };
+  assert.equal(kiemTraChuSan.nganHang.body.safeParse(hopLe).success, true);
+  const { maNganHang, ...thieuMa } = hopLe;
+  assert.equal(kiemTraChuSan.nganHang.body.safeParse(thieuMa).success, false);
+});

@@ -14,14 +14,20 @@ exports.luuBuocBangGia = xuLy((yeuCau) => dichVu.luuBuocBangGia(layMaChuSan(yeuC
 exports.luuBuocNganHang = xuLy((yeuCau) => dichVu.luuBuocNganHang(layMaChuSan(yeuCau), yeuCau.body));
 exports.guiHoSoDuyet = xuLy((yeuCau) => dichVu.guiHoSoDuyet(layMaChuSan(yeuCau)));
 
-exports.layCoSo = xuLy((yeuCau) => dichVu.layCoSo(layMaChuSan(yeuCau)));
-exports.capNhatCoSo = xuLy((yeuCau) => dichVu.capNhatCoSo(layMaChuSan(yeuCau), yeuCau.body));
-exports.capNhatBangGia = xuLy((yeuCau) => dichVu.thayBangGia(layMaChuSan(yeuCau), yeuCau.body.khungGias));
+// Cơ sở: maCoSo lấy từ đường dẫn (/co-so/:maCoSo/...); không có thì dùng cơ sở đầu tiên (API cũ).
+const layMaCoSo = (yeuCau) => yeuCau.params.maCoSo;
+exports.lietKeCoSo = xuLy((yeuCau) => dichVu.layDanhSachCoSo(layMaChuSan(yeuCau)));
+exports.layCoSo = xuLy((yeuCau) => dichVu.layCoSoTheoMa(layMaChuSan(yeuCau), layMaCoSo(yeuCau)));
+exports.taoCoSo = xuLy((yeuCau) => dichVu.taoCoSoMoi(layMaChuSan(yeuCau), yeuCau.body), daTao);
+exports.capNhatCoSo = xuLy((yeuCau) =>
+  dichVu.capNhatCoSo(layMaChuSan(yeuCau), yeuCau.body, layMaCoSo(yeuCau)));
+exports.capNhatBangGia = xuLy((yeuCau) =>
+  dichVu.thayBangGia(layMaChuSan(yeuCau), yeuCau.body.khungGias, layMaCoSo(yeuCau)));
 exports.capNhatAnhCoSo = xuLy((yeuCau) => {
   if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
-  return dichVu.capNhatAnhCoSo(layMaChuSan(yeuCau), layDuongDanTep(yeuCau.file));
+  return dichVu.capNhatAnhCoSo(layMaChuSan(yeuCau), layDuongDanTep(yeuCau.file), layMaCoSo(yeuCau));
 });
-exports.lietKeSan = xuLy((yeuCau) => dichVu.lietKeSan(layMaChuSan(yeuCau)));
+exports.lietKeSan = xuLy((yeuCau) => dichVu.lietKeSan(layMaChuSan(yeuCau), yeuCau.query.maCoSo));
 exports.taoSan = xuLy((yeuCau) => dichVu.taoSan(layMaChuSan(yeuCau), yeuCau.body), daTao);
 exports.capNhatSan = xuLy((yeuCau) =>
   dichVu.capNhatSan(layMaChuSan(yeuCau), yeuCau.params.maSan, yeuCau.body));

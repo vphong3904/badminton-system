@@ -30,16 +30,26 @@ const khungGia = z.object({
 });
 
 exports.coSo = { body: coSo };
+const maCoSoTrongDuongDan = z.object({ maCoSo: maSo });
+exports.maCoSo = { params: maCoSoTrongDuongDan };
+exports.capNhatCoSoTheoMa = { params: maCoSoTrongDuongDan, body: coSo };
+exports.bangGiaTheoMa = {
+  params: maCoSoTrongDuongDan,
+  body: z.object({ khungGias: z.array(khungGia).min(1).max(24) }),
+};
+exports.danhSachSan = { query: z.object({ maCoSo: maSo.optional() }) };
 exports.bangGia = { body: z.object({ khungGias: z.array(khungGia).min(1).max(24) }) };
 exports.nganHang = {
   body: z.object({
     tenNganHang: z.string().trim().min(2).max(100),
+    maNganHang: z.string().trim().min(2).max(20),
     soTaiKhoan: z.string().trim().regex(/^\d{6,20}$/, 'Số tài khoản không hợp lệ'),
     chuTaiKhoan: z.string().trim().min(2).max(100),
   }),
 };
 exports.san = {
   body: z.object({
+    maCoSo: maSo.optional(),
     tenSan: z.string().trim().min(1).max(50),
     trangThai: z.enum(['active', 'maintenance']).optional(),
   }),

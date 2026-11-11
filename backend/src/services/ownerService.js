@@ -16,20 +16,39 @@ async function layHoSo(maChuSan) {
   return hoSo;
 }
 
+// Câu SELECT cơ sở dùng chung cho danh sách / chi tiết / "cơ sở đầu tiên".
+const CHON_CO_SO = `
+  SELECT cs.MaCoSo AS maCoSo, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo,
+    cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai, cs.Zalo AS zalo,
+    cs.LinkBanDo AS linkBanDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
+    cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
+    cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.GiaThapNhat AS giaThapNhat,
+    cs.TrangThai AS trangThai,
+    (SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo
+     ORDER BY LaAnhBia DESC, ThuTu, MaAnh LIMIT 1) AS duongDanAnh,
+    (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo) AS soSan,
+    (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active') AS soSanHoatDong
+  FROM CoSo cs`;
+
+// Tất cả cơ sở của chủ sân (mới nhất ở cuối), kèm số sân.
+async function layDanhSachCoSo(maChuSan) {
+  const [cacCoSo] = await pool.query(`${CHON_CO_SO} WHERE cs.MaChuSan = ? ORDER BY cs.MaCoSo`, [maChuSan]);
+  return cacCoSo;
+}
+
+// Cơ sở đầu tiên (dùng cho bước đăng ký và các API cũ không truyền maCoSo).
 async function layCoSo(maChuSan) {
-  const [[coSo]] = await pool.query(
-    `SELECT cs.MaCoSo AS maCoSo, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo,
-       cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai, cs.Zalo AS zalo,
-       cs.LinkBanDo AS linkBanDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
-       cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
-       cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.GiaThapNhat AS giaThapNhat,
-       cs.TrangThai AS trangThai,
-       (SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo
-        ORDER BY LaAnhBia DESC, ThuTu, MaAnh LIMIT 1) AS duongDanAnh,
-       (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo) AS soSan
-     FROM CoSo cs WHERE cs.MaChuSan = ? ORDER BY cs.MaCoSo LIMIT 1`,
-    [maChuSan]);
-  return coSo || null;
+  const [cacCoSo] = await pool.query(
+    `${CHON_CO_SO} WHERE cs.MaChuSan = ? ORDER BY cs.MaCoSo LIMIT 1`, [maChuSan]);
+  return cacCoSo[0] || null;
+}
+
+// Một cơ sở theo mã; 404 nếu không phải của chủ sân này (không lộ cơ sở người khác).
+async function layCoSoTheoMa(maChuSan, maCoSo) {
+  const [cacCoSo] = await pool.query(
+    `${CHON_CO_SO} WHERE cs.MaChuSan = ? AND cs.MaCoSo = ?`, [maChuSan, maCoSo]);
+  if (!cacCoSo[0]) throw AppError.khongTimThay('Không tìm thấy cơ sở');
+  return cacCoSo[0];
 }
 
 async function layBangGia(maCoSo) {
@@ -55,6 +74,24 @@ async function batBuocCoSo(maChuSan) {
   return coSo;
 }
 
+// Có maCoSo → đúng cơ sở đó (phải của mình); không có → cơ sở đầu tiên (tương thích API cũ).
+async function chonCoSo(maChuSan, maCoSo) {
+  return maCoSo ? layCoSoTheoMa(maChuSan, maCoSo) : batBuocCoSo(maChuSan);
+}
+
+// Cơ sở mới tạo ở trạng thái ẩn; tự hiện cho khách khi đã có ≥1 sân hoạt động + có bảng giá
+// và chủ sân đã được admin duyệt. Chỉ chuyển hidden → active (không đụng cơ sở bị admin khoá).
+async function kichHoatNeuSanSang(maCoSo, ketNoi = pool) {
+  await ketNoi.query(
+    `UPDATE CoSo cs SET cs.TrangThai = 'active'
+     WHERE cs.MaCoSo = ? AND cs.TrangThai = 'hidden'
+       AND EXISTS (SELECT 1 FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active')
+       AND EXISTS (SELECT 1 FROM BangGia WHERE MaCoSo = cs.MaCoSo)
+       AND EXISTS (SELECT 1 FROM HoSoChuSan
+                   WHERE MaNguoiDung = cs.MaChuSan AND TrangThaiDuyet = 'approved')`,
+    [maCoSo]);
+}
+
 async function xacNhanDuocSua(maChuSan) {
   const hoSo = await layHoSo(maChuSan);
   if (!TRANG_THAI_DUOC_SUA.includes(hoSo.trangThaiDuyet)) {
@@ -76,6 +113,7 @@ async function trangThaiDangKy(maChuSan) {
     khungGias,
     thongTinNganHang: {
       tenNganHang: hoSo.tenNganHang,
+      maNganHang: hoSo.maNganHang,
       soTaiKhoan: hoSo.soTaiKhoan,
       chuTaiKhoan: hoSo.chuTaiKhoan,
     },
@@ -110,8 +148,8 @@ async function luuBuocCoSo(maChuSan, duLieuCoSo) {
   return trangThaiDangKy(maChuSan);
 }
 
-async function thayBangGia(maChuSan, khungGias) {
-  const coSo = await batBuocCoSo(maChuSan);
+async function thayBangGia(maChuSan, khungGias, maCoSo) {
+  const coSo = await chonCoSo(maChuSan, maCoSo);
   kiemTraKhungGia(khungGias, coSo.gioMoCua.slice(0, 5), coSo.gioDongCua.slice(0, 5));
 
   const duLieuBangGia = khungGias.flatMap((khungGia) => [
@@ -132,6 +170,7 @@ async function thayBangGia(maChuSan, khungGias) {
        VALUES ?`,
       [duLieuBangGia]);
     await ketNoi.query('UPDATE CoSo SET GiaThapNhat=? WHERE MaCoSo=?', [giaThapNhat, coSo.maCoSo]);
+    await kichHoatNeuSanSang(coSo.maCoSo, ketNoi);
   });
   return layBangGia(coSo.maCoSo);
 }
@@ -144,8 +183,8 @@ async function luuBuocBangGia(maChuSan, khungGias) {
 
 async function luuBuocNganHang(maChuSan, thongTinNganHang) {
   await pool.query(
-    `UPDATE HoSoChuSan SET TenNganHang=?, SoTaiKhoan=?, ChuTaiKhoan=? WHERE MaNguoiDung=?`,
-    [thongTinNganHang.tenNganHang, thongTinNganHang.soTaiKhoan, thongTinNganHang.chuTaiKhoan, maChuSan]);
+    `UPDATE HoSoChuSan SET TenNganHang=?, MaNganHang=?, SoTaiKhoan=?, ChuTaiKhoan=? WHERE MaNguoiDung=?`,
+    [thongTinNganHang.tenNganHang, thongTinNganHang.maNganHang, thongTinNganHang.soTaiKhoan, thongTinNganHang.chuTaiKhoan, maChuSan]);
   return trangThaiDangKy(maChuSan);
 }
 
@@ -165,8 +204,8 @@ async function guiHoSoDuyet(maChuSan) {
   return trangThaiDangKy(maChuSan);
 }
 
-async function capNhatCoSo(maChuSan, duLieuCoSo) {
-  const coSo = await batBuocCoSo(maChuSan);
+async function capNhatCoSo(maChuSan, duLieuCoSo, maCoSo) {
+  const coSo = await chonCoSo(maChuSan, maCoSo);
   const khungGias = await layBangGia(coSo.maCoSo);
   kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
   await pool.query(
@@ -179,11 +218,26 @@ async function capNhatCoSo(maChuSan, duLieuCoSo) {
       duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
       duLieuCoSo.soPhutDatToiThieu, coSo.maCoSo,
     ]);
-  return layCoSo(maChuSan);
+  return layCoSoTheoMa(maChuSan, coSo.maCoSo);
 }
 
-async function capNhatAnhCoSo(maChuSan, duongDan) {
-  const coSo = await batBuocCoSo(maChuSan);
+// Thêm cơ sở thứ 2, 3… (chỉ sau khi được duyệt). Bắt đầu ở trạng thái ẩn cho tới khi có sân + giá.
+async function taoCoSoMoi(maChuSan, duLieuCoSo) {
+  const [ketQua] = await pool.query(
+    `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
+       TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, TrangThai)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'hidden')`,
+    [
+      maChuSan, duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai,
+      duLieuCoSo.zalo ?? null, duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh,
+      duLieuCoSo.quanHuyen, duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua,
+      duLieuCoSo.gioDongCua, duLieuCoSo.soPhutDatToiThieu,
+    ]);
+  return layCoSoTheoMa(maChuSan, ketQua.insertId);
+}
+
+async function capNhatAnhCoSo(maChuSan, duongDan, maCoSo) {
+  const coSo = await chonCoSo(maChuSan, maCoSo);
   await thucHienGiaoDich(async (ketNoi) => {
     await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=0 WHERE MaCoSo=?', [coSo.maCoSo]);
     await ketNoi.query('INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia) VALUES (?,?,1)', [coSo.maCoSo, duongDan]);
@@ -191,28 +245,34 @@ async function capNhatAnhCoSo(maChuSan, duongDan) {
   return { duongDanAnh: duongDan };
 }
 
-async function lietKeSan(maChuSan) {
-  const coSo = await batBuocCoSo(maChuSan);
+// Không truyền maCoSo → sân của TẤT CẢ cơ sở của chủ sân (kèm tên cơ sở).
+async function lietKeSan(maChuSan, maCoSo) {
+  if (maCoSo) await layCoSoTheoMa(maChuSan, maCoSo);
   const [cacSan] = await pool.query(
-    `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
-     FROM San WHERE MaCoSo=? ORDER BY MaSan`,
-    [coSo.maCoSo]);
+    `SELECT s.MaSan AS maSan, s.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo,
+       s.TenSan AS tenSan, s.TrangThai AS trangThai
+     FROM San s JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo
+     WHERE cs.MaChuSan = ? ${maCoSo ? 'AND s.MaCoSo = ?' : ''}
+     ORDER BY s.MaCoSo, s.MaSan`,
+    maCoSo ? [maChuSan, maCoSo] : [maChuSan]);
   return cacSan;
 }
 
+// Body có maCoSo → thêm vào cơ sở đó; không có → cơ sở đầu tiên (tương thích API cũ).
 async function taoSan(maChuSan, duLieuSan) {
-  const coSo = await batBuocCoSo(maChuSan);
+  const coSo = await chonCoSo(maChuSan, duLieuSan.maCoSo);
   try {
     const [ketQua] = await pool.query(
       'INSERT INTO San (MaCoSo, TenSan, TrangThai) VALUES (?,?,?)',
       [coSo.maCoSo, duLieuSan.tenSan, duLieuSan.trangThai || 'active']);
+    await kichHoatNeuSanSang(coSo.maCoSo);
     const [[sanMoi]] = await pool.query(
       `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
        FROM San WHERE MaSan=?`,
       [ketQua.insertId]);
     return sanMoi;
   } catch (loi) {
-    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Tên sân đã tồn tại');
+    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Tên sân đã tồn tại trong cơ sở này');
     throw loi;
   }
 }
@@ -276,14 +336,14 @@ async function taoKhoaSan(maChuSan, duLieuKhoa) {
 }
 
 async function lietKeKhoaSan(maChuSan, boLoc) {
-  const coSo = await batBuocCoSo(maChuSan);
-  const thamSo = [coSo.maCoSo];
+  const thamSo = [maChuSan];
   let truyVan = `SELECT k.MaKhoa AS maKhoa, k.MaSan AS maSan,
       CONCAT(DATE_FORMAT(k.NgayKhoa, '%Y-%m-%d'), ' ', TIME_FORMAT(k.GioBatDau, '%H:%i')) AS thoiGianBatDau,
       CONCAT(DATE_FORMAT(k.NgayKhoa, '%Y-%m-%d'), ' ', TIME_FORMAT(k.GioKetThuc, '%H:%i')) AS thoiGianKetThuc,
       k.LyDo AS lyDo
     FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
-    WHERE s.MaCoSo=?`;
+      JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+    WHERE cs.MaChuSan=?`;
   if (boLoc.maSan) {
     truyVan += ' AND k.MaSan=?';
     thamSo.push(boLoc.maSan);
@@ -320,6 +380,9 @@ module.exports = {
   thayBangGia,
   capNhatAnhCoSo,
   layCoSo,
+  layDanhSachCoSo,
+  layCoSoTheoMa,
+  taoCoSoMoi,
   lietKeSan,
   taoSan,
   capNhatSan,

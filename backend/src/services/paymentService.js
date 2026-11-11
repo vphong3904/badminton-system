@@ -122,6 +122,11 @@ function coMaDonTrongNoiDung(maDon, duLieu) {
   return new RegExp(`(^|[^A-Z0-9])${maDon.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Z0-9])`).test(noiDung);
 }
 
+// SePay báo có tiền về (đã được xác thực chữ ký ở controller). Các bước:
+//  1) kiểm tra dữ liệu, ghi giao dịch (INSERT IGNORE → gửi lặp thì bỏ qua)
+//  2) bỏ qua nếu không phải tiền vào đúng tài khoản nhận hoặc không có mã đơn BK… trong nội dung
+//  3) tìm thanh toán theo mã đơn; sai số tiền → 'confirming' (admin xem)
+//  4) hết hạn giữ chỗ → 'late_payment' + chờ hoàn tiền; còn hạn → success và đơn → confirmed
 async function xuLyWebhookSePay(duLieu) {
   if (!duLieu || typeof duLieu !== 'object' || Array.isArray(duLieu)) {
     throw AppError.duLieuKhongHopLe('Dữ liệu webhook SePay không hợp lệ');

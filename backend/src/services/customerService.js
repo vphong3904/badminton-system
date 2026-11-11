@@ -41,7 +41,17 @@ function kiemTraBatDauTuongLai(ngay, gioBatDau) {
   }
 }
 
+// Dọn trạng thái của khách mỗi lần họ mở danh sách/hoá đơn (không có job nền):
+//  1) đơn confirmed đã qua giờ chơi  → completed
+//  2) đơn pending_payment quá hạn giữ chỗ → expired (+ thanh toán expired)
+//  3) lịch cố định không còn đơn nào đang hiệu lực → ended
 async function hetHanDatSan(maNguoiDung, ketNoi = pool) {
+  // Đơn đã xác nhận mà quá giờ kết thúc thì chuyển sang hoàn thành (ghi lười khi khách truy cập).
+  await ketNoi.query(
+    `UPDATE DatSan SET TrangThai='completed'
+     WHERE MaKhachHang=? AND TrangThai='confirmed'
+       AND TIMESTAMP(NgayChoi,GioKetThuc)<=NOW()`,
+    [maNguoiDung]);
   await ketNoi.query(
     `UPDATE DatSan SET TrangThai='expired'
      WHERE MaKhachHang=? AND TrangThai='pending_payment' AND HetHanGiuCho<=NOW()`,
@@ -75,6 +85,9 @@ async function layThongTinSan(maSan, ketNoi = pool, khoa = false) {
   return san;
 }
 
+// Trả true nếu khung giờ HỢP LỆ và còn trống; ném lỗi 400 nếu sai quy tắc (quá khứ, lệch 30 phút,
+// ngoài giờ mở cửa, ngắn hơn tối thiểu). Trống = không trùng đơn đang giữ/đã xác nhận và không bị khoá.
+// Có FOR UPDATE nên phải gọi trong giao dịch (chặn 2 người đặt cùng ô cùng lúc).
 async function kiemTraKhungDat(san, ngay, gioBatDau, gioKetThuc, ketNoi = pool) {
   kiemTraNgay(ngay);
   const batDau = doiGioRaPhut(gioBatDau);
@@ -102,6 +115,8 @@ async function kiemTraKhungDat(san, ngay, gioBatDau, gioKetThuc, ketNoi = pool) 
   return !donTrung && !khoaTrung;
 }
 
+// Giá = tổng giá từng ô 30 phút (giá mỗi giờ / 2). Giá lấy theo bảng giá của cơ sở:
+// loại ngày (T2–T6 hoặc T7–CN) × loại khách (vãng lai / cố định) × khung giờ chứa ô đó.
 async function tinhTongTien(maCoSo, ngay, gioBatDau, gioKetThuc, loaiKhach, ketNoi = pool) {
   const loaiNgay = [0, 6].includes(new Date(`${ngay}T00:00:00Z`).getUTCDay()) ? 'weekend' : 'weekday';
   const [cacGia] = await ketNoi.query(
@@ -136,6 +151,10 @@ async function layThongTinLienHe(maNguoiDung, duLieu, ketNoi) {
   };
 }
 
+// ĐẶT SÂN (lẻ 1 ngày hoặc cố định nhiều ngày). Tất cả trong 1 giao dịch, lỗi giữa chừng thì không lưu gì:
+//  1) khoá sân, 2) kiểm tra từng ngày còn trống + tính tiền, 3) (cố định) tạo LichCoDinh,
+//  4) mỗi ngày tạo 1 DatSan ở trạng thái pending_payment, giữ chỗ 10 phút, chia hoa hồng nền tảng,
+//  5) tạo 1 ThanhToan (QR) cho cả chuỗi, gắn vào đơn đầu tiên.
 async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
   const cacNgay = taoDanhSachNgay(duLieu.ngay, ngayKetThuc);
   const ketQua = await thucHienGiaoDich(async (ketNoi) => {
@@ -265,6 +284,7 @@ async function layDanhSachCoSo() {
        cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
        cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.TienIch AS tienIch,
        cs.ViDo AS viDo, cs.KinhDo AS kinhDo,
+       cs.SoDienThoai AS soDienThoai, cs.LinkBanDo AS linkBanDo,
        cs.DiemTrungBinh AS diemTrungBinh, cs.SoDanhGia AS soDanhGia,
        (SELECT COUNT(*) FROM San s WHERE s.MaCoSo=cs.MaCoSo AND s.TrangThai='active') AS soSan,
        (SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo

@@ -11,9 +11,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   timezone: '+07:00',
   dateStrings: true,
-  namedPlaceholders: true,
-  dateStrings: true,
-  decimalNumbers: true,   // thêm dòng này
+  decimalNumbers: true,
   namedPlaceholders: true,
 });
 

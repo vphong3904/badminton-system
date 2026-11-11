@@ -45,7 +45,9 @@ async function dangKy(vaiTro, duLieuDangKy) {
     return { nguoiDung, maTruyCap: taoMaTruyCap(nguoiDung) };
   } catch (loi) {
     if (loi.code === 'ER_DUP_ENTRY') {
-      throw AppError.biTrung(/email/i.test(loi.message) ? 'Email đã được sử dụng' : 'Tên đăng nhập đã tồn tại');
+      throw /email/i.test(loi.message)
+        ? AppError.biTrung('Email đã được sử dụng', 'EMAIL_EXISTS')
+        : AppError.biTrung('Tên đăng nhập đã tồn tại', 'USERNAME_EXISTS');
     }
     throw loi;
   }
@@ -100,7 +102,7 @@ async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
        WHERE MaNguoiDung = ?`,
       [...cacTruongCapNhat.map((truong) => duLieuCapNhat[truong]), maNguoiDung]);
   } catch (loi) {
-    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Email đã được sử dụng');
+    if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Email đã được sử dụng', 'EMAIL_EXISTS');
     throw loi;
   }
   return layNguoiDung(maNguoiDung);

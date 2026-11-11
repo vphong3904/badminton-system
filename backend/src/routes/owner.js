@@ -6,6 +6,7 @@ const { xacThucNguoiDung, kiemTraVaiTro, kiemTraChuSanDaDuyet } = require('../mi
 const { taiTep } = require('../middlewares/upload');
 const baoCao = require('../controllers/ownerReportController');
 const kiemTraBaoCao = require('../validators/ownerReport');
+const donDatSan = require('../controllers/ownerBookingController');
 
 dinhTuyen.use(xacThucNguoiDung, kiemTraVaiTro('owner'));
 
@@ -18,16 +19,26 @@ dinhTuyen.post('/dang-ky/gui-duyet', dieuKhien.guiHoSoDuyet);
 
 // Cac chuc nang quan ly chi dung sau khi ho so duoc duyet.
 dinhTuyen.use(kiemTraChuSanDaDuyet);
-dinhTuyen.get('/co-so', dieuKhien.layCoSo);
+// Cơ sở: một chủ sân có NHIỀU cơ sở.
+dinhTuyen.get('/co-so', dieuKhien.lietKeCoSo);
+dinhTuyen.post('/co-so', kiemTraHopLe(kiemTraDuLieu.coSo), dieuKhien.taoCoSo);
+// API cũ (không có maCoSo → áp dụng cho cơ sở đầu tiên). Phải khai báo TRƯỚC '/co-so/:maCoSo'.
 dinhTuyen.put('/co-so', kiemTraHopLe(kiemTraDuLieu.coSo), dieuKhien.capNhatCoSo);
 dinhTuyen.put('/co-so/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGia), dieuKhien.capNhatBangGia);
 dinhTuyen.post('/co-so/anh', taiTep.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
-dinhTuyen.get('/san', dieuKhien.lietKeSan);
+// API theo từng cơ sở.
+dinhTuyen.get('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layCoSo);
+dinhTuyen.put('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.capNhatCoSoTheoMa), dieuKhien.capNhatCoSo);
+dinhTuyen.put('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGiaTheoMa), dieuKhien.capNhatBangGia);
+dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiTep.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
+dinhTuyen.get('/san', kiemTraHopLe(kiemTraDuLieu.danhSachSan), dieuKhien.lietKeSan);
 dinhTuyen.post('/san', kiemTraHopLe(kiemTraDuLieu.san), dieuKhien.taoSan);
 dinhTuyen.patch('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.capNhatSan), dieuKhien.capNhatSan);
 dinhTuyen.get('/khoa-san', kiemTraHopLe(kiemTraDuLieu.danhSachKhoaSan), dieuKhien.lietKeKhoaSan);
 dinhTuyen.post('/khoa-san', kiemTraHopLe(kiemTraDuLieu.khoaSan), dieuKhien.taoKhoaSan);
 dinhTuyen.delete('/khoa-san/:maKhoa', kiemTraHopLe(kiemTraDuLieu.maKhoaSan), dieuKhien.xoaKhoaSan);
+dinhTuyen.get('/dat-san', kiemTraHopLe(kiemTraBaoCao.danhSachDon), donDatSan.lietKeDon);
+dinhTuyen.get('/dat-san/:maDatSan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan.layChiTietDon);
 dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);
 dinhTuyen.get('/bao-cao/top-khach', kiemTraHopLe(kiemTraBaoCao.topKhach), baoCao.layTopKhach);
 dinhTuyen.get('/bao-cao/top-san', kiemTraHopLe(kiemTraBaoCao.topSan), baoCao.layTopSan);

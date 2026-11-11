@@ -269,17 +269,31 @@ module.exports = {
       post: endpoint('Gửi hồ sơ chủ sân để quản trị duyệt', 'Chủ sân', { auth: true }),
     },
     '/api/chu-san/co-so': {
-      get: endpoint('Xem thông tin cơ sở', 'Chủ sân', { auth: true }),
-      put: endpoint('Cập nhật thông tin cơ sở', 'Chủ sân', { auth: true, body: 'CoSo' }),
+      get: endpoint('Danh sách TẤT CẢ cơ sở của tôi (kèm soSan, soSanHoatDong)', 'Chủ sân', { auth: true }),
+      post: endpoint('Tạo thêm cơ sở (ẩn cho tới khi có sân + bảng giá)', 'Chủ sân', { auth: true, body: 'CoSo' }),
+      put: endpoint('[Cũ] Cập nhật cơ sở đầu tiên - nên dùng PUT /co-so/{maCoSo}', 'Chủ sân', { auth: true, body: 'CoSo' }),
     },
     '/api/chu-san/co-so/bang-gia': {
-      put: endpoint('Cập nhật bảng giá', 'Chủ sân', { auth: true, body: 'BangGia' }),
+      put: endpoint('[Cũ] Cập nhật bảng giá cơ sở đầu tiên', 'Chủ sân', { auth: true, body: 'BangGia' }),
     },
     '/api/chu-san/co-so/anh': {
-      post: endpoint('Tải ảnh cơ sở', 'Chủ sân', { auth: true, upload: true }),
+      post: endpoint('[Cũ] Tải ảnh cơ sở đầu tiên', 'Chủ sân', { auth: true, upload: true }),
+    },
+    '/api/chu-san/co-so/{maCoSo}': {
+      get: endpoint('Chi tiết 1 cơ sở của tôi', 'Chủ sân', { auth: true, params: maCoSo }),
+      put: endpoint('Cập nhật 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, body: 'CoSo' }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/bang-gia': {
+      put: endpoint('Cập nhật bảng giá của 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, body: 'BangGia' }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/anh': {
+      post: endpoint('Tải ảnh cho 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, upload: true }),
     },
     '/api/chu-san/san': {
-      get: endpoint('Liệt kê sân', 'Chủ sân', { auth: true }),
+      get: endpoint('Liệt kê sân của mọi cơ sở (lọc ?maCoSo)', 'Chủ sân', {
+        auth: true,
+        query: [thamSoTruyVan('maCoSo', 'Chỉ sân của cơ sở này')],
+      }),
       post: endpoint('Tạo sân', 'Chủ sân', { auth: true, body: 'TaoSan' }),
     },
     '/api/chu-san/san/{maSan}': {
@@ -305,6 +319,25 @@ module.exports = {
         auth: true,
         params: [thamSoDuongDan('maKhoa')],
       }),
+    },
+    '/api/chu-san/dat-san': {
+      get: endpoint('Danh sách đơn đặt sân của khách tại cơ sở của tôi', 'Chủ sân', {
+        auth: true,
+        query: [
+          thamSoTruyVan('trangThai', 'pending_payment | confirmed | completed | cancelled | expired'),
+          thamSoTruyVan('maCoSo', 'Lọc theo cơ sở'),
+          thamSoTruyVan('maSan', 'Lọc theo sân'),
+          thamSoTruyVan('ngay', 'Đúng 1 ngày chơi YYYY-MM-DD (ưu tiên hơn tuNgay/denNgay)'),
+          thamSoTruyVan('soDong', 'Số đơn mỗi trang, 1-200 (mặc định 20)'),
+          thamSoTruyVan('tuNgay', 'Ngày chơi từ YYYY-MM-DD'),
+          thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
+          thamSoTruyVan('tuKhoa', 'Tìm theo mã đơn / tên / SĐT khách'),
+          thamSoTruyVan('trang', 'Trang (mặc định 1, 20 đơn/trang)'),
+        ],
+      }),
+    },
+    '/api/chu-san/dat-san/{maDatSan}': {
+      get: endpoint('Chi tiết đơn (hoá đơn) tại cơ sở của tôi', 'Chủ sân', { auth: true, params: maDatSan }),
     },
     '/api/chu-san/bao-cao/doanh-thu': {
       get: endpoint('Báo cáo doanh thu ngày, tháng, năm', 'Chủ sân', {
@@ -521,9 +554,10 @@ module.exports = {
       },
       NganHang: {
         type: 'object',
-        required: ['tenNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
+        required: ['tenNganHang', 'maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
         properties: {
           tenNganHang: { type: 'string' },
+          maNganHang: { type: 'string' },
           soTaiKhoan: { type: 'string' },
           chuTaiKhoan: { type: 'string' },
         },
