@@ -12,10 +12,9 @@ USE db_sancaulong;
 -- ---------------------------------------------------------------------
 -- 1. NguoiDung: dùng chung cho khách / chủ sân / admin, phân biệt bằng VaiTro
 --    (VaiTro do backend gán, KHÔNG nhận từ client)
---    TenDangNhap: dùng cho chủ sân đăng nhập web; khách mobile dùng Email (cột này có thể NULL)
+--    Đăng nhập bằng Email (duy nhất) cho mọi vai trò
 CREATE TABLE NguoiDung (
   MaNguoiDung   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  TenDangNhap   VARCHAR(50)  NULL,
   HoTen         VARCHAR(100) NOT NULL,
   Email         VARCHAR(150) NOT NULL,
   SoDienThoai   VARCHAR(20),
@@ -27,7 +26,6 @@ CREATE TABLE NguoiDung (
   NgayTao       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   NgayCapNhat   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY UQ_NguoiDung_Email (Email),
-  UNIQUE KEY UQ_NguoiDung_TenDangNhap (TenDangNhap),
   KEY IDX_NguoiDung_VaiTro (VaiTro)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -412,8 +410,8 @@ CREATE TABLE NhatKyHeThong (
 -- ---------------------------------------------------------------------
 -- Seed: tài khoản admin (thay MatKhauMaHoa bằng hash bcrypt thật trước khi dùng)
 -- ---------------------------------------------------------------------
-INSERT INTO NguoiDung (TenDangNhap, HoTen, Email, MatKhauMaHoa, VaiTro)
-VALUES ('admin', 'Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 'admin');
+INSERT INTO NguoiDung (HoTen, Email, MatKhauMaHoa, VaiTro)
+VALUES ('Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 'admin');
 
 -- ---------------------------------------------------------------------
 -- TRUY VẤN GỢI Ý CHO CÁC HÀNG CHỜ (tham khảo, không chạy cùng file)
@@ -451,18 +449,18 @@ WHERE MaNguoiDung = 1;
 -- 1. NguoiDung: 4 chủ sân (id 2-5) + 6 khách (id 6-11)
 -- ---------------------------------------------------------------------
 INSERT INTO NguoiDung
-  (MaNguoiDung, TenDangNhap, HoTen, Email, SoDienThoai, MatKhauMaHoa, AnhDaiDien, VaiTro, TrangThai, LyDoKhoa, NgayTao)
+  (MaNguoiDung, HoTen, Email, SoDienThoai, MatKhauMaHoa, AnhDaiDien, VaiTro, TrangThai, LyDoKhoa, NgayTao)
 VALUES
-  (2,  'chusan_khoa', 'Nguyễn Minh Khoa', 'khoa.owner@badminton.local', '0912345671', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/owner2.jpg', 'owner', 'active', NULL, '2026-07-30 09:00:00'),
-  (3,  'chusan_lan',  'Trần Thị Lan',     'lan.owner@badminton.local',  '0912345672', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/owner3.jpg', 'owner', 'active', NULL, '2026-08-05 10:30:00'),
-  (4,  'chusan_bao',  'Lê Quốc Bảo',      'bao.owner@badminton.local',  '0912345673', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                          'owner', 'active', NULL, '2026-10-29 08:45:00'),
-  (5,  'chusan_duc',  'Phạm Hữu Đức',     'duc.owner@badminton.local',  '0912345674', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                          'owner', 'active', NULL, '2026-10-18 15:20:00'),
-  (6,  NULL, 'Nguyễn Thị Mai',  'mai.nguyen@gmail.com',  '0901234561', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/kh6.jpg', 'customer', 'active', NULL, '2026-08-20 19:00:00'),
-  (7,  NULL, 'Trần Văn Nam',    'nam.tran@gmail.com',    '0901234562', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-08-25 20:10:00'),
-  (8,  NULL, 'Lê Hoàng Phúc',   'phuc.le@gmail.com',     '0901234563', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-09-02 08:30:00'),
-  (9,  NULL, 'Phạm Thu Hà',     'ha.pham@gmail.com',     '0901234564', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/kh9.jpg', 'customer', 'active', NULL, '2026-09-10 21:00:00'),
-  (10, NULL, 'Nguyễn Văn Hùng', 'hung.nguyen@gmail.com', '0903456789', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-09-15 18:00:00'),
-  (11, NULL, 'Đỗ Quang Vinh',   'vinh.do@gmail.com',     '0901234566', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'locked', 'Nhiều lần đặt sân nhưng không đến', '2026-09-20 12:00:00');
+  (2,  'Nguyễn Minh Khoa', 'khoa.owner@badminton.local', '0912345671', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/owner2.jpg', 'owner', 'active', NULL, '2026-07-30 09:00:00'),
+  (3,  'Trần Thị Lan',     'lan.owner@badminton.local',  '0912345672', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/owner3.jpg', 'owner', 'active', NULL, '2026-08-05 10:30:00'),
+  (4,  'Lê Quốc Bảo',      'bao.owner@badminton.local',  '0912345673', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                          'owner', 'active', NULL, '2026-10-29 08:45:00'),
+  (5,  'Phạm Hữu Đức',     'duc.owner@badminton.local',  '0912345674', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                          'owner', 'active', NULL, '2026-10-18 15:20:00'),
+  (6,  'Nguyễn Thị Mai',  'mai.nguyen@gmail.com',  '0901234561', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/kh6.jpg', 'customer', 'active', NULL, '2026-08-20 19:00:00'),
+  (7,  'Trần Văn Nam',    'nam.tran@gmail.com',    '0901234562', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-08-25 20:10:00'),
+  (8,  'Lê Hoàng Phúc',   'phuc.le@gmail.com',     '0901234563', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-09-02 08:30:00'),
+  (9,  'Phạm Thu Hà',     'ha.pham@gmail.com',     '0901234564', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/kh9.jpg', 'customer', 'active', NULL, '2026-09-10 21:00:00'),
+  (10, 'Nguyễn Văn Hùng', 'hung.nguyen@gmail.com', '0903456789', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-09-15 18:00:00'),
+  (11, 'Đỗ Quang Vinh',   'vinh.do@gmail.com',     '0901234566', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'locked', 'Nhiều lần đặt sân nhưng không đến', '2026-09-20 12:00:00');
 
 -- ---------------------------------------------------------------------
 -- 2. HoSoChuSan: đủ 4 trạng thái approved / approved / pending / rejected
@@ -477,7 +475,7 @@ VALUES
       'approved', '2026-08-06 11:00:00', '2026-08-08 10:00:00', 1, NULL),
   (4, 'Cầu lông Bảo Long',                'Techcombank', '970407', '19036789012345', 'LE QUOC BAO',
       'pending',  '2026-10-30 16:20:00', NULL, NULL, NULL),
-  (5, NULL,                               'ACB',         '970416', '245678901',     'PHAM HUU DUONG',
+  (5, 'Sân bóng Dương Phát',      'ACB',         '970416', '245678901',     'PHAM HUU DUONG',
       'rejected', '2026-10-20 10:00:00', '2026-10-22 09:30:00', 1, 'Tên chủ tài khoản ngân hàng không khớp với hồ sơ đăng ký');
 
 -- ---------------------------------------------------------------------

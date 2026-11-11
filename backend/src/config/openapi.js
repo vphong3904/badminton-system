@@ -441,20 +441,19 @@ module.exports = {
     schemas: {
       DangKy: {
         type: 'object',
-        required: ['tenDangNhap', 'matKhau', 'hoTen', 'soDienThoai', 'email'],
+        required: ['matKhau', 'hoTen', 'soDienThoai', 'email'],
         properties: {
-          tenDangNhap: { type: 'string', example: 'khach01' },
-          matKhau: { type: 'string', format: 'password', example: 'MatKhau123' },
-          hoTen: { type: 'string', example: 'Nguyen Van A' },
-          soDienThoai: { type: 'string', example: '0901234567' },
+          matKhau: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng', example: 'MatKhau123' },
+          hoTen: { type: 'string', minLength: 2, maxLength: 100, description: 'Chỉ chữ cái, khoảng trắng và . \' -', example: 'Nguyen Van A' },
+          soDienThoai: { type: 'string', pattern: '^0[35789][0-9]{8}$', description: 'Số di động VN; nhận cả +84 và tự chuẩn hoá về 0xxxxxxxxx', example: '0901234567' },
           email: { type: 'string', format: 'email', example: 'khach@example.com' },
         },
       },
       DangNhap: {
         type: 'object',
-        required: ['tenDangNhap', 'matKhau'],
+        required: ['email', 'matKhau'],
         properties: {
-          tenDangNhap: { type: 'string', example: 'khach01' },
+          email: { type: 'string', format: 'email', example: 'khach@example.com' },
           matKhau: { type: 'string', format: 'password', example: 'MatKhau123' },
         },
       },
@@ -463,7 +462,7 @@ module.exports = {
         required: ['matKhauCu', 'matKhauMoi'],
         properties: {
           matKhauCu: { type: 'string', format: 'password' },
-          matKhauMoi: { type: 'string', format: 'password', minLength: 6 },
+          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu' },
         },
       },
       CapNhatCaNhan: {
@@ -476,7 +475,7 @@ module.exports = {
       },
       DatSan: {
         type: 'object',
-        required: ['maSan', 'ngay', 'gioBatDau', 'gioKetThuc'],
+        required: ['maSan', 'ngay', 'gioBatDau', 'gioKetThuc', 'tenKhach', 'soDienThoai'],
         properties: {
           maSan: { type: 'integer', example: 1 },
           ngay: { type: 'string', format: 'date', example: '2026-11-15' },

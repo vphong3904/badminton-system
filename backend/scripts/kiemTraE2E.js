@@ -1,9 +1,10 @@
 // Kịch bản kiểm thử API đầu-cuối (cần server đang chạy + DB đã nạp db_sancaulong.sql + admin đã seed).
-// Dùng: API=http://localhost:3055/api ADMIN_PASSWORD=Admin12345 SEPAY_WEBHOOK_SECRET=whsec SEPAY_BANK_ACCOUNT=123456789 node scripts/kiemTraE2E.js
+// Dùng: API=http://localhost:3055/api ADMIN_EMAIL=admin@badminton.local ADMIN_PASSWORD=Admin12345 SEPAY_WEBHOOK_SECRET=whsec SEPAY_BANK_ACCOUNT=123456789 node scripts/kiemTraE2E.js
 const crypto = require('crypto');
 
 const API = process.env.API || 'http://localhost:3000/api';
 const MAT_KHAU_ADMIN = process.env.ADMIN_PASSWORD || 'Admin12345';
+const EMAIL_ADMIN = process.env.ADMIN_EMAIL || 'admin@badminton.local';
 const BI_MAT_WEBHOOK = process.env.SEPAY_WEBHOOK_SECRET || 'whsec';
 const TAI_KHOAN_NHAN = process.env.SEPAY_BANK_ACCOUNT || '123456789';
 const hau = Date.now().toString().slice(-6); // làm email/SĐT không trùng giữa các lần chạy
@@ -66,20 +67,16 @@ async function chay() {
   const matKhau = 'matkhau123';
 
   nhom('1. Khách: đăng ký / đăng nhập / hồ sơ');
-  let r = await goi('POST', '/tai-khoan/dang-ky', { body: { tenDangNhap: sdt, matKhau, hoTen: 'Khách Thử', soDienThoai: sdt, email } });
+  let r = await goi('POST', '/tai-khoan/dang-ky', { body: { matKhau, hoTen: 'Khách Thử', soDienThoai: sdt, email } });
   kiemTra('đăng ký khách thành công (201)', r.ma === 201, tomTat(r));
   const tokenKhach = r.du?.duLieu?.maTruyCap;
-  r = await goi('POST', '/tai-khoan/dang-ky', { body: { tenDangNhap: `${sdt}x`, matKhau, hoTen: 'Khách Thử', soDienThoai: sdt, email } });
+  r = await goi('POST', '/tai-khoan/dang-ky', { body: { matKhau, hoTen: 'Khách Thử', soDienThoai: sdt, email } });
   kiemTra('trùng email → 409 EMAIL_EXISTS', r.ma === 409 && r.du?.loi?.maLoi === 'EMAIL_EXISTS', tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-ky', { body: { tenDangNhap: sdt, matKhau, hoTen: 'Khách Thử', soDienThoai: sdt, email: `khac${hau}@test.vn` } });
-  kiemTra('trùng SĐT (tên đăng nhập) → 409 USERNAME_EXISTS', r.ma === 409 && r.du?.loi?.maLoi === 'USERNAME_EXISTS', tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-ky', { body: { tenDangNhap: 'a', matKhau: '1', hoTen: '', soDienThoai: '12', email: 'x' } });
+  r = await goi('POST', '/tai-khoan/dang-ky', { body: { matKhau: '1', hoTen: '', soDienThoai: '12', email: 'x' } });
   kiemTra('dữ liệu sai → 400 kèm chiTiet theo trường', r.ma === 400 && Array.isArray(r.du?.loi?.chiTiet), tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { tenDangNhap: email, matKhau } });
+  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { email, matKhau } });
   kiemTra('đăng nhập bằng email', r.ma === 200, tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { tenDangNhap: sdt, matKhau } });
-  kiemTra('đăng nhập bằng SĐT', r.ma === 200, tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { tenDangNhap: email, matKhau: 'saimatkhau' } });
+  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { email, matKhau: 'saimatkhau' } });
   kiemTra('sai mật khẩu → 401', r.ma === 401, tomTat(r));
   r = await goi('GET', '/tai-khoan/ca-nhan');
   kiemTra('không token → 401', r.ma === 401, tomTat(r));
@@ -87,18 +84,17 @@ async function chay() {
   kiemTra('sửa hồ sơ một phần', r.ma === 200 && r.du?.duLieu?.hoTen === 'Khách Đã Sửa', tomTat(r));
   r = await goi('POST', '/tai-khoan/doi-mat-khau', { token: tokenKhach, body: { matKhauCu: 'sai', matKhauMoi: 'matkhaumoi1' } });
   kiemTra('đổi mật khẩu với mật khẩu cũ sai → 400', r.ma === 400, tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { tenDangNhap: email, matKhau } });
+  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { email, matKhau } });
   kiemTra('khách đăng nhập cổng web → 403', r.ma === 403, tomTat(r));
 
   nhom('2. Chủ sân: đăng ký → chưa duyệt bị chặn');
   const emailChu = `chu${hau}@test.vn`;
-  const tenChu = `chu${hau}`;
-  r = await goi('POST', '/tai-khoan/dang-ky-chu-san', { body: { tenDangNhap: tenChu, matKhau, hoTen: 'Chủ Sân Thử', soDienThoai: '0988000111', email: emailChu } });
+  r = await goi('POST', '/tai-khoan/dang-ky-chu-san', { body: { matKhau, hoTen: 'Chủ Sân Thử', soDienThoai: '0988000111', email: emailChu } });
   kiemTra('đăng ký chủ sân (201), trạng thái duyệt = draft', r.ma === 201 && r.du?.duLieu?.nguoiDung?.trangThaiDuyet === 'draft', tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { tenDangNhap: tenChu, matKhau } });
+  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { email: emailChu, matKhau } });
   const tokenChu = r.du?.duLieu?.maTruyCap;
   kiemTra('đăng nhập web chủ sân', r.ma === 200 && !!tokenChu, tomTat(r));
-  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { tenDangNhap: tenChu, matKhau } });
+  r = await goi('POST', '/tai-khoan/dang-nhap', { body: { email: emailChu, matKhau } });
   kiemTra('chủ sân đăng nhập cổng mobile → 403', r.ma === 403, tomTat(r));
   r = await goi('GET', '/chu-san/co-so', { token: tokenChu });
   kiemTra('chưa duyệt gọi /chu-san/co-so → 403', r.ma === 403, tomTat(r));
@@ -122,7 +118,7 @@ async function chay() {
   kiemTra('đang chờ duyệt thì không sửa được → 409', r.ma === 409, tomTat(r));
 
   nhom('4. Admin duyệt hồ sơ chủ sân');
-  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { tenDangNhap: 'admin', matKhau: MAT_KHAU_ADMIN } });
+  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { email: EMAIL_ADMIN, matKhau: MAT_KHAU_ADMIN } });
   const tokenAdmin = r.du?.duLieu?.maTruyCap;
   kiemTra('admin đăng nhập', r.ma === 200 && !!tokenAdmin, tomTat(r));
   r = await goi('GET', '/chu-san/co-so', { token: tokenAdmin });
@@ -252,9 +248,9 @@ async function chay() {
   kiemTra('khách không xem được API chủ sân → 403', r.ma === 403, tomTat(r));
 
   // Chủ sân KHÁC không được xem đơn của cơ sở này.
-  const tenChu2 = `chub${hau}`;
-  await goi('POST', '/tai-khoan/dang-ky-chu-san', { body: { tenDangNhap: tenChu2, matKhau, hoTen: 'Chủ Khác', soDienThoai: '0988000222', email: `chub${hau}@test.vn` } });
-  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { tenDangNhap: tenChu2, matKhau } });
+  const emailChu2 = `chub${hau}@test.vn`;
+  await goi('POST', '/tai-khoan/dang-ky-chu-san', { body: { matKhau, hoTen: 'Chủ Khác', soDienThoai: '0988000222', email: emailChu2 } });
+  r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { email: emailChu2, matKhau } });
   r = await goi('GET', `/chu-san/dat-san/${don.cacDon[0].maDatSan}`, { token: r.du?.duLieu?.maTruyCap });
   kiemTra('chủ sân chưa duyệt/khác không xem được đơn → 403', r.ma === 403, tomTat(r));
 

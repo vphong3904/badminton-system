@@ -36,8 +36,14 @@ function kiemTraBatDauTuongLai(ngay, gioBatDau) {
     timeZone: 'Asia/Ho_Chi_Minh',
     hour12: false,
   }).slice(0, 5);
-  if (ngay < ngayHienTai || (ngay === ngayHienTai && gioBatDau <= gioHienTai)) {
-    throw AppError.duLieuKhongHopLe('Không thể đặt sân trong quá khứ');
+  // Câu chữ trùng 05-validation.md để FE hiện đúng một thông báo dù chặn ở máy khách hay ở BE.
+  if (ngay < ngayHienTai) {
+    throw AppError.duLieuKhongHopLe('Không thể chọn ngày đã qua.', [
+      { truong: 'ngay', thongBao: 'Không thể chọn ngày đã qua.' }]);
+  }
+  if (ngay === ngayHienTai && gioBatDau <= gioHienTai) {
+    throw AppError.duLieuKhongHopLe('Giờ bắt đầu phải sau giờ hiện tại.', [
+      { truong: 'gioBatDau', thongBao: 'Giờ bắt đầu phải sau giờ hiện tại.' }]);
   }
 }
 
@@ -94,12 +100,18 @@ async function kiemTraKhungDat(san, ngay, gioBatDau, gioKetThuc, ketNoi = pool) 
   const ketThuc = doiGioRaPhut(gioKetThuc);
   const soPhut = ketThuc - batDau;
   kiemTraBatDauTuongLai(ngay, gioBatDau);
-  if (soPhut <= 0 || soPhut % 30 !== 0 || batDau % 30 !== 0 || ketThuc % 30 !== 0
+  if (soPhut <= 0) {
+    throw AppError.duLieuKhongHopLe('Giờ kết thúc phải sau giờ bắt đầu.', [
+      { truong: 'gioKetThuc', thongBao: 'Giờ kết thúc phải sau giờ bắt đầu.' }]);
+  }
+  if (soPhut % 30 !== 0 || batDau % 30 !== 0 || ketThuc % 30 !== 0
     || soPhut < san.soPhutDatToiThieu) {
-    throw AppError.duLieuKhongHopLe(`Thời lượng phải là bội số của 30 phút và tối thiểu ${san.soPhutDatToiThieu} phút`);
+    const thongBao = `Tối thiểu ${san.soPhutDatToiThieu} phút, theo mốc 30 phút.`;
+    throw AppError.duLieuKhongHopLe(thongBao, [{ truong: 'gioKetThuc', thongBao }]);
   }
   if (batDau < doiGioRaPhut(san.gioMoCua) || ketThuc > doiGioRaPhut(san.gioDongCua)) {
-    throw AppError.duLieuKhongHopLe('Khung giờ nằm ngoài giờ hoạt động của cơ sở');
+    const thongBao = `Ngoài giờ hoạt động (${String(san.gioMoCua).slice(0, 5)}–${String(san.gioDongCua).slice(0, 5)}).`;
+    throw AppError.duLieuKhongHopLe(thongBao, [{ truong: 'gioBatDau', thongBao }]);
   }
 
   const [[donTrung]] = await ketNoi.query(

@@ -1,11 +1,13 @@
 const { z } = require('zod');
+const quyTac = require('./quyTac');
 
 const ngay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải dạng YYYY-MM-DD')
   .refine((giaTri) => {
     const ngayDate = new Date(`${giaTri}T00:00:00Z`);
     return !Number.isNaN(ngayDate.getTime()) && ngayDate.toISOString().slice(0, 10) === giaTri;
   }, 'Ngày không hợp lệ');
-const gio = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải dạng HH:MM');
+const gio = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải dạng HH:MM')
+  .refine((giaTri) => /:(00|30)$/.test(giaTri), 'Giờ phải theo mốc 30 phút (HH:00 hoặc HH:30).');
 const maSo = z.coerce.number().int().positive();
 
 const khungGio = {
@@ -45,9 +47,10 @@ const thongTinDat = z.object({
   ngay: ngay,
   gioBatDau: gio,
   gioKetThuc: gio,
-  tenKhach: z.string().trim().min(2).max(100).optional(),
-  soDienThoai: z.string().trim().regex(/^(0|\+84)\d{9,10}$/).optional(),
-  ghiChu: z.string().trim().max(500).optional(),
+  // FE luôn gửi đủ tên + SĐT liên hệ (booking_confirm_screen) nên BE bắt buộc, không tự lấy hồ sơ nữa.
+  tenKhach: quyTac.tenKhachDat,
+  soDienThoai: quyTac.soDienThoaiLienHe,
+  ghiChu: quyTac.ghiChu.optional(),
 }).refine((duLieu) => duLieu.gioKetThuc > duLieu.gioBatDau, {
   message: 'Giờ kết thúc phải sau giờ bắt đầu',
   path: ['gioKetThuc'],
@@ -64,9 +67,14 @@ exports.maDatSan = { params: z.object({ maDatSan: maSo }) };
 exports.thongTinHoanTien = {
   params: z.object({ maDatSan: maSo }),
   body: z.object({
-    tenNganHang: z.string().trim().min(2).max(100),
+    tenNganHang: z.string({ error: 'Vui lòng chọn ngân hàng.' }).trim()
+      .min(2, 'Vui lòng chọn ngân hàng.').max(100, 'Tên ngân hàng tối đa 100 ký tự.'),
     maNganHang: z.string().trim().min(2).max(20),
-    soTaiKhoan: z.string().trim().regex(/^\d{6,30}$/),
-    chuTaiKhoan: z.string().trim().min(2).max(100),
+    // Bỏ dấu cách/gạch trước khi kiểm (đúng chuẩn hoá FE ở 05-validation.md).
+    soTaiKhoan: z.string({ error: 'Số tài khoản chỉ gồm 6–30 chữ số.' })
+      .transform((giaTri) => giaTri.replace(/[\s-]/g, ''))
+      .pipe(z.string().regex(/^\d{6,30}$/, 'Số tài khoản chỉ gồm 6–30 chữ số.')),
+    chuTaiKhoan: z.string({ error: 'Vui lòng nhập tên chủ tài khoản.' }).trim()
+      .min(2, 'Vui lòng nhập tên chủ tài khoản.').max(100, 'Tên chủ tài khoản tối đa 100 ký tự.'),
   }),
 };

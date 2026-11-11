@@ -10,11 +10,11 @@ exports.dangKyChuSan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
 });
 exports.dangNhapDiDong = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.dangNhap(
-    yeuCau.body.tenDangNhap, yeuCau.body.matKhau, ['customer']));
+    yeuCau.body.email, yeuCau.body.matKhau, ['customer']));
 });
 exports.dangNhapWeb = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.dangNhap(
-    yeuCau.body.tenDangNhap, yeuCau.body.matKhau, ['owner', 'admin']));
+    yeuCau.body.email, yeuCau.body.matKhau, ['owner', 'admin']));
 });
 exports.layThongTinCaNhan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.layNguoiDung(yeuCau.nguoiDung.maNguoiDung));

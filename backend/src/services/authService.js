@@ -3,12 +3,12 @@ const jwt = require('jsonwebtoken');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const cauHinh = require('../config/env');
 const AppError = require('../utils/AppError');
+const { chuanHoaSoDienThoai, kiemTraSoDiDong } = require('../validators/quyTac');
 
 function taoThongTinNguoiDung(nguoiDung) {
   const thongTin = {
     maNguoiDung: nguoiDung.maNguoiDung,
     vaiTro: nguoiDung.vaiTro,
-    tenDangNhap: nguoiDung.tenDangNhap,
     hoTen: nguoiDung.hoTen,
     soDienThoai: nguoiDung.soDienThoai,
     email: nguoiDung.email,
@@ -30,10 +30,10 @@ async function dangKy(vaiTro, duLieuDangKy) {
   try {
     const maNguoiDung = await thucHienGiaoDich(async (ketNoi) => {
       const [ketQua] = await ketNoi.query(
-        `INSERT INTO NguoiDung (VaiTro, TenDangNhap, MatKhauMaHoa, HoTen, SoDienThoai, Email)
-         VALUES (?,?,?,?,?,?)`,
+        `INSERT INTO NguoiDung (VaiTro, MatKhauMaHoa, HoTen, SoDienThoai, Email)
+         VALUES (?,?,?,?,?)`,
         [
-          vaiTro, duLieuDangKy.tenDangNhap, matKhauMaHoa, duLieuDangKy.hoTen,
+          vaiTro, matKhauMaHoa, duLieuDangKy.hoTen,
           duLieuDangKy.soDienThoai, duLieuDangKy.email,
         ]);
       if (vaiTro === 'owner') {
@@ -45,25 +45,23 @@ async function dangKy(vaiTro, duLieuDangKy) {
     return { nguoiDung, maTruyCap: taoMaTruyCap(nguoiDung) };
   } catch (loi) {
     if (loi.code === 'ER_DUP_ENTRY') {
-      throw /email/i.test(loi.message)
-        ? AppError.biTrung('Email đã được sử dụng', 'EMAIL_EXISTS')
-        : AppError.biTrung('Tên đăng nhập đã tồn tại', 'USERNAME_EXISTS');
+      throw AppError.biTrung('Email đã được sử dụng', 'EMAIL_EXISTS');
     }
     throw loi;
   }
 }
 
-async function dangNhap(tenDangNhap, matKhau, cacVaiTroDuocPhep) {
+async function dangNhap(email, matKhau, cacVaiTroDuocPhep) {
   const [[nguoiDung]] = await pool.query(
-    `SELECT MaNguoiDung AS maNguoiDung, TenDangNhap AS tenDangNhap,
+    `SELECT MaNguoiDung AS maNguoiDung,
        HoTen AS hoTen, SoDienThoai AS soDienThoai, Email AS email,
        MatKhauMaHoa AS matKhauMaHoa, VaiTro AS vaiTro, TrangThai AS trangThai
-     FROM NguoiDung WHERE TenDangNhap = ? OR Email = ? LIMIT 1`,
-    [tenDangNhap, tenDangNhap]);
+     FROM NguoiDung WHERE Email = ? LIMIT 1`,
+    [email]);
   const matKhauHopLe = await bcrypt.compare(
     matKhau,
     nguoiDung ? nguoiDung.matKhauMaHoa : '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
-  if (!nguoiDung || !matKhauHopLe) throw AppError.chuaDangNhap('Sai tên đăng nhập hoặc mật khẩu');
+  if (!nguoiDung || !matKhauHopLe) throw AppError.chuaDangNhap('Sai email hoặc mật khẩu');
   if (nguoiDung.trangThai === 'locked') throw AppError.khongDuQuyen('Tài khoản đã bị khóa');
   if (cacVaiTroDuocPhep && !cacVaiTroDuocPhep.includes(nguoiDung.vaiTro)) {
     throw AppError.khongDuQuyen('Tài khoản không dùng được ở nền tảng này');
@@ -77,7 +75,7 @@ async function dangNhap(tenDangNhap, matKhau, cacVaiTroDuocPhep) {
 
 async function layNguoiDung(maNguoiDung) {
   const [[nguoiDung]] = await pool.query(
-    `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro, nd.TenDangNhap AS tenDangNhap,
+    `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro,
        nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.Email AS email,
        nd.TrangThai AS trangThai, hs.TrangThaiDuyet AS trangThaiDuyet
      FROM NguoiDung nd
@@ -96,6 +94,19 @@ async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
   };
   const cacTruongCapNhat = Object.keys(duLieuCapNhat)
     .filter((truong) => cotDuocCapNhat[truong]);
+  if (duLieuCapNhat.soDienThoai !== undefined) {
+    // Chỉ khi ĐỔI số mới bắt buộc số di động (FE: edit_profile_screen). Giữ nguyên số cũ thì không kiểm lại.
+    const [[hienTai]] = await pool.query(
+      'SELECT SoDienThoai AS soDienThoai FROM NguoiDung WHERE MaNguoiDung = ?', [maNguoiDung]);
+    const soDaDoi = !hienTai
+      || chuanHoaSoDienThoai(hienTai.soDienThoai) !== chuanHoaSoDienThoai(duLieuCapNhat.soDienThoai);
+    const loiSoDienThoai = soDaDoi ? kiemTraSoDiDong(duLieuCapNhat.soDienThoai) : null;
+    if (loiSoDienThoai) {
+      throw AppError.duLieuKhongHopLe('Dữ liệu không hợp lệ', [
+        { truong: 'soDienThoai', thongBao: loiSoDienThoai },
+      ]);
+    }
+  }
   try {
     await pool.query(
       `UPDATE NguoiDung SET ${cacTruongCapNhat.map((truong) => `${cotDuocCapNhat[truong]} = ?`).join(', ')}
