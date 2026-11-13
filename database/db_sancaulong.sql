@@ -248,9 +248,10 @@ CREATE TABLE DatSan (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
--- 11. ThanhToan: thanh toán QR vào TK hệ thống + hoàn tiền cho khách (gộp cho đơn giản)
+-- 11. ThanhToan: thanh toán QR vào TK hệ thống, khách gửi ảnh, chủ sân xác nhận + hoàn tiền cho khách (gộp cho đơn giản)
 --     TrangThai = trạng thái THANH TOÁN; TrangThaiHoanTien = trạng thái HOÀN TIỀN
---     late_payment: tiền về sau khi QR hết hạn, chờ admin duyệt hoàn
+--     pending: chờ khách chuyển khoản + gửi ảnh | confirming: khách đã gửi ảnh, ĐỢI CHỦ SÂN XÁC NHẬN
+--     success: chủ sân đã xác nhận | late_payment: hết hạn giữ chỗ khi chủ sân chưa xác nhận, chờ admin duyệt hoàn
 --     waiting_info: đã duyệt hoàn nhưng chờ khách nhập tài khoản nhận hoàn
 --     Chỉ có dòng ThanhToan cho đơn Nguon = 'app'
 CREATE TABLE ThanhToan (
@@ -261,12 +262,13 @@ CREATE TABLE ThanhToan (
   TrangThai             ENUM('pending','confirming','success','failed','expired','late_payment')
                         NOT NULL DEFAULT 'pending',
   NoiDungChuyenKhoan    VARCHAR(100) NULL COMMENT 'nội dung chuyển khoản để đối chiếu (dùng MaDon)',
-  NoiDungQR             TEXT NULL,
   MaGiaoDichNganHang    VARCHAR(100) NULL COMMENT 'mã giao dịch từ ngân hàng/cổng thanh toán',
-  LinkAnhChuyenKhoan    VARCHAR(500) NULL COMMENT 'ảnh khách đính kèm sau khi chuyển',
-  NgayTaiAnh            DATETIME NULL,
-  LyDoLoi               VARCHAR(255) NULL COMMENT 'lý do lỗi / admin ghi chú khi xét',
-  NgayThanhToan         DATETIME NULL,
+  LyDoLoi               VARCHAR(255) NULL COMMENT 'lý do chủ sân từ chối ảnh / ghi chú khi xét',
+  AnhChuyenKhoan        VARCHAR(255) NULL COMMENT 'đường dẫn ảnh chụp màn hình chuyển khoản khách gửi',
+  NgayGuiAnh            DATETIME NULL,
+  MaNguoiXacNhan        INT UNSIGNED NULL COMMENT 'chủ sân hoặc admin đã xác nhận thanh toán',
+  VaiTroXacNhan         ENUM('owner','admin') NULL,
+  NgayThanhToan         DATETIME NULL COMMENT 'thời điểm chủ sân xác nhận',
   TrangThaiHoanTien     ENUM('none','waiting_info','processing','refunded','failed') NOT NULL DEFAULT 'none',
   SoTienHoan            DECIMAL(12,0) NOT NULL DEFAULT 0,
   MaGiaoDichHoan        VARCHAR(100) NULL COMMENT 'mã giao dịch hoàn do admin nhập',
@@ -280,29 +282,10 @@ CREATE TABLE ThanhToan (
   NgayCapNhat           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT FK_ThanhToan_DatSan  FOREIGN KEY (MaDatSan)           REFERENCES DatSan(MaDatSan),
   CONSTRAINT FK_ThanhToan_QuanTri FOREIGN KEY (MaQuanTriDuyetHoan) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_ThanhToan_NguoiXN FOREIGN KEY (MaNguoiXacNhan)     REFERENCES NguoiDung(MaNguoiDung),
   KEY IDX_ThanhToan_DatSan (MaDatSan),
   KEY IDX_ThanhToan_TrangThai (TrangThai),
   KEY IDX_ThanhToan_HoanTien (TrangThaiHoanTien)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- GiaoDichSePay: lưu webhook theo ID giao dịch để chống SePay gửi lặp.
-CREATE TABLE GiaoDichSePay (
-  MaGiaoDichSePay     BIGINT UNSIGNED PRIMARY KEY,
-  MaThanhToan         INT UNSIGNED NULL,
-  MaGiaoDichNganHang  VARCHAR(100) NULL,
-  SoTaiKhoan          VARCHAR(30) NULL,
-  LoaiGiaoDich        ENUM('in','out') NOT NULL,
-  SoTien              DECIMAL(12,0) NOT NULL,
-  NoiDung             VARCHAR(500) NULL,
-  MaDoiSoat           VARCHAR(100) NULL,
-  NgayGiaoDich        DATETIME NULL,
-  TrangThaiDoiSoat    ENUM('matched','unmatched','amount_mismatch','late') NOT NULL DEFAULT 'unmatched',
-  DuLieuWebhook       JSON NOT NULL,
-  NgayNhan             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT FK_GiaoDichSePay_ThanhToan FOREIGN KEY (MaThanhToan)
-    REFERENCES ThanhToan(MaThanhToan) ON DELETE SET NULL,
-  KEY IDX_GiaoDichSePay_ThanhToan (MaThanhToan),
-  KEY IDX_GiaoDichSePay_TrangThai (TrangThaiDoiSoat, NgayNhan)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -385,6 +368,7 @@ CREATE TABLE CauHinhHeThong (
 INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
   ('commission_rate',          '10',     'Hoa hồng hệ thống (%) trên đơn app'),
   ('hold_minutes',             '10',     'Thời gian giữ chỗ (phút)'),
+  ('confirm_minutes',          '60',     'Thời gian giữ chỗ (phút) sau khi khách gửi ảnh chuyển khoản, chờ chủ sân xác nhận'),
   ('min_payout',               '100000', 'Mức rút tối thiểu (đồng)'),
   ('cancel_free_hours',        '24',     'Khách hủy trước giờ chơi tối thiểu bao nhiêu giờ thì được hoàn 100%'),
   ('late_cancel_refund_percent','50',    'Tỷ lệ hoàn (%) khi khách hủy muộn hơn cancel_free_hours (chủ sân hủy luôn hoàn 100%)'),
@@ -432,7 +416,7 @@ VALUES ('Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 
 -- =====================================================================
 -- SEED DATA - HỆ THỐNG ĐẶT SÂN CẦU LÔNG
 -- Chạy SAU khi đã import db_sancaulong.sql (schema đã tự tạo admin MaNguoiDung = 1)
--- Không seed: ThanhToan, GiaoDichSePay (theo yêu cầu)
+-- Không seed: ThanhToan (theo yêu cầu)
 -- Mật khẩu mọi tài khoản demo: "password"
 --   (bcrypt hash dưới đây là hash phổ biến của chuỗi "password", chỉ dùng để dev/test)
 -- Ngày "hiện tại" của dữ liệu mẫu: 2026-10-31 (thứ Bảy)

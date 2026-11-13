@@ -20,7 +20,7 @@ async function layHoSo(maChuSan) {
 const CHON_CO_SO = `
   SELECT cs.MaCoSo AS maCoSo, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo,
     cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai, cs.Zalo AS zalo,
-    cs.LinkBanDo AS linkBanDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
+    cs.LinkBanDo AS linkBanDo, cs.ViDo AS viDo, cs.KinhDo AS kinhDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
     cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
     cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.GiaThapNhat AS giaThapNhat,
     cs.TrangThai AS trangThai,
@@ -127,7 +127,7 @@ async function luuBuocCoSo(maChuSan, duLieuCoSo) {
     duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai, duLieuCoSo.zalo ?? null,
     duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh, duLieuCoSo.quanHuyen,
     duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
-    duLieuCoSo.soPhutDatToiThieu,
+    duLieuCoSo.soPhutDatToiThieu, duLieuCoSo.viDo ?? null, duLieuCoSo.kinhDo ?? null,
   ];
 
   if (coSoHienTai) {
@@ -135,14 +135,15 @@ async function luuBuocCoSo(maChuSan, duLieuCoSo) {
     kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
     await pool.query(
       `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
-       TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?
+       TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?,
+       ViDo=COALESCE(?,ViDo), KinhDo=COALESCE(?,KinhDo)
        WHERE MaCoSo=?`,
       [...duLieuLuu, coSoHienTai.maCoSo]);
   } else {
     await pool.query(
       `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
-       TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+       TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, ViDo, KinhDo)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [maChuSan, ...duLieuLuu]);
   }
   return trangThaiDangKy(maChuSan);
@@ -210,13 +211,15 @@ async function capNhatCoSo(maChuSan, duLieuCoSo, maCoSo) {
   kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
   await pool.query(
     `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
-       TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?
+       TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?,
+       ViDo=COALESCE(?,ViDo), KinhDo=COALESCE(?,KinhDo)
      WHERE MaCoSo=?`,
     [
       duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai, duLieuCoSo.zalo ?? null,
       duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh, duLieuCoSo.quanHuyen,
       duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
-      duLieuCoSo.soPhutDatToiThieu, coSo.maCoSo,
+      duLieuCoSo.soPhutDatToiThieu, duLieuCoSo.viDo ?? null, duLieuCoSo.kinhDo ?? null,
+      coSo.maCoSo,
     ]);
   return layCoSoTheoMa(maChuSan, coSo.maCoSo);
 }
@@ -225,13 +228,14 @@ async function capNhatCoSo(maChuSan, duLieuCoSo, maCoSo) {
 async function taoCoSoMoi(maChuSan, duLieuCoSo) {
   const [ketQua] = await pool.query(
     `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
-       TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, TrangThai)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'hidden')`,
+       TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, ViDo, KinhDo, TrangThai)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'hidden')`,
     [
       maChuSan, duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai,
       duLieuCoSo.zalo ?? null, duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh,
       duLieuCoSo.quanHuyen, duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua,
       duLieuCoSo.gioDongCua, duLieuCoSo.soPhutDatToiThieu,
+      duLieuCoSo.viDo ?? null, duLieuCoSo.kinhDo ?? null,
     ]);
   return layCoSoTheoMa(maChuSan, ketQua.insertId);
 }

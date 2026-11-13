@@ -2,12 +2,6 @@ const path = require('path');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
-const sepayDoLechThoiGianToiDa = Number(process.env.SEPAY_WEBHOOK_MAX_SKEW_SECONDS || 300);
-if (!Number.isSafeInteger(sepayDoLechThoiGianToiDa)
-  || sepayDoLechThoiGianToiDa < 1 || sepayDoLechThoiGianToiDa > 3600) {
-  throw new Error('SEPAY_WEBHOOK_MAX_SKEW_SECONDS phải là số nguyên từ 1 đến 3600');
-}
-
 const cauHinh = {
   cong: Number(process.env.PORT || 3000),
   moiTruong: process.env.NODE_ENV || 'development',
@@ -21,17 +15,19 @@ const cauHinh = {
   khoaBiMat: process.env.JWT_SECRET || 'dev_secret',
   thoiHanMaTruyCap: process.env.JWT_EXPIRES_IN || '7d',
   nguonTruyCap: process.env.CORS_ORIGIN || '*',
-  sepayWebhookSecret: (process.env.SEPAY_WEBHOOK_SECRET || '').trim(),
-  sepayTaiKhoan: (process.env.SEPAY_BANK_ACCOUNT || '').trim(),
-  sepayNganHang: (process.env.SEPAY_BANK_CODE || '').trim(),
-  sepayDoLechThoiGianToiDa,
+  // Tài khoản nhận tiền chuyển khoản của khách (hiển thị + tạo QR VietQR).
+  nganHang: {
+    maNganHang: (process.env.BANK_CODE || '').trim(), // vd VIB, VCB, MB (hoặc mã BIN)
+    soTaiKhoan: (process.env.BANK_ACCOUNT_NUMBER || '').trim(),
+    chuTaiKhoan: (process.env.BANK_ACCOUNT_NAME || '').trim(), // vd TRINH THI NGOC LAN
+  },
 };
 
 if (cauHinh.moiTruong === 'production' && cauHinh.khoaBiMat === 'dev_secret') {
   throw new Error('Phải đặt JWT_SECRET khi chạy production');
 }
 if (cauHinh.moiTruong === 'production'
-  && (!cauHinh.sepayWebhookSecret || !cauHinh.sepayTaiKhoan || !cauHinh.sepayNganHang)) {
-  throw new Error('Phải cấu hình SEPAY_WEBHOOK_SECRET, SEPAY_BANK_ACCOUNT và SEPAY_BANK_CODE khi chạy production');
+  && (!cauHinh.nganHang.maNganHang || !cauHinh.nganHang.soTaiKhoan || !cauHinh.nganHang.chuTaiKhoan)) {
+  throw new Error('Phải cấu hình BANK_CODE, BANK_ACCOUNT_NUMBER và BANK_ACCOUNT_NAME khi chạy production');
 }
 module.exports = cauHinh;

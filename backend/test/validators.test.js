@@ -78,3 +78,32 @@ test('Hoàn tiền: số tài khoản bỏ dấu cách/gạch rồi kiểm 6–3
   assert.equal(body.parse(hopLe).soTaiKhoan, '0123456789');
   assert.deepEqual(loi(body, { ...hopLe, soTaiKhoan: '12ab' }), ['Số tài khoản chỉ gồm 6–30 chữ số.']);
 });
+
+test('Đánh giá: 1–5 sao, bình luận ≤1000 ký tự (đúng câu chữ review_sheet.dart)', () => {
+  const body = customer.guiDanhGia.body;
+  assert.equal(body.parse({ soSao: 5, noiDung: '  Sân tốt  ' }).noiDung, 'Sân tốt');
+  assert.ok(body.safeParse({ soSao: 1 }).success);
+  assert.deepEqual(loi(body, {}), ['Vui lòng chọn số sao.']);
+  assert.deepEqual(loi(body, { soSao: 0 }), ['Vui lòng chọn số sao.']);
+  assert.deepEqual(loi(body, { soSao: 6 }), ['Số sao tối đa là 5.']);
+  assert.deepEqual(loi(body, { soSao: 3.5 }), ['Vui lòng chọn số sao.']);
+  assert.ok(loi(body, { soSao: '5' }));
+  assert.deepEqual(loi(body, { soSao: 5, noiDung: 'x'.repeat(1001) }), ['Bình luận tối đa 1000 ký tự.']);
+  assert.ok(body.safeParse({ soSao: 5, noiDung: 'x'.repeat(1000) }).success);
+});
+
+test('Danh sách đánh giá: trang/soLuong có mặc định và giới hạn', () => {
+  const query = customer.danhSachDanhGia.query;
+  assert.deepEqual(query.parse({}), { trang: 1, soLuong: 20 });
+  assert.deepEqual(query.parse({ trang: '2', soLuong: '50' }), { trang: 2, soLuong: 50 });
+  assert.ok(loi(query, { trang: '0' }));
+  assert.ok(loi(query, { soLuong: '51' }));
+});
+
+test('Chủ sân từ chối thanh toán: bắt buộc lý do 2–255 ký tự', () => {
+  const { tuChoiThanhToan } = require('../src/validators/ownerReport');
+  assert.equal(tuChoiThanhToan.body.safeParse({}).success, false);
+  assert.equal(tuChoiThanhToan.body.safeParse({ lyDo: ' ' }).success, false);
+  assert.equal(tuChoiThanhToan.body.safeParse({ lyDo: 'a'.repeat(256) }).success, false);
+  assert.equal(tuChoiThanhToan.body.safeParse({ lyDo: 'Chưa thấy tiền' }).success, true);
+});

@@ -14,7 +14,6 @@ const { khongTimThayDuongDan, xuLyLoi } = require('./middlewares/errorHandler');
 const ungDung = express();
 ungDung.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 ungDung.use(cors({ origin: cauHinh.nguonTruyCap === '*' ? true : cauHinh.nguonTruyCap.split(',') }));
-ungDung.use('/api/webhooks/sepay', require('./routes/sepayWebhook'));
 ungDung.use(express.json({ limit: '1mb' }));
 if (cauHinh.moiTruong !== 'test') ungDung.use(morgan('dev'));
 ungDung.use('/tep-tai-len', express.static(thuMucTepTaiLen));

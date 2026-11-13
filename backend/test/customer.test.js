@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-process.env.SEPAY_BANK_ACCOUNT = '1234567890';
-process.env.SEPAY_BANK_CODE = 'VCB';
+process.env.BANK_ACCOUNT_NUMBER = '1234567890';
+process.env.BANK_CODE = 'VCB';
 
 const cacTruyVan = [];
 let coDonTrung = false;
@@ -102,8 +102,8 @@ test('Tạo đơn lẻ tính giá, phí và mã QR theo schema db_sancaulong', a
   assert.equal(ketQua.tongTien, 100000);
   assert.equal(ketQua.cacDon.length, 1);
   assert.equal(ketQua.cacDon[0].tongTien, 100000);
-  assert.match(ketQua.anhQrUrl, /acc=1234567890/);
-  assert.match(ketQua.anhQrUrl, /des=BK/);
+  assert.match(ketQua.anhQrUrl, /^https:\/\/img\.vietqr\.io\/image\/VCB-1234567890-compact2\.png/);
+  assert.match(ketQua.anhQrUrl, /addInfo=BK/);
   const truyVanDatSan = cacTruyVan.find((muc) => /INSERT INTO DatSan/.test(muc.cauTruyVan));
   assert.deepEqual(truyVanDatSan.thamSo.slice(5, 16), [
     'walk_in', null, 3, ngayMai, '12:00', '13:00', 60, 100000, 10000, 90000, 10,

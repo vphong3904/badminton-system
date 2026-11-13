@@ -11,6 +11,9 @@ const coSo = z.object({
   soDienThoai: z.string().trim().regex(/^(0|\+84)\d{9,10}$/),
   zalo: z.string().trim().max(30).optional(),
   linkBanDo: z.string().url().max(500),
+  // Toạ độ để app khách tìm "sân gần tôi". Bỏ trống = giữ nguyên giá trị đang lưu.
+  viDo: z.number().min(-90).max(90).optional(),
+  kinhDo: z.number().min(-180).max(180).optional(),
   moTa: z.string().max(2000).optional(),
   gioMoCua: gioPhut,
   gioDongCua: gioPhut,

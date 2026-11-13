@@ -47,6 +47,24 @@ async function duyetHoSo(maQuanTri, maNguoiDung, duLieu) {
   });
 }
 
+// Đơn khách đã gửi ảnh chuyển khoản, đang đợi xác nhận (admin xem mọi cơ sở; có đường dẫn ảnh).
+async function lietKeThanhToanChoXacNhan() {
+  const [cacDon] = await pool.query(
+    `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.TenKhach AS tenKhach,
+       d.SoDienThoaiLienHe AS soDienThoaiLienHe, d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau,
+       d.GioKetThuc AS gioKetThuc, d.HetHanGiuCho AS hetHanGiuCho,
+       t.MaThanhToan AS maThanhToan, t.SoTien AS soTien, t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
+       t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh,
+       s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo,
+       nd.HoTen AS tenChuSan, nd.SoDienThoai AS soDienThoaiChuSan
+     FROM ThanhToan t JOIN DatSan d ON d.MaDatSan=t.MaDatSan
+       JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+       JOIN NguoiDung nd ON nd.MaNguoiDung=cs.MaChuSan
+     WHERE t.TrangThai='confirming' AND d.TrangThai='pending_payment'
+     ORDER BY t.NgayGuiAnh`);
+  return cacDon;
+}
+
 async function lietKeHoanTien() {
   const [cacThanhToan] = await pool.query(
     `SELECT t.MaThanhToan AS maThanhToan, t.MaDatSan AS maDatSan, d.MaDon AS maDon,
@@ -58,22 +76,10 @@ async function lietKeHoanTien() {
        t.NgayCapNhat AS ngayCapNhat
      FROM ThanhToan t JOIN DatSan d ON d.MaDatSan=t.MaDatSan
      WHERE (t.TrangThai='late_payment' AND t.TrangThaiHoanTien IN ('none','waiting_info'))
-        OR t.TrangThaiHoanTien IN ('waiting_info','processing')
+        OR t.TrangThaiHoanTien='waiting_info'
+        OR (t.TrangThaiHoanTien='processing' AND t.TrangThai<>'success')
      ORDER BY t.NgayCapNhat`);
   return cacThanhToan;
-}
-
-async function lietKeGiaoDichSePay() {
-  const [giaoDichs] = await pool.query(
-    `SELECT gd.MaGiaoDichSePay AS maGiaoDichSePay, gd.MaThanhToan AS maThanhToan,
-       gd.MaGiaoDichNganHang AS maGiaoDichNganHang, gd.SoTaiKhoan AS soTaiKhoan,
-       gd.LoaiGiaoDich AS loaiGiaoDich, gd.SoTien AS soTien, gd.NoiDung AS noiDung,
-       gd.MaDoiSoat AS maDoiSoat, gd.NgayGiaoDich AS ngayGiaoDich,
-       gd.TrangThaiDoiSoat AS trangThaiDoiSoat, gd.NgayNhan AS ngayNhan
-     FROM GiaoDichSePay gd
-     WHERE gd.TrangThaiDoiSoat<>'matched'
-     ORDER BY gd.NgayNhan DESC LIMIT 100`);
-  return giaoDichs;
 }
 
 async function xuLyHoanTien(maQuanTri, maThanhToan) {
@@ -181,10 +187,10 @@ async function lietKeNhatKy(boLoc) {
 }
 
 module.exports = {
+  lietKeThanhToanChoXacNhan,
   lietKeHoSoChoDuyet,
   duyetHoSo,
   lietKeHoanTien,
-  lietKeGiaoDichSePay,
   xuLyHoanTien,
   hoanTatHoanTien,
   lietKeRutTien,

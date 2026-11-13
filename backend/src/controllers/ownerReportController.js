@@ -6,7 +6,7 @@ const xuLy = (hamXuLy, dinhDang = thanhCong) =>
   xuLyBatDongBo(async (yeuCau, phanHoi) => dinhDang(phanHoi, await hamXuLy(yeuCau)));
 const layMaChuSan = (yeuCau) => yeuCau.nguoiDung.maNguoiDung;
 
-exports.layDoanhThu = xuLy((yeuCau) => dichVu.layDoanhThu(layMaChuSan(yeuCau), yeuCau.query.nam));
+exports.layDoanhThu = xuLy((yeuCau) => dichVu.layDoanhThu(layMaChuSan(yeuCau), yeuCau.query));
 exports.layTopKhach = xuLy((yeuCau) => dichVu.layTopKhach(layMaChuSan(yeuCau), yeuCau.query));
 exports.layTopSan = xuLy((yeuCau) => dichVu.layTopSan(layMaChuSan(yeuCau), yeuCau.query));
 exports.layCongNo = xuLy((yeuCau) => dichVu.layCongNo(layMaChuSan(yeuCau)));

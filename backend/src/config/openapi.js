@@ -104,9 +104,8 @@ module.exports = {
     version: '1.0.0',
     description: [
       'Tài liệu và trang thử API cho hệ thống đặt sân cầu lông.',
-      'API thông thường trả JSON tiếng Việt không dấu. Webhook SePay dùng phản hồi JSON theo yêu cầu của SePay.',
+      'API thông thường trả JSON tiếng Việt không dấu.',
       'Nhấn Authorize để nhập mã truy cập dạng Bearer sau khi đăng nhập.',
-      'Để thử webhook SePay thật cần request có chữ ký HMAC hợp lệ; không thể gọi trực tiếp từ trang này nếu không ký raw body.',
     ].join('\n\n'),
   },
   servers: [{ url: `http://localhost:${cauHinh.cong}`, description: 'Máy phát triển cục bộ' }],
@@ -117,7 +116,6 @@ module.exports = {
     { name: 'Thanh toán' },
     { name: 'Chủ sân' },
     { name: 'Quản trị' },
-    { name: 'Webhook SePay' },
   ],
   paths: {
     '/api/suc-khoe': {
@@ -168,6 +166,16 @@ module.exports = {
         query: [thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD', true)],
       }),
     },
+    '/api/khach/co-so/{maCoSo}/danh-gia': {
+      get: endpoint('Xem đánh giá của cơ sở (công khai, mới nhất trước, bỏ đánh giá bị admin ẩn)', 'Khách hàng', {
+        params: maCoSo,
+        query: [
+          thamSoTruyVan('trang', 'Trang, từ 1 (mặc định 1)'),
+          thamSoTruyVan('soLuong', 'Số đánh giá mỗi trang, 1–50 (mặc định 20)'),
+        ],
+        responses: { 404: response.Loi },
+      }),
+    },
     '/api/khach/san/{maSan}': {
       get: endpoint('Xem chi tiết sân và bảng giá', 'Khách hàng', { params: maSan }),
     },
@@ -197,6 +205,14 @@ module.exports = {
     '/api/khach/dat-san/{maDatSan}/huy': {
       post: endpoint('Hủy đơn đặt sân', 'Khách hàng', { auth: true, params: maDatSan }),
     },
+    '/api/khach/dat-san/{maDatSan}/danh-gia': {
+      post: endpoint('Đánh giá cơ sở sau khi chơi xong và đã thanh toán (đơn completed, mỗi đơn 1 đánh giá; trả 201)', 'Khách hàng', {
+        auth: true,
+        params: maDatSan,
+        body: 'DanhGiaMoi',
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
     '/api/khach/dat-san/{maDatSan}/tai-khoan-hoan-tien': {
       put: endpoint('Cập nhật tài khoản nhận tiền hoàn', 'Khách hàng', {
         auth: true,
@@ -208,45 +224,20 @@ module.exports = {
       get: endpoint('Lấy QR và nội dung chuyển khoản', 'Thanh toán', { auth: true, params: maDatSan }),
     },
     '/api/thanh-toan/{maDatSan}/anh-chuyen-khoan': {
-      post: endpoint('Tải ảnh chuyển khoản để tham khảo', 'Thanh toán', {
-        auth: true,
-        params: maDatSan,
-        upload: true,
-      }),
-    },
-    '/api/webhooks/sepay': {
       post: {
-        ...endpoint('Nhận thông báo giao dịch SePay; cần chữ ký HMAC hợp lệ', 'Webhook SePay', {
-          responses: {
-            200: {
-              description: 'Phản hồi bắt buộc cho SePay',
-              content: { 'application/json': { schema: { type: 'object', example: { success: true } } } },
-            },
-            401: response.Loi,
-            503: response.Loi,
-          },
+        ...endpoint('Khách gửi ảnh chuyển khoản → thanh toán chuyển sang confirming (đợi chủ sân xác nhận)', 'Thanh toán', {
+          auth: true,
+          params: maDatSan,
+          responses: { 404: response.Loi, 409: response.Loi },
         }),
-        parameters: [
-          { name: 'X-SePay-Timestamp', in: 'header', required: true, schema: { type: 'string' } },
-          { name: 'X-SePay-Signature', in: 'header', required: true, schema: { type: 'string' } },
-        ],
         requestBody: {
           required: true,
           content: {
-            'application/json': {
+            'multipart/form-data': {
               schema: {
                 type: 'object',
-                required: ['id', 'transferType', 'transferAmount', 'accountNumber'],
-                properties: {
-                  id: { type: 'integer', example: 123456 },
-                  gateway: { type: 'string', example: 'Vietcombank' },
-                  transactionDate: { type: 'string', format: 'date-time' },
-                  accountNumber: { type: 'string', example: '0123456789' },
-                  content: { type: 'string', example: 'Thanh toan BK261031ABC123' },
-                  transferType: { type: 'string', enum: ['in', 'out'] },
-                  transferAmount: { type: 'integer', example: 200000 },
-                  referenceCode: { type: 'string' },
-                },
+                required: ['anhChuyenKhoan'],
+                properties: { anhChuyenKhoan: { type: 'string', format: 'binary' } },
               },
             },
           },
@@ -325,6 +316,7 @@ module.exports = {
         auth: true,
         query: [
           thamSoTruyVan('trangThai', 'pending_payment | confirmed | completed | cancelled | expired'),
+          thamSoTruyVan('trangThaiThanhToan', 'pending | confirming (đợi xác nhận) | success | failed | expired | late_payment'),
           thamSoTruyVan('maCoSo', 'Lọc theo cơ sở'),
           thamSoTruyVan('maSan', 'Lọc theo sân'),
           thamSoTruyVan('ngay', 'Đúng 1 ngày chơi YYYY-MM-DD (ưu tiên hơn tuNgay/denNgay)'),
@@ -333,16 +325,56 @@ module.exports = {
           thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
           thamSoTruyVan('tuKhoa', 'Tìm theo mã đơn / tên / SĐT khách'),
           thamSoTruyVan('trang', 'Trang (mặc định 1, 20 đơn/trang)'),
+          thamSoTruyVan('sapXep', 'moi-nhat (mặc định: ngày chơi mới nhất trước, cũ nhất cuối) | cu-nhat'),
         ],
+      }),
+      post: endpoint('Chủ sân tạo đơn cho khách tại chỗ (1 ngày) hoặc khách cố định (có ngayKetThuc) — xác nhận ngay', 'Chủ sân', {
+        auth: true,
+        body: 'ChuSanTaoDon',
+        responses: { 404: response.Loi, 409: response.Loi },
       }),
     },
     '/api/chu-san/dat-san/{maDatSan}': {
       get: endpoint('Chi tiết đơn (hoá đơn) tại cơ sở của tôi', 'Chủ sân', { auth: true, params: maDatSan }),
     },
-    '/api/chu-san/bao-cao/doanh-thu': {
-      get: endpoint('Báo cáo doanh thu ngày, tháng, năm', 'Chủ sân', {
+    '/api/chu-san/dat-san/{maDatSan}/xac-nhan-thanh-toan': {
+      post: endpoint('Chủ sân xác nhận đã nhận tiền → đơn thành công (confirmed)', 'Chủ sân', {
         auth: true,
-        query: [thamSoTruyVan('nam', 'Năm cần xem')],
+        params: maDatSan,
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
+    '/api/chu-san/dat-san/{maDatSan}/tu-choi-thanh-toan': {
+      post: endpoint('Chủ sân từ chối ảnh chuyển khoản (kèm lý do) → khách gửi lại', 'Chủ sân', {
+        auth: true,
+        params: maDatSan,
+        body: 'TuChoiThanhToan',
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
+    '/api/chu-san/hoan-tien': {
+      get: endpoint('Yêu cầu hoàn tiền của khách huỷ đơn (chủ sân tự chuyển khoản)', 'Chủ sân', {
+        auth: true,
+        query: [thamSoTruyVan('trangThai', 'processing (chờ hoàn, mặc định) | refunded (đã hoàn)')],
+      }),
+    },
+    '/api/chu-san/hoan-tien/{maThanhToan}/hoan-thanh': {
+      post: endpoint('Chủ sân xác nhận đã chuyển khoản hoàn tiền cho khách', 'Chủ sân', {
+        auth: true,
+        params: maThanhToan,
+        body: 'HoanThanhHoanTien',
+      }),
+    },
+    '/api/chu-san/bao-cao/doanh-thu': {
+      get: endpoint('Báo cáo doanh thu theo ngày/tháng/năm hoặc khoảng ngày tự chọn (kèm tongCong)', 'Chủ sân', {
+        auth: true,
+        query: [
+          thamSoTruyVan('nam', 'Xem theo năm, vd 2026'),
+          thamSoTruyVan('thang', 'Xem theo tháng 1-12 (cần kèm nam)'),
+          thamSoTruyVan('tuNgay', 'Khoảng ngày tự chọn: từ YYYY-MM-DD (ưu tiên hơn nam/thang)'),
+          thamSoTruyVan('denNgay', 'Khoảng ngày tự chọn: đến YYYY-MM-DD'),
+          thamSoTruyVan('maCoSo', 'Chỉ tính 1 cơ sở'),
+        ],
       }),
     },
     '/api/chu-san/bao-cao/top-khach': {
@@ -363,6 +395,46 @@ module.exports = {
         ],
       }),
     },
+    '/api/chu-san/bao-cao/khach-hang/tong-quan': {
+      get: endpoint('Tổng quan khách đặt sân: số khách, khách mới/quay lại, tỷ lệ huỷ, chi tiêu, theo nguồn, khách mới theo tháng', 'Chủ sân', {
+        auth: true,
+        query: [
+          thamSoTruyVan('tuNgay', 'Ngày chơi từ YYYY-MM-DD'),
+          thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
+          thamSoTruyVan('maCoSo', 'Chỉ tính 1 cơ sở'),
+        ],
+      }),
+    },
+    '/api/chu-san/bao-cao/khach-hang': {
+      get: endpoint('Danh sách khách đặt sân kèm số lượt, chi tiêu, công nợ, lần đặt gần nhất', 'Chủ sân', {
+        auth: true,
+        query: [
+          thamSoTruyVan('tuNgay', 'Ngày chơi từ YYYY-MM-DD'),
+          thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
+          thamSoTruyVan('maCoSo', 'Chỉ tính 1 cơ sở'),
+          thamSoTruyVan('tuKhoa', 'Tìm theo tên / SĐT khách'),
+          thamSoTruyVan('nhom', 'moi (đặt lần đầu trong khoảng) | quay-lai (từ 2 lượt)'),
+          thamSoTruyVan('sapXep', 'luot-dat (mặc định) | chi-tieu | gan-nhat | ten'),
+          thamSoTruyVan('trang', 'Trang (mặc định 1)'),
+          thamSoTruyVan('soDong', 'Số khách mỗi trang, 1-100 (mặc định 20)'),
+        ],
+      }),
+    },
+    '/api/chu-san/bao-cao/khach-hang/chi-tiet': {
+      get: endpoint('Chi tiết 1 khách: tổng hợp, sân hay đặt, lịch sử đơn (mới nhất trước)', 'Chủ sân', {
+        auth: true,
+        responses: { 404: response.Loi },
+        query: [
+          thamSoTruyVan('maKhachHang', 'Mã khách có tài khoản (hoặc dùng soDienThoai)'),
+          thamSoTruyVan('soDienThoai', 'SĐT khách vãng lai do chủ sân tạo (hoặc dùng maKhachHang)'),
+          thamSoTruyVan('maCoSo', 'Chỉ 1 cơ sở'),
+          thamSoTruyVan('tuNgay', 'Ngày chơi từ YYYY-MM-DD'),
+          thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
+          thamSoTruyVan('trang', 'Trang đơn (mặc định 1)'),
+          thamSoTruyVan('soDong', 'Số đơn mỗi trang, 1-100 (mặc định 20)'),
+        ],
+      }),
+    },
     '/api/chu-san/bao-cao/cong-no': {
       get: endpoint('Xem công nợ khách đặt tại sân', 'Chủ sân', { auth: true }),
     },
@@ -380,6 +452,24 @@ module.exports = {
         auth: true,
         params: maNguoiDung,
         body: 'DuyetChuSan',
+      }),
+    },
+    '/api/quan-tri/dat-san/cho-xac-nhan': {
+      get: endpoint('Admin: đơn khách đã gửi ảnh chuyển khoản, đang đợi xác nhận (kèm anhChuyenKhoanUrl)', 'Quản trị', { auth: true }),
+    },
+    '/api/quan-tri/dat-san/{maDatSan}/xac-nhan-thanh-toan': {
+      post: endpoint('Admin xác nhận thanh toán → đơn thành công (confirmed)', 'Quản trị', {
+        auth: true,
+        params: maDatSan,
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
+    '/api/quan-tri/dat-san/{maDatSan}/tu-choi-thanh-toan': {
+      post: endpoint('Admin từ chối ảnh chuyển khoản (kèm lý do) → khách gửi lại', 'Quản trị', {
+        auth: true,
+        params: maDatSan,
+        body: 'TuChoiThanhToan',
+        responses: { 404: response.Loi, 409: response.Loi },
       }),
     },
     '/api/quan-tri/hoan-tien': {
@@ -414,9 +504,6 @@ module.exports = {
         params: maYeuCau,
         body: 'LyDoTuChoi',
       }),
-    },
-    '/api/quan-tri/giao-dich/sepay': {
-      get: endpoint('Xem giao dịch SePay chưa đối soát', 'Quản trị', { auth: true }),
     },
     '/api/quan-tri/nhat-ky': {
       get: endpoint('Tra cứu nhật ký hệ thống', 'Quản trị', {
@@ -486,6 +573,21 @@ module.exports = {
           ghiChu: { type: 'string' },
         },
       },
+      ChuSanTaoDon: {
+        allOf: [
+          { $ref: '#/components/schemas/DatSan' },
+          {
+            type: 'object',
+            properties: {
+              ngayKetThuc: {
+                type: 'string', format: 'date', example: '2026-12-15',
+                description: 'Có → khách cố định, tạo đơn mỗi ngày từ ngay đến ngayKetThuc',
+              },
+              daThu: { type: 'boolean', example: true, description: 'Khách đã trả tiền chưa (mặc định false)' },
+            },
+          },
+        ],
+      },
       DatSanCoDinh: {
         allOf: [
           { $ref: '#/components/schemas/DatSan' },
@@ -495,6 +597,14 @@ module.exports = {
             properties: { ngayKetThuc: { type: 'string', format: 'date', example: '2026-12-15' } },
           },
         ],
+      },
+      DanhGiaMoi: {
+        type: 'object',
+        required: ['soSao'],
+        properties: {
+          soSao: { type: 'integer', minimum: 1, maximum: 5, example: 5 },
+          noiDung: { type: 'string', maxLength: 1000, description: 'Không bắt buộc', example: 'Sân đẹp, đèn sáng, chủ sân nhiệt tình.' },
+        },
       },
       TaiKhoanHoanTien: {
         type: 'object',
@@ -593,6 +703,15 @@ module.exports = {
           trangThai: { type: 'string', enum: ['approved', 'rejected'] },
           lyDoTuChoi: { type: 'string' },
         },
+      },
+      TuChoiThanhToan: {
+        type: 'object',
+        required: ['lyDo'],
+        properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Chưa thấy tiền về tài khoản' } },
+      },
+      HoanThanhHoanTien: {
+        type: 'object',
+        properties: { maGiaoDichHoan: { type: 'string', maxLength: 100, description: 'Mã giao dịch chuyển khoản hoàn (không bắt buộc)' } },
       },
       MaGiaoDichHoan: {
         type: 'object',

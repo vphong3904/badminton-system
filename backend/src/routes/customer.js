@@ -9,6 +9,9 @@ dinhTuyen.get('/co-so', kiemTraHopLe(kiemTraDuLieu.timCoSo), dieuKhien.timCoSo);
 dinhTuyen.get('/co-so/danh-sach', dieuKhien.layDanhSachCoSo);
 dinhTuyen.get('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layChiTietCoSo);
 dinhTuyen.get('/co-so/:maCoSo/lich-ngay', kiemTraHopLe(kiemTraDuLieu.lichNgay), dieuKhien.layLichNgay);
+// Đánh giá của cơ sở: công khai, không cần đăng nhập (bỏ các đánh giá bị admin ẩn).
+dinhTuyen.get('/co-so/:maCoSo/danh-gia',
+  kiemTraHopLe(kiemTraDuLieu.danhSachDanhGia), dieuKhien.layDanhSachDanhGia);
 dinhTuyen.get('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.maSan), dieuKhien.layChiTietSan);
 dinhTuyen.get('/san/:maSan/lich-trong', kiemTraHopLe(kiemTraDuLieu.kiemTraTrong), dieuKhien.kiemTraTrong);
 
@@ -21,6 +24,8 @@ dinhTuyen.post('/dat-san/co-dinh', kiemTraHopLe(kiemTraDuLieu.datCoDinh), dieuKh
 dinhTuyen.get('/dat-san', dieuKhien.lietKeDatSan);
 dinhTuyen.get('/dat-san/:maDatSan/hoa-don-nhap', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.layHoaDonNhap);
 dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.huyDatSan);
+dinhTuyen.post('/dat-san/:maDatSan/danh-gia',
+  kiemTraHopLe(kiemTraDuLieu.guiDanhGia), dieuKhien.guiDanhGia);
 dinhTuyen.put('/dat-san/:maDatSan/tai-khoan-hoan-tien',
   kiemTraHopLe(kiemTraDuLieu.thongTinHoanTien), dieuKhien.capNhatTaiKhoanHoan);
 

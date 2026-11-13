@@ -8,6 +8,8 @@ const xuLy = (hamXuLy, dinhDang = thanhCong) =>
 exports.timCoSo = xuLy((yeuCau) => dichVu.timCoSo(yeuCau.query));
 exports.layDanhSachCoSo = xuLy(() => dichVu.layDanhSachCoSo());
 exports.layChiTietCoSo = xuLy((yeuCau) => dichVu.layChiTietCoSo(yeuCau.params.maCoSo));
+exports.layDanhSachDanhGia = xuLy((yeuCau) =>
+  dichVu.layDanhSachDanhGia(yeuCau.params.maCoSo, yeuCau.query));
 exports.layChiTietSan = xuLy((yeuCau) => dichVu.layChiTietSan(yeuCau.params.maSan));
 exports.layLichNgay = xuLy((yeuCau) =>
   dichVu.layLichNgay(yeuCau.params.maCoSo, yeuCau.query.ngay));
@@ -21,6 +23,8 @@ exports.layHoaDonNhap = xuLy((yeuCau) =>
   dichVu.layHoaDonNhap(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.huyDatSan = xuLy((yeuCau) =>
   dichVu.huyDatSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
+exports.guiDanhGia = xuLy((yeuCau) =>
+  dichVu.guiDanhGia(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body), daTao);
 exports.capNhatTaiKhoanHoan = xuLy((yeuCau) =>
   dichVu.capNhatTaiKhoanHoan(
     yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body));

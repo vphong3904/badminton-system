@@ -18,6 +18,13 @@ exports.duyetChuSan = {
     path: ['lyDoTuChoi'],
   }),
 };
+exports.maDatSan = { params: z.object({ maDatSan: maSo }) };
+exports.tuChoiThanhToan = {
+  params: z.object({ maDatSan: maSo }),
+  body: z.object({
+    lyDo: z.string().trim().min(2, 'Vui lòng nhập lý do từ chối.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
 exports.maThanhToan = { params: z.object({ maThanhToan: maSo }) };
 exports.hoanTien = {
   params: z.object({ maThanhToan: maSo }),

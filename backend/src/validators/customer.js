@@ -64,6 +64,30 @@ exports.datCoDinh = {
   }),
 };
 exports.maDatSan = { params: z.object({ maDatSan: maSo }) };
+
+// Xem đánh giá của cơ sở (công khai): phân trang `?trang&soLuong`.
+exports.danhSachDanhGia = {
+  params: z.object({ maCoSo: maSo }),
+  query: z.object({
+    trang: z.coerce.number({ error: 'Trang phải là số nguyên từ 1.' })
+      .int('Trang phải là số nguyên từ 1.').min(1, 'Trang phải là số nguyên từ 1.').default(1),
+    soLuong: z.coerce.number({ error: 'Số lượng phải từ 1 đến 50.' })
+      .int('Số lượng phải từ 1 đến 50.')
+      .min(1, 'Số lượng phải từ 1 đến 50.').max(50, 'Số lượng phải từ 1 đến 50.').default(20),
+  }),
+};
+// Gửi đánh giá sau khi chơi. Câu chữ lỗi trùng review_sheet.dart (05-validation.md).
+exports.guiDanhGia = {
+  params: z.object({ maDatSan: maSo }),
+  body: z.object({
+    soSao: z.number({ error: 'Vui lòng chọn số sao.' })
+      .int('Vui lòng chọn số sao.')
+      .min(1, 'Vui lòng chọn số sao.')
+      .max(5, 'Số sao tối đa là 5.'),
+    noiDung: z.string({ error: 'Bình luận không hợp lệ.' }).trim()
+      .max(1000, 'Bình luận tối đa 1000 ký tự.').optional(),
+  }),
+};
 exports.thongTinHoanTien = {
   params: z.object({ maDatSan: maSo }),
   body: z.object({

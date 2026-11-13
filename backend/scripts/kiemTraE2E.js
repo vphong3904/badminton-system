@@ -1,12 +1,9 @@
 // Kịch bản kiểm thử API đầu-cuối (cần server đang chạy + DB đã nạp db_sancaulong.sql + admin đã seed).
-// Dùng: API=http://localhost:3055/api ADMIN_EMAIL=admin@badminton.local ADMIN_PASSWORD=Admin12345 SEPAY_WEBHOOK_SECRET=whsec SEPAY_BANK_ACCOUNT=123456789 node scripts/kiemTraE2E.js
-const crypto = require('crypto');
+// Dùng: API=http://localhost:3055/api ADMIN_EMAIL=admin@badminton.local ADMIN_PASSWORD=Admin12345 node scripts/kiemTraE2E.js
 
 const API = process.env.API || 'http://localhost:3000/api';
 const MAT_KHAU_ADMIN = process.env.ADMIN_PASSWORD || 'Admin12345';
 const EMAIL_ADMIN = process.env.ADMIN_EMAIL || 'admin@badminton.local';
-const BI_MAT_WEBHOOK = process.env.SEPAY_WEBHOOK_SECRET || 'whsec';
-const TAI_KHOAN_NHAN = process.env.SEPAY_BANK_ACCOUNT || '123456789';
 const hau = Date.now().toString().slice(-6); // làm email/SĐT không trùng giữa các lần chạy
 
 let soDat = 0;
@@ -43,22 +40,19 @@ function ngayTuongLai(soNgayToiThieu, thuMong) { // thuMong: 0=CN..6=T7
   return d.toISOString().slice(0, 10);
 }
 
-// Mô phỏng SePay báo tiền về (ký HMAC như thật).
-async function baoTienVe(maDon, soTien) {
-  const noiDung = JSON.stringify({
-    id: Number(`${hau}${Math.floor(Math.random() * 900 + 100)}`),
-    transferType: 'in', transferAmount: soTien, accountNumber: TAI_KHOAN_NHAN,
-    content: `Thanh toan ${maDon}`, code: maDon, referenceCode: `REF${maDon}`,
-    transactionDate: new Date().toISOString(),
+// Khách gửi ảnh chuyển khoản (multipart). Ảnh PNG 1x1 hợp lệ; trả { ma, du }.
+const PNG_NHO = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64');
+async function guiAnhChuyenKhoan(token, maDatSan, noiDung = PNG_NHO, tenTep = 'ck.png', loai = 'image/png') {
+  const form = new FormData();
+  form.append('anhChuyenKhoan', new Blob([noiDung], { type: loai }), tenTep);
+  const phanHoi = await fetch(`${API}/thanh-toan/${maDatSan}/anh-chuyen-khoan`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
   });
-  const thoiGian = String(Math.floor(Date.now() / 1000));
-  const chuKy = crypto.createHmac('sha256', BI_MAT_WEBHOOK).update(`${thoiGian}.${noiDung}`).digest('hex');
-  const phanHoi = await fetch(`${API}/webhooks/sepay`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-sepay-timestamp': thoiGian, 'x-sepay-signature': `sha256=${chuKy}` },
-    body: noiDung,
-  });
-  return phanHoi.status;
+  let du = null;
+  try { du = await phanHoi.json(); } catch { /* không phải JSON */ }
+  return { ma: phanHoi.status, du };
 }
 
 async function chay() {
@@ -207,13 +201,57 @@ async function chay() {
   kiemTra('hoá đơn nháp có QR và đếm ngược', r.ma === 200 && !!r.du?.duLieu?.anhQrUrl, tomTat(r));
   r = await goi('GET', `/thanh-toan/${don.cacDon[0].maDatSan}/qr`, { token: tokenKhach });
   kiemTra('lấy QR thanh toán', r.ma === 200, tomTat(r));
-  kiemTra('webhook sai chữ ký → 401', (await (await fetch(`${API}/webhooks/sepay`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-sepay-timestamp': '1', 'x-sepay-signature': 'sha256=x' }, body: '{}' })).status) === 401);
-  kiemTra('webhook tiền về → 200', (await baoTienVe(don.maDonThanhToan, 80000)) === 200);
+  const maDatSanDon = don.cacDon[0].maDatSan;
+  r = await guiAnhChuyenKhoan(tokenKhach, maDatSanDon, Buffer.from('khong phai anh'), 'gia.png');
+  kiemTra('gửi file không phải ảnh → 400', r.ma === 400, tomTat(r));
+  r = await guiAnhChuyenKhoan(tokenKhach, maDatSanDon);
+  kiemTra('khách gửi ảnh chuyển khoản → confirming (đợi xác nhận)', r.ma === 200 && r.du?.duLieu?.trangThaiThanhToan === 'confirming', tomTat(r));
+  r = await goi('GET', '/khach/dat-san', { token: tokenKhach });
+  let donKhach = (r.du?.duLieu || []).find((d) => d.maDon === don.maDonThanhToan);
+  kiemTra('đơn vẫn pending_payment khi chủ sân chưa xác nhận', donKhach?.trangThai === 'pending_payment', JSON.stringify(donKhach || r.du).slice(0, 200));
+  r = await goi('GET', `/khach/dat-san/${maDatSanDon}/hoa-don-nhap`, { token: tokenKhach });
+  kiemTra('hoá đơn trả ảnh đã gửi + thông tin tài khoản nhận', r.du?.duLieu?.trangThaiThanhToan === 'confirming' && !!r.du.duLieu.anhChuyenKhoanUrl && !!r.du.duLieu.taiKhoanNhan?.soTaiKhoan, tomTat(r));
+  r = await goi('POST', `/chu-san/dat-san/${maDatSanDon}/xac-nhan-thanh-toan`, { token: tokenKhach });
+  kiemTra('khách không tự xác nhận được → 403', r.ma === 403, tomTat(r));
+
+  // Chủ sân từ chối lần 1 → khách gửi lại → chủ sân xác nhận.
+  r = await goi('GET', '/chu-san/dat-san?trangThaiThanhToan=confirming', { token: tokenChu });
+  kiemTra('chủ sân lọc được đơn đợi xác nhận kèm ảnh', r.ma === 200 && r.du?.duLieu?.tong === 1 && !!r.du.duLieu.cacDon[0].anhChuyenKhoanUrl, tomTat(r));
+  r = await goi('POST', `/chu-san/dat-san/${maDatSanDon}/tu-choi-thanh-toan`, { token: tokenChu, body: {} });
+  kiemTra('từ chối thiếu lý do → 400', r.ma === 400, tomTat(r));
+  r = await goi('POST', `/chu-san/dat-san/${maDatSanDon}/tu-choi-thanh-toan`, { token: tokenChu, body: { lyDo: 'Chưa thấy tiền về' } });
+  kiemTra('chủ sân từ chối ảnh → pending', r.ma === 200 && r.du?.duLieu?.trangThaiThanhToan === 'pending', tomTat(r));
+  r = await goi('GET', `/khach/dat-san/${maDatSanDon}/hoa-don-nhap`, { token: tokenKhach });
+  kiemTra('khách thấy lý do bị từ chối', r.du?.duLieu?.lyDoTuChoi === 'Chưa thấy tiền về', tomTat(r));
+  r = await goi('POST', `/chu-san/dat-san/${maDatSanDon}/xac-nhan-thanh-toan`, { token: tokenChu });
+  kiemTra('xác nhận khi khách chưa gửi lại ảnh → 409', r.ma === 409, tomTat(r));
+  r = await guiAnhChuyenKhoan(tokenKhach, maDatSanDon);
+  kiemTra('khách gửi lại ảnh', r.ma === 200, tomTat(r));
+  r = await goi('POST', `/chu-san/dat-san/${maDatSanDon}/xac-nhan-thanh-toan`, { token: tokenChu });
+  kiemTra('chủ sân xác nhận → success + confirmed', r.ma === 200 && r.du?.duLieu?.trangThaiDatSan === 'confirmed', tomTat(r));
+  r = await goi('POST', `/chu-san/dat-san/${maDatSanDon}/xac-nhan-thanh-toan`, { token: tokenChu });
+  kiemTra('xác nhận lần 2 → 409', r.ma === 409, tomTat(r));
   r = await goi('GET', '/khach/dat-san', { token: tokenKhach });
   const donDaThanhToan = (r.du?.duLieu || []).find((d) => d.maDon === don.maDonThanhToan);
-  kiemTra('đơn chuyển sang confirmed sau khi tiền về', donDaThanhToan?.trangThai === 'confirmed' || donDaThanhToan?.trangThaiDatSan === 'confirmed', JSON.stringify(donDaThanhToan || r.du).slice(0, 200));
+  kiemTra('đơn chuyển sang confirmed sau khi chủ sân xác nhận', donDaThanhToan?.trangThai === 'confirmed' || donDaThanhToan?.trangThaiDatSan === 'confirmed', JSON.stringify(donDaThanhToan || r.du).slice(0, 200));
   r = await goi('POST', '/khach/dat-san', { token: tokenKhach, body: { maSan, ngay: ngayThuHai, gioBatDau: '18:00', gioKetThuc: '19:00' } });
   kiemTra('giờ đã xác nhận không đặt lại được → 409', r.ma === 409, tomTat(r));
+
+  nhom('6b. Chủ sân tạo đơn + admin duyệt thanh toán');
+  const ngayChuTao = ngayTuongLai(3, 3);
+  const donChuTao = { maSan, ngay: ngayChuTao, gioBatDau: '10:00', gioKetThuc: '11:00', tenKhach: 'Khach Tai Cho', soDienThoai: '0338484839', daThu: true };
+  r = await goi('POST', '/chu-san/dat-san', { token: tokenKhach, body: donChuTao });
+  kiemTra('khách không tạo đơn kiểu chủ sân được → 403', r.ma === 403, tomTat(r));
+  r = await goi('POST', '/chu-san/dat-san', { token: tokenChu, body: donChuTao });
+  kiemTra('chủ sân tạo đơn cho khách tại chỗ → confirmed, đã thu', r.ma === 201 && r.du?.duLieu?.trangThai === 'confirmed' && r.du.duLieu.trangThaiThu === 'paid', tomTat(r));
+  r = await goi('POST', '/chu-san/dat-san', { token: tokenChu, body: donChuTao });
+  kiemTra('tạo trùng giờ → 409', r.ma === 409, tomTat(r));
+  r = await goi('POST', '/chu-san/dat-san', { token: tokenChu, body: { ...donChuTao, gioBatDau: '12:00', gioKetThuc: '13:00', ngayKetThuc: ngayTuongLai(3, 5), daThu: false } });
+  kiemTra('chủ sân tạo lịch cố định nhiều ngày', r.ma === 201 && r.du?.duLieu?.loaiKhach === 'fixed' && r.du.duLieu.cacDon.length >= 2, tomTat(r));
+  r = await goi('GET', '/quan-tri/dat-san/cho-xac-nhan', { token: tokenAdmin });
+  kiemTra('admin xem được danh sách đơn đợi xác nhận', r.ma === 200 && Array.isArray(r.du?.duLieu), tomTat(r));
+  r = await goi('POST', `/quan-tri/dat-san/${maDatSanDon}/xac-nhan-thanh-toan`, { token: tokenChu });
+  kiemTra('chủ sân không gọi được API admin → 403', r.ma === 403, tomTat(r));
 
   nhom('7. Chủ sân thấy dữ liệu khách tạo ra');
   r = await goi('POST', '/chu-san/khoa-san', { token: tokenChu, body: { maSan, thoiGianBatDau: `${ngayThuHai} 18:00`, thoiGianKetThuc: `${ngayThuHai} 19:00` } });
@@ -222,6 +260,16 @@ async function chay() {
   kiemTra('khoá giờ trống', r.ma === 201 || r.ma === 200, tomTat(r));
   r = await goi('GET', '/chu-san/bao-cao/doanh-thu', { token: tokenChu });
   kiemTra('báo cáo doanh thu có đơn vừa thanh toán', r.ma === 200 && JSON.stringify(r.du?.duLieu?.theoNgay || []).includes('80000'), tomTat(r));
+  r = await goi('GET', '/chu-san/bao-cao/khach-hang/tong-quan', { token: tokenChu });
+  kiemTra('thống kê khách: tổng quan', r.ma === 200 && r.du?.duLieu?.tongKhach >= 1 && Array.isArray(r.du.duLieu.theoNguon), tomTat(r));
+  r = await goi('GET', '/chu-san/bao-cao/khach-hang?sapXep=chi-tieu', { token: tokenChu });
+  kiemTra('thống kê khách: danh sách khách', r.ma === 200 && r.du?.duLieu?.tong >= 1, tomTat(r));
+  const khachDau = r.du?.duLieu?.cacKhach?.[0];
+  if (khachDau) {
+    const truyVan = khachDau.maKhachHang ? `maKhachHang=${khachDau.maKhachHang}` : `soDienThoai=${encodeURIComponent(khachDau.soDienThoai)}`;
+    r = await goi('GET', `/chu-san/bao-cao/khach-hang/chi-tiet?${truyVan}`, { token: tokenChu });
+    kiemTra('thống kê khách: chi tiết 1 khách', r.ma === 200 && r.du?.duLieu?.khach?.soLuotDat >= 1, tomTat(r));
+  }
   r = await goi('GET', '/chu-san/rut-tien/so-du', { token: tokenChu });
   kiemTra('số dư rút tiền', r.ma === 200, tomTat(r));
   r = await goi('GET', '/chu-san/dat-san', { token: tokenChu });

@@ -7,6 +7,7 @@ const { taiTep } = require('../middlewares/upload');
 const baoCao = require('../controllers/ownerReportController');
 const kiemTraBaoCao = require('../validators/ownerReport');
 const donDatSan = require('../controllers/ownerBookingController');
+const baoCaoKhach = require('../controllers/ownerCustomerReportController');
 
 dinhTuyen.use(xacThucNguoiDung, kiemTraVaiTro('owner'));
 
@@ -37,12 +38,21 @@ dinhTuyen.patch('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.capNhatSan), dieuKhien
 dinhTuyen.get('/khoa-san', kiemTraHopLe(kiemTraDuLieu.danhSachKhoaSan), dieuKhien.lietKeKhoaSan);
 dinhTuyen.post('/khoa-san', kiemTraHopLe(kiemTraDuLieu.khoaSan), dieuKhien.taoKhoaSan);
 dinhTuyen.delete('/khoa-san/:maKhoa', kiemTraHopLe(kiemTraDuLieu.maKhoaSan), dieuKhien.xoaKhoaSan);
+dinhTuyen.post('/dat-san', kiemTraHopLe(kiemTraBaoCao.taoDon), donDatSan.taoDon);
 dinhTuyen.get('/dat-san', kiemTraHopLe(kiemTraBaoCao.danhSachDon), donDatSan.lietKeDon);
 dinhTuyen.get('/dat-san/:maDatSan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan.layChiTietDon);
+dinhTuyen.post('/dat-san/:maDatSan/xac-nhan-thanh-toan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan.xacNhanThanhToan);
+dinhTuyen.post('/dat-san/:maDatSan/tu-choi-thanh-toan', kiemTraHopLe(kiemTraBaoCao.tuChoiThanhToan), donDatSan.tuChoiThanhToan);
+dinhTuyen.get('/hoan-tien', kiemTraHopLe(kiemTraBaoCao.danhSachHoanTien), donDatSan.lietKeHoanTien);
+dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien), donDatSan.hoanThanhHoanTien);
 dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);
 dinhTuyen.get('/bao-cao/top-khach', kiemTraHopLe(kiemTraBaoCao.topKhach), baoCao.layTopKhach);
 dinhTuyen.get('/bao-cao/top-san', kiemTraHopLe(kiemTraBaoCao.topSan), baoCao.layTopSan);
 dinhTuyen.get('/bao-cao/cong-no', baoCao.layCongNo);
+// Thống kê khách hàng đặt sân.
+dinhTuyen.get('/bao-cao/khach-hang/tong-quan', kiemTraHopLe(kiemTraBaoCao.thongKeKhach), baoCaoKhach.layTongQuanKhach);
+dinhTuyen.get('/bao-cao/khach-hang/chi-tiet', kiemTraHopLe(kiemTraBaoCao.chiTietKhach), baoCaoKhach.layChiTietKhach);
+dinhTuyen.get('/bao-cao/khach-hang', kiemTraHopLe(kiemTraBaoCao.danhSachKhach), baoCaoKhach.lietKeKhach);
 dinhTuyen.get('/rut-tien/so-du', baoCao.laySoDuRutTien);
 dinhTuyen.post('/rut-tien', baoCao.taoYeuCauRutTien);
 
