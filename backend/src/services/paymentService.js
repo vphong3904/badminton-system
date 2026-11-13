@@ -2,7 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
-const { taoAnhQrUrl } = require('../utils/vietqr');
+const { taoAnhQrUrl, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
 const { thuMucTepTaiLen, layDuongDanTep } = require('../middlewares/upload');
 
 // Luồng thanh toán (không dùng cổng thanh toán tự động):
@@ -98,12 +98,14 @@ async function layQr(maNguoiDung, maDatSan) {
     await thucHienGiaoDich((ketNoi) => chotHetHan(ketNoi, thanhToan));
     throw AppError.biTrung('Thời gian giữ chỗ đã hết hạn');
   }
+  const taiKhoan = await layTaiKhoanNhanTheoDatSan(pool, maDatSan);
   return {
     maThanhToan: thanhToan.maThanhToan,
     soTien: Number(thanhToan.soTien),
     noiDungChuyenKhoan: thanhToan.noiDungChuyenKhoan,
     trangThai: thanhToan.trangThai,
-    anhQrUrl: taoAnhQrUrl(thanhToan.noiDungChuyenKhoan, Number(thanhToan.soTien)),
+    anhQrUrl: taoAnhQrUrl(thanhToan.noiDungChuyenKhoan, Number(thanhToan.soTien), taiKhoan),
+    chuaCauHinhThanhToan: !taiKhoan,
   };
 }
 
@@ -188,7 +190,7 @@ async function layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan) {
          ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
        END
      WHERE d.MaDatSan=? AND d.Nguon='app' ${laAdmin ? '' : 'AND cs.MaChuSan=?'}
-     FOR UPDATE OF d, t`,
+     FOR UPDATE`,
     laAdmin ? [maDatSan] : [maDatSan, maNguoiDung]);
   if (!thanhToan) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
   if (thanhToan.trangThai !== 'confirming') {

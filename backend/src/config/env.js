@@ -15,7 +15,7 @@ const cauHinh = {
   khoaBiMat: process.env.JWT_SECRET || 'dev_secret',
   thoiHanMaTruyCap: process.env.JWT_EXPIRES_IN || '7d',
   nguonTruyCap: process.env.CORS_ORIGIN || '*',
-  // Tài khoản nhận tiền chuyển khoản của khách (hiển thị + tạo QR VietQR).
+  // Tài khoản DỰ PHÒNG (tuỳ chọn): chỉ dùng khi chủ sân chưa nhập tài khoản ngân hàng trong HoSoChuSan.
   nganHang: {
     maNganHang: (process.env.BANK_CODE || '').trim(), // vd VIB, VCB, MB (hoặc mã BIN)
     soTaiKhoan: (process.env.BANK_ACCOUNT_NUMBER || '').trim(),
@@ -25,9 +25,5 @@ const cauHinh = {
 
 if (cauHinh.moiTruong === 'production' && cauHinh.khoaBiMat === 'dev_secret') {
   throw new Error('Phải đặt JWT_SECRET khi chạy production');
-}
-if (cauHinh.moiTruong === 'production'
-  && (!cauHinh.nganHang.maNganHang || !cauHinh.nganHang.soTaiKhoan || !cauHinh.nganHang.chuTaiKhoan)) {
-  throw new Error('Phải cấu hình BANK_CODE, BANK_ACCOUNT_NUMBER và BANK_ACCOUNT_NAME khi chạy production');
 }
 module.exports = cauHinh;

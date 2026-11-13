@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { doiGioRaPhut } = require('../utils/time');
-const { taoAnhQrUrl, layTaiKhoanNhan } = require('../utils/vietqr');
+const { taoAnhQrUrl, layTaiKhoanChuSan, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
 
 const GIOI_HAN_DAT_CO_DINH_NGAY = 90;
 
@@ -230,7 +230,8 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
       cacDon.push({ maDatSan: don.insertId, maDon, ngay: cacNgay[viTri], tongTien });
     }
     const tongTien = cacMucGia.reduce((tong, gia) => tong + gia, 0);
-    const anhQrUrl = taoAnhQrUrl(cacDon[0].maDon, tongTien);
+    const anhQrUrl = taoAnhQrUrl(
+      cacDon[0].maDon, tongTien, await layTaiKhoanChuSan(ketNoi, san.maChuSan));
     const [thanhToan] = await ketNoi.query(
       `INSERT INTO ThanhToan (MaDatSan, SoTien, NoiDungChuyenKhoan)
        VALUES (?,?,?)`,
@@ -480,14 +481,17 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
   if (!hoaDon) throw AppError.khongTimThay('Không tìm thấy hóa đơn');
   const { lyDoLoi, ...phanConLai } = hoaDon;
   if (!['pending', 'confirming'].includes(hoaDon.trangThaiThanhToan)) {
-    return { ...phanConLai, anhQrUrl: null, taiKhoanNhan: null, lyDoTuChoi: null };
+    return { ...phanConLai, anhQrUrl: null, taiKhoanNhan: null, chuaCauHinhThanhToan: false, lyDoTuChoi: null };
   }
-  const taiKhoan = layTaiKhoanNhan();
+  // Tài khoản của chủ sân; null nếu chủ sân chưa nhập ngân hàng: vẫn trả hoá đơn, chưa có QR.
+  const taiKhoan = await layTaiKhoanNhanTheoDatSan(pool, maDatSan);
   return {
     ...phanConLai,
-    anhQrUrl: taoAnhQrUrl(hoaDon.noiDungChuyenKhoan, Number(hoaDon.soTien)),
+    anhQrUrl: taoAnhQrUrl(hoaDon.noiDungChuyenKhoan, Number(hoaDon.soTien), taiKhoan),
+    chuaCauHinhThanhToan: !taiKhoan,
     // Thông tin hiển thị cạnh QR (chủ sân từ chối ảnh → lyDoTuChoi để khách biết gửi lại).
-    taiKhoanNhan: {
+    taiKhoanNhan: taiKhoan && {
+      tenNganHang: taiKhoan.tenNganHang,
       maNganHang: taiKhoan.maNganHang,
       soTaiKhoan: taiKhoan.soTaiKhoan,
       chuTaiKhoan: taiKhoan.chuTaiKhoan,
@@ -646,7 +650,7 @@ async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
          COALESCE((SELECT MIN(d2.MaDatSan) FROM DatSan d2
                    WHERE d2.MaLichCoDinh=d.MaLichCoDinh), d.MaDatSan) AS maDatSanThanhToan
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan
-       WHERE d.MaDatSan=? AND d.MaKhachHang=? FOR UPDATE OF d`,
+       WHERE d.MaDatSan=? AND d.MaKhachHang=? FOR UPDATE`,
       [maDatSan, maNguoiDung]);
     if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
     if (don.trangThai !== 'completed') {

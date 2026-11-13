@@ -3,9 +3,13 @@ SET NAMES utf8mb4;
 -- HỆ THỐNG ĐẶT SÂN CẦU LÔNG - SCHEMA HOÀN CHỈNH (khách + chủ sân + admin)
 -- Quy ước: tên bảng, tên cột viết tiếng Việt không dấu, viết hoa chữ cái đầu mỗi từ (PascalCase)
 -- Giá trị ENUM và khóa trong CauHinhHeThong giữ nguyên tiếng Anh
--- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực)
+-- Yêu cầu: MySQL 8.0.16+ hoặc MariaDB 10.5+ (để CHECK có hiệu lực). Chạy được trên cả hai.
+-- LƯU Ý: file này XOÁ và TẠO LẠI database db_sancaulong (schema + dữ liệu mẫu), import 1 lần là xong.
 -- =====================================================================
-CREATE DATABASE IF NOT EXISTS db_sancaulong
+SET FOREIGN_KEY_CHECKS = 0;
+DROP DATABASE IF EXISTS db_sancaulong;
+SET FOREIGN_KEY_CHECKS = 1;
+CREATE DATABASE db_sancaulong
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE db_sancaulong;
 
@@ -415,8 +419,8 @@ VALUES ('Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 
 
 -- =====================================================================
 -- SEED DATA - HỆ THỐNG ĐẶT SÂN CẦU LÔNG
--- Chạy SAU khi đã import db_sancaulong.sql (schema đã tự tạo admin MaNguoiDung = 1)
--- Không seed: ThanhToan (theo yêu cầu)
+-- (Nằm chung file schema: import 1 lần, không cần chạy riêng)
+-- ThanhToan được seed cho mọi đơn app (success / pending / confirming / expired + hoàn tiền)
 -- Mật khẩu mọi tài khoản demo: "password"
 --   (bcrypt hash dưới đây là hash phổ biến của chuỗi "password", chỉ dùng để dev/test)
 -- Ngày "hiện tại" của dữ liệu mẫu: 2026-10-31 (thứ Bảy)
@@ -658,8 +662,8 @@ VALUES
        NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-31 09:30:00'),
   -- Đơn đang giữ chỗ (chưa thanh toán)
   (16, 'BK20261031002', 9, 'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
-       9, '2026-11-02', '20:00:00', '21:00:00', 60, 110000, 11000, 99000,
-       NULL, NULL, 'pending_payment', '2026-10-31 13:45:00', NULL, NULL, NULL, NULL, '2026-10-31 13:35:00'),
+       9, '2026-11-21', '20:00:00', '21:00:00', 60, 110000, 11000, 99000,
+       NULL, NULL, 'pending_payment', DATE_ADD(NOW(), INTERVAL 1 DAY), NULL, NULL, NULL, NULL, '2026-10-31 13:35:00'),
   -- Đơn bị hủy bởi khách (hủy sớm, hoàn 100%)
   (17, 'BK20261028001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
        1, '2026-11-04', '18:00:00', '19:00:00', 60, 100000, 10000, 90000,
@@ -671,7 +675,34 @@ VALUES
   -- Đơn app bị chủ sân hủy (hoàn 100%)
   (19, 'BK20261027001', 8, 'Lê Hoàng Phúc',   '0901234563', NULL, 'app', 'walk_in', NULL,
        4, '2026-11-06', '19:00:00', '21:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'cancelled', NULL, 'owner', 'Sân bảo trì đột xuất', '2026-10-30 08:00:00', NULL, '2026-10-27 19:00:00');
+       NULL, NULL, 'cancelled', NULL, 'owner', 'Sân bảo trì đột xuất', '2026-10-30 08:00:00', NULL, '2026-10-27 19:00:00'),
+  -- Đơn app khách đã gửi ảnh chuyển khoản, ĐANG CHỜ CHỦ SÂN XÁC NHẬN (dùng để test nút xác nhận)
+  (20, 'BK20261120001', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
+       3, '2026-11-20', '18:00:00', '19:00:00', 60, 100000, 10000, 90000,
+       NULL, NULL, 'pending_payment', DATE_ADD(NOW(), INTERVAL 1 DAY), NULL, NULL, NULL, NULL, NOW());
+
+-- ---------------------------------------------------------------------
+-- 10b. ThanhToan cho mọi đơn app (đơn owner không có thanh toán)
+--   success: chủ sân đã xác nhận | pending: chờ khách chuyển khoản | confirming: chờ chủ sân xác nhận
+--   Đơn hủy đã thanh toán: TrangThaiHoanTien = processing (chủ sân chuyển khoản hoàn rồi bấm hoàn thành)
+-- ---------------------------------------------------------------------
+INSERT INTO ThanhToan
+  (MaThanhToan, MaDatSan, SoTien, TrangThai, NoiDungChuyenKhoan, AnhChuyenKhoan, NgayGuiAnh,
+   MaNguoiXacNhan, VaiTroXacNhan, NgayThanhToan, TrangThaiHoanTien, SoTienHoan, NgayTao)
+VALUES
+  (1,  1,  200000, 'success', 'BK20261020001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-18 20:01:00', 2, 'owner', '2026-10-18 20:03:00', 'none', 0, '2026-10-18 20:00:00'),
+  (2,  2,   90000, 'success', 'BK20261022001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-21 21:01:00', 2, 'owner', '2026-10-21 21:05:00', 'none', 0, '2026-10-21 21:00:00'),
+  (3,  3,  260000, 'success', 'BK20261024001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-22 09:31:00', 2, 'owner', '2026-10-22 09:40:00', 'none', 0, '2026-10-22 09:30:00'),
+  (4,  4,  200000, 'success', 'BK20261025001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-23 18:01:00', 3, 'owner', '2026-10-23 18:10:00', 'none', 0, '2026-10-23 18:00:00'),
+  (5,  5,   90000, 'success', 'BK20261026001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-25 22:01:00', 2, 'owner', '2026-10-25 22:10:00', 'none', 0, '2026-10-25 22:00:00'),
+  (6,  13, 200000, 'success', 'BK20261102001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-30 21:01:00', 2, 'owner', '2026-10-30 21:03:00', 'none', 0, '2026-10-30 21:00:00'),
+  (7,  14, 220000, 'success', 'BK20261107002', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-31 08:01:00', 2, 'owner', '2026-10-31 08:05:00', 'none', 0, '2026-10-31 08:00:00'),
+  (8,  15, 170000, 'success', 'BK20261101002', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-31 09:31:00', 2, 'owner', '2026-10-31 09:40:00', 'none', 0, '2026-10-31 09:30:00'),
+  (9,  16, 110000, 'pending', 'BK20261031002', NULL, NULL, NULL, NULL, NULL, 'none', 0, '2026-10-31 13:35:00'),
+  (10, 17, 100000, 'success', 'BK20261028001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-28 09:01:00', 2, 'owner', '2026-10-28 09:10:00', 'processing', 100000, '2026-10-28 09:00:00'),
+  (11, 18,  90000, 'expired', 'BK20261029002', NULL, NULL, NULL, NULL, NULL, 'none', 0, '2026-10-29 10:00:00'),
+  (12, 19, 200000, 'success', 'BK20261027001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-27 19:01:00', 2, 'owner', '2026-10-27 19:10:00', 'processing', 200000, '2026-10-27 19:00:00'),
+  (13, 20, 100000, 'confirming', 'BK20261120001', '/tep-tai-len/demo-chuyen-khoan.png', NOW(), NULL, NULL, NULL, 'none', 0, NOW());
 
 -- ---------------------------------------------------------------------
 -- 11. DanhGia (đơn app đã completed) - khớp DiemTrungBinh/SoDanhGia của CoSo
@@ -757,4 +788,3 @@ INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiT
 -- SELECT 'DatSan', COUNT(*) FROM DatSan UNION ALL
 -- SELECT 'DanhGia', COUNT(*) FROM DanhGia;
 -- Hoan tat import schema
-SET FOREIGN_KEY_CHECKS = 1;
