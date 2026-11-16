@@ -1,0 +1,158 @@
+/** Màn hình Tổng quan: số việc đang chờ xử lý và hoạt động gần đây */
+import { useEffect, useState } from 'react';
+import {
+  layHoSoChoDuyet,
+  layHangDoiHoanTien,
+  layHangDoiRutTien,
+  layGiaoDichSepayChuaKhop,
+  layNhatKy,
+} from '../api/admin';
+import { dinhDangTien, dinhDangNgayGio, nhanHanhDong } from '../utils/format';
+import EmptyState from '../components/EmptyState';
+
+const layNhatKyMoiNhat = () => layNhatKy({ gioiHan: 10 });
+
+/** Mỗi khối tải độc lập: một khối lỗi không làm hỏng các khối còn lại */
+function useTaiDuLieu(hamTai) {
+  const [trangThai, setTrangThai] = useState({ dangTai: true, loi: '', duLieu: null });
+  const [lanTai, setLanTai] = useState(0);
+
+  useEffect(() => {
+    let daHuy = false;
+    hamTai()
+      .then((duLieu) => {
+        if (!daHuy) setTrangThai({ dangTai: false, loi: '', duLieu });
+      })
+      .catch((e) => {
+        if (!daHuy) setTrangThai({ dangTai: false, loi: e.message, duLieu: null });
+      });
+    return () => {
+      daHuy = true;
+    };
+  }, [hamTai, lanTai]);
+
+  const thuLai = () => {
+    setTrangThai({ dangTai: true, loi: '', duLieu: null });
+    setLanTai((n) => n + 1);
+  };
+  return { ...trangThai, thuLai };
+}
+
+function TheSoLieu({ tieuDe, trangThai, giaTri, phu, tabDich, doiTab }) {
+  const { dangTai, loi, duLieu, thuLai } = trangThai;
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm flex flex-col justify-between gap-3 min-h-[148px]">
+      <div className="space-y-1">
+        <span className="text-xs font-semibold text-slate-500">{tieuDe}</span>
+        {dangTai ? (
+          <p className="text-xs font-semibold text-slate-400 pt-2" role="status">Đang tải…</p>
+        ) : loi ? (
+          <div className="pt-1 space-y-2">
+            <p className="text-xs font-semibold text-rose-700">Không tải được</p>
+            <button type="button" onClick={thuLai} className="px-3 py-1 border border-rose-200 text-rose-700 font-bold text-xs rounded-xl hover:bg-rose-50">
+              Thử lại
+            </button>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-3xl font-extrabold text-slate-900">{giaTri(duLieu)}</h2>
+            {phu && phu(duLieu) && <p className="text-[11px] text-slate-500 font-medium">{phu(duLieu)}</p>}
+          </>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => doiTab(tabDich)}
+        className="self-start text-xs font-bold text-[#165137] hover:underline"
+      >
+        Xem chi tiết
+      </button>
+    </div>
+  );
+}
+
+export default function Dashboard({ doiTab }) {
+  const hoSo = useTaiDuLieu(layHoSoChoDuyet);
+  const hoanTien = useTaiDuLieu(layHangDoiHoanTien);
+  const rutTien = useTaiDuLieu(layHangDoiRutTien);
+  const sepay = useTaiDuLieu(layGiaoDichSepayChuaKhop);
+  const nhatKy = useTaiDuLieu(layNhatKyMoiNhat);
+
+  return (
+    <section className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Tổng quan</h1>
+        <p className="text-xs text-slate-500 mt-1 font-medium">Những việc đang chờ bạn xử lý.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+        <TheSoLieu
+          tieuDe="Hồ sơ chủ sân chờ duyệt"
+          trangThai={hoSo}
+          giaTri={(d) => d.length}
+          tabDich="owners"
+          doiTab={doiTab}
+        />
+        <TheSoLieu
+          tieuDe="Khoản chờ hoàn tiền"
+          trangThai={hoanTien}
+          giaTri={(d) => d.length}
+          tabDich="refunds"
+          doiTab={doiTab}
+        />
+        <TheSoLieu
+          tieuDe="Yêu cầu rút tiền chờ chi"
+          trangThai={rutTien}
+          giaTri={(d) => d.length}
+          phu={(d) => `Tổng ${dinhDangTien(d.reduce((tong, yc) => tong + (Number(yc.soTien) || 0), 0))}`}
+          tabDich="withdrawals"
+          doiTab={doiTab}
+        />
+        <TheSoLieu
+          tieuDe="Giao dịch SePay chưa khớp"
+          trangThai={sepay}
+          giaTri={(d) => d.length}
+          phu={(d) => (d.length >= 100 ? 'Hiển thị tối đa 100 giao dịch' : null)}
+          tabDich="sepay"
+          doiTab={doiTab}
+        />
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 text-lg">Hoạt động gần đây</h3>
+          <button type="button" onClick={() => doiTab('logs')} className="text-xs font-bold text-[#165137] hover:underline">
+            Xem toàn bộ nhật ký
+          </button>
+        </div>
+
+        {nhatKy.dangTai ? (
+          <p className="text-xs font-semibold text-slate-400" role="status">Đang tải…</p>
+        ) : nhatKy.loi ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-rose-700">{nhatKy.loi}</p>
+            <button type="button" onClick={nhatKy.thuLai} className="px-3 py-1 border border-rose-200 text-rose-700 font-bold text-xs rounded-xl hover:bg-rose-50">
+              Thử lại
+            </button>
+          </div>
+        ) : nhatKy.duLieu.length === 0 ? (
+          <EmptyState noiDung="Chưa có hoạt động nào được ghi nhận." />
+        ) : (
+          <ul className="divide-y divide-slate-100 text-xs">
+            {nhatKy.duLieu.map((nk) => (
+              <li key={nk.maNhatKy} className="py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-1">
+                <span className="font-bold text-slate-900">
+                  {nhanHanhDong(nk.hanhDong)}
+                  {nk.maDoiTuong != null && <span className="font-medium text-slate-500"> – mã {nk.maDoiTuong}</span>}
+                </span>
+                <span className="text-slate-500">
+                  {nk.tenNguoiThucHien || 'Hệ thống'} · {dinhDangNgayGio(nk.ngayTao)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
