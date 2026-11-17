@@ -6,6 +6,7 @@ import './App.css'
    ============================================================ */
 
 const MENU = [
+  { id: 'branches', label: 'Quản lý cơ sở' },
   { id: 'courts', label: 'Quản lý sân' },
   { id: 'bookings', label: 'Quản lý đặt sân' },
   { id: 'refunds', label: 'Hoàn tiền' },
@@ -1263,6 +1264,387 @@ function PageBanner({ title }) {
     <div className="page-banner">
       <h1 className="page-banner-title">{title}</h1>
     </div>
+  )
+}
+
+/* ============================================================
+   Quản lý cơ sở
+   API có sẵn: GET /api/chu-san/co-so (danh sách), POST /api/chu-san/co-so (thêm cơ sở),
+   POST /api/chu-san/co-so/:maCoSo/anh (ảnh bìa, multipart trường tepAnh)
+   ============================================================ */
+
+const BRANCH_STATUS = {
+  hidden: { label: 'Chưa hiển thị cho khách', className: 'status-wait', hint: 'Cần có ít nhất 1 sân hoạt động và bảng giá thì cơ sở mới hiện cho khách đặt.' },
+  active: { label: 'Đang hoạt động', className: 'status-ok', hint: '' },
+  closed: { label: 'Tạm đóng', className: 'status-maint', hint: 'Cơ sở đang tạm đóng, khách không đặt được.' },
+  locked: { label: 'Bị khoá', className: 'status-maint', hint: 'Cơ sở bị quản trị viên khoá, vui lòng liên hệ quản trị viên.' },
+}
+const MIN_BOOKING_OPTIONS = [30, 60, 90, 120]
+const EMPTY_BRANCH_FORM = {
+  tenCoSo: '',
+  diaChi: '',
+  tinhThanh: '',
+  quanHuyen: '',
+  soDienThoai: '',
+  zalo: '',
+  linkBanDo: '',
+  moTa: '',
+  gioMoCua: '06:00',
+  gioDongCua: '22:00',
+  soPhutDatToiThieu: '60',
+  viDo: '',
+  kinhDo: '',
+}
+// Số liên hệ giống backend: di động 10 số (03/05/07/08/09) hoặc số bàn 11 số, bắt đầu bằng 0 (chấp nhận +84 / khoảng trắng)
+const CONTACT_PHONE_RE = /^0([35789]\d{8}|2\d{9})$/
+function normalizeContactPhone(raw) {
+  let digits = String(raw ?? '').replace(/[^0-9]/g, '')
+  if (digits.startsWith('84') && digits.length >= 11) digits = digits.slice(2)
+  if (digits && !digits.startsWith('0')) digits = `0${digits}`
+  return digits
+}
+
+// Trả về { body } hợp lệ gửi API hoặc { error } (luật khớp validator của backend)
+function validateBranchForm(f) {
+  const text = (v) => String(v ?? '').trim()
+  const tenCoSo = text(f.tenCoSo)
+  const diaChi = text(f.diaChi)
+  const tinhThanh = text(f.tinhThanh)
+  const quanHuyen = text(f.quanHuyen)
+  const linkBanDo = text(f.linkBanDo)
+  const zalo = text(f.zalo)
+  const moTa = String(f.moTa ?? '').trim()
+  if (!tenCoSo || !diaChi || !tinhThanh || !quanHuyen || !text(f.soDienThoai) || !linkBanDo) {
+    return { error: 'Vui lòng nhập đầy đủ các mục có dấu *.' }
+  }
+  if (tenCoSo.length < 2 || tenCoSo.length > 150) return { error: 'Tên cơ sở từ 2 đến 150 ký tự.' }
+  if (diaChi.length < 5 || diaChi.length > 255) return { error: 'Địa chỉ từ 5 đến 255 ký tự.' }
+  if (tinhThanh.length < 2 || tinhThanh.length > 80) return { error: 'Tỉnh/Thành từ 2 đến 80 ký tự.' }
+  if (quanHuyen.length < 2 || quanHuyen.length > 80) return { error: 'Quận/Huyện từ 2 đến 80 ký tự.' }
+  const soDienThoai = normalizeContactPhone(f.soDienThoai)
+  if (!CONTACT_PHONE_RE.test(soDienThoai)) {
+    return { error: 'Số điện thoại không hợp lệ (di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0).' }
+  }
+  if (zalo.length > 30) return { error: 'Zalo tối đa 30 ký tự.' }
+  try {
+    const u = new URL(linkBanDo)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('x')
+  } catch {
+    return { error: 'Link bản đồ không hợp lệ (bắt đầu bằng https://).' }
+  }
+  if (linkBanDo.length > 500) return { error: 'Link bản đồ tối đa 500 ký tự.' }
+  if (moTa.length > 2000) return { error: 'Mô tả tối đa 2000 ký tự.' }
+  if (!f.gioMoCua || !f.gioDongCua) return { error: 'Vui lòng chọn giờ mở cửa và giờ đóng cửa.' }
+  if (f.gioMoCua >= f.gioDongCua) return { error: 'Giờ đóng cửa phải sau giờ mở cửa.' }
+  const soPhut = Number(f.soPhutDatToiThieu)
+  if (!Number.isInteger(soPhut) || soPhut < 30 || soPhut % 30 !== 0) return { error: 'Thời gian đặt tối thiểu phải là bội số của 30 phút.' }
+
+  const body = { tenCoSo, diaChi, tinhThanh, quanHuyen, soDienThoai, linkBanDo, gioMoCua: f.gioMoCua, gioDongCua: f.gioDongCua, soPhutDatToiThieu: soPhut }
+  if (zalo) body.zalo = zalo
+  if (moTa) body.moTa = moTa
+  if (text(f.viDo) !== '') {
+    const v = Number(f.viDo)
+    if (!Number.isFinite(v) || v < -90 || v > 90) return { error: 'Vĩ độ phải từ -90 đến 90.' }
+    body.viDo = v
+  }
+  if (text(f.kinhDo) !== '') {
+    const v = Number(f.kinhDo)
+    if (!Number.isFinite(v) || v < -180 || v > 180) return { error: 'Kinh độ phải từ -180 đến 180.' }
+    body.kinhDo = v
+  }
+  return { body }
+}
+
+function BranchCard({ b }) {
+  const st = BRANCH_STATUS[b.trangThai] ?? { label: b.trangThai, className: 'status-wait', hint: '' }
+  const place = [b.quanHuyen, b.tinhThanh].filter(Boolean).join(', ')
+  return (
+    <article className="branch-slide">
+      <div className="branch-slide-photo">
+        {b.duongDanAnh ? <img src={fileUrl(b.duongDanAnh)} alt={b.tenCoSo} /> : <span>Cơ sở chưa có ảnh</span>}
+      </div>
+      <div className="branch-slide-body">
+        <div className="branch-slide-head">
+          <h3>{b.tenCoSo}</h3>
+          <span className={`status-badge ${st.className}`}>{st.label}</span>
+        </div>
+        <dl className="branch-info">
+          <div>
+            <dt>Địa chỉ</dt>
+            <dd>
+              {b.diaChi}
+              {place ? `, ${place}` : ''}
+              {b.linkBanDo && (
+                <>
+                  {' '}
+                  <a href={b.linkBanDo} target="_blank" rel="noreferrer">
+                    Xem bản đồ
+                  </a>
+                </>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Liên hệ</dt>
+            <dd>
+              {b.soDienThoai ?? '—'}
+              {b.zalo ? ` · Zalo: ${b.zalo}` : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>Giờ hoạt động</dt>
+            <dd>
+              {cut5(b.gioMoCua)} – {cut5(b.gioDongCua)} · đặt tối thiểu {b.soPhutDatToiThieu} phút
+            </dd>
+          </div>
+          <div>
+            <dt>Số sân</dt>
+            <dd>
+              {b.soSanHoatDong ?? 0} đang hoạt động / {b.soSan ?? 0} sân
+            </dd>
+          </div>
+          <div>
+            <dt>Giá thấp nhất</dt>
+            <dd>{b.giaThapNhat != null ? `${formatVnd(Number(b.giaThapNhat))}/giờ` : 'Chưa có bảng giá'}</dd>
+          </div>
+          {b.moTa && (
+            <div>
+              <dt>Mô tả</dt>
+              <dd>{b.moTa}</dd>
+            </div>
+          )}
+        </dl>
+        {st.hint && <p className="branch-hint">{st.hint}</p>}
+      </div>
+    </article>
+  )
+}
+
+function BranchesPage({ user }) {
+  const token = user.maTruyCap
+  const isOwner = user.vaiTro === 'owner'
+  const [branches, setBranches] = useState([])
+  const [loading, setLoading] = useState(isOwner)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [index, setIndex] = useState(0) // cơ sở đang xem trên thanh trượt
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_BRANCH_FORM)
+  const [imageFile, setImageFile] = useState(null)
+  const [dialogError, setDialogError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const trackRef = useRef(null)
+  const tick = useAutoRefresh()
+
+  useEffect(() => {
+    if (!isOwner) return
+    let cancelled = false
+    callApi('/api/chu-san/co-so', { token })
+      .then((data) => {
+        if (!cancelled) setBranches(Array.isArray(data) ? data : data ? [data] : [])
+      })
+      .catch((err) => {
+        if (!cancelled) setError(describeApiError(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token, tick])
+
+  if (!isOwner) {
+    return (
+      <Page>
+        <Alert>Tài khoản quản trị viên không quản lý cơ sở nào.</Alert>
+      </Page>
+    )
+  }
+
+  const go = (i) => {
+    const next = Math.max(0, Math.min(branches.length - 1, i))
+    setIndex(next)
+    const el = trackRef.current
+    if (el) el.scrollTo({ left: next * el.clientWidth, behavior: 'smooth' })
+  }
+  // Vuốt/kéo thanh trượt thì cập nhật cơ sở đang xem
+  const onScroll = (e) => {
+    const el = e.currentTarget
+    const i = Math.round(el.scrollLeft / Math.max(el.clientWidth, 1))
+    if (i !== index) setIndex(i)
+  }
+
+  const openDialog = () => {
+    setForm(EMPTY_BRANCH_FORM)
+    setImageFile(null)
+    setDialogError('')
+    setDialogOpen(true)
+  }
+  const update = (key) => (e) => {
+    setForm((f) => ({ ...f, [key]: e.target.value }))
+    setDialogError('')
+  }
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const { body, error: invalid } = validateBranchForm(form)
+    if (invalid) {
+      setDialogError(invalid)
+      return
+    }
+    setSaving(true)
+    setDialogError('')
+    try {
+      let created = await callApi('/api/chu-san/co-so', { method: 'POST', token, body })
+      let imageWarning = ''
+      if (imageFile) {
+        try {
+          const saved = await uploadBranchImage(token, imageFile, created.maCoSo)
+          created = { ...created, duongDanAnh: saved.duongDanAnh }
+        } catch (err) {
+          imageWarning = ` Nhưng chưa lưu được ảnh (${describeApiError(err)}).`
+        }
+      }
+      const next = [...branches, created]
+      setBranches(next)
+      setDialogOpen(false)
+      setError('')
+      setSuccess(`Đã thêm cơ sở ${created.tenCoSo}.${imageWarning}`)
+      // đợi thanh trượt vẽ xong cơ sở mới rồi trượt tới đó
+      setTimeout(() => go(next.length - 1), 50)
+    } catch (err) {
+      setDialogError(describeApiError(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Page>
+      {error && <Alert type="error">{error}</Alert>}
+      {success && <Alert type="success">{success}</Alert>}
+
+      <section className="card branch-card">
+        <div className="branch-toolbar">
+          <h2 className="card-title">Cơ sở của bạn{branches.length > 0 ? ` (${branches.length})` : ''}</h2>
+          <button type="button" className="btn btn-primary" onClick={openDialog}>
+            <PlusIcon /> Thêm cơ sở
+          </button>
+        </div>
+
+        {loading && <p className="table-empty">Đang tải danh sách cơ sở...</p>}
+        {!loading && branches.length === 0 && (
+          <div className="branch-empty">
+            <p>Bạn chưa có cơ sở nào.</p>
+            <p className="field-hint">Bấm &quot;Thêm cơ sở&quot; để nhập thông tin cơ sở đầu tiên. Sau đó thêm sân và bảng giá để khách đặt được.</p>
+          </div>
+        )}
+        {branches.length > 0 && (
+          <div className="branch-slider">
+            <button type="button" className="branch-arrow" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Cơ sở trước">
+              ‹
+            </button>
+            <div className="branch-track" ref={trackRef} onScroll={onScroll}>
+              {branches.map((b) => (
+                <BranchCard key={b.maCoSo} b={b} />
+              ))}
+            </div>
+            <button type="button" className="branch-arrow" onClick={() => go(index + 1)} disabled={index >= branches.length - 1} aria-label="Cơ sở sau">
+              ›
+            </button>
+          </div>
+        )}
+        {branches.length > 1 && (
+          <div className="branch-dots" role="tablist" aria-label="Chọn cơ sở">
+            {branches.map((b, i) => (
+              <button key={b.maCoSo} type="button" className={`branch-dot${i === index ? ' is-active' : ''}`} onClick={() => go(i)} title={b.tenCoSo} aria-label={b.tenCoSo} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {dialogOpen && (
+        <Dialog title="Thêm cơ sở" width={640} onClose={() => !saving && setDialogOpen(false)}>
+          <form onSubmit={submit} noValidate>
+            <div className="branch-form">
+              <label className="dialog-field branch-wide">
+                <span>Tên cơ sở *</span>
+                <input className="input" value={form.tenCoSo} onChange={update('tenCoSo')} maxLength={150} autoFocus />
+              </label>
+              <label className="dialog-field branch-wide">
+                <span>Địa chỉ *</span>
+                <input className="input" value={form.diaChi} onChange={update('diaChi')} maxLength={255} placeholder="Số nhà, đường, phường" />
+              </label>
+              <label className="dialog-field">
+                <span>Quận/Huyện *</span>
+                <input className="input" value={form.quanHuyen} onChange={update('quanHuyen')} maxLength={80} />
+              </label>
+              <label className="dialog-field">
+                <span>Tỉnh/Thành *</span>
+                <input className="input" value={form.tinhThanh} onChange={update('tinhThanh')} maxLength={80} />
+              </label>
+              <label className="dialog-field">
+                <span>Số điện thoại *</span>
+                <input className="input" type="tel" inputMode="numeric" value={form.soDienThoai} onChange={update('soDienThoai')} />
+              </label>
+              <label className="dialog-field">
+                <span>Zalo</span>
+                <input className="input" value={form.zalo} onChange={update('zalo')} maxLength={30} />
+              </label>
+              <label className="dialog-field branch-wide">
+                <span>Link bản đồ (Google Maps) *</span>
+                <input className="input" type="url" value={form.linkBanDo} onChange={update('linkBanDo')} placeholder="https://maps.google.com/..." />
+              </label>
+              <label className="dialog-field">
+                <span>Giờ mở cửa *</span>
+                <input className="input" type="time" value={form.gioMoCua} onChange={update('gioMoCua')} />
+              </label>
+              <label className="dialog-field">
+                <span>Giờ đóng cửa *</span>
+                <input className="input" type="time" value={form.gioDongCua} onChange={update('gioDongCua')} />
+              </label>
+              <label className="dialog-field">
+                <span>Thời gian đặt tối thiểu *</span>
+                <select className="input" value={form.soPhutDatToiThieu} onChange={update('soPhutDatToiThieu')}>
+                  {MIN_BOOKING_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m} phút
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="dialog-field">
+                <span>Ảnh cơ sở</span>
+                <input className="input input-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] ?? null)} />
+              </label>
+              <label className="dialog-field">
+                <span>Vĩ độ (tuỳ chọn)</span>
+                <input className="input" inputMode="decimal" value={form.viDo} onChange={update('viDo')} placeholder="10.8012" />
+              </label>
+              <label className="dialog-field">
+                <span>Kinh độ (tuỳ chọn)</span>
+                <input className="input" inputMode="decimal" value={form.kinhDo} onChange={update('kinhDo')} placeholder="106.6399" />
+              </label>
+              <label className="dialog-field branch-wide">
+                <span>Mô tả</span>
+                <textarea className="input branch-textarea" rows={3} value={form.moTa} onChange={update('moTa')} maxLength={2000} />
+              </label>
+            </div>
+            <p className="picker-hint">Cơ sở mới ở trạng thái &quot;Chưa hiển thị cho khách&quot; cho tới khi có sân hoạt động và bảng giá.</p>
+            {dialogError && <p className="dialog-error">{dialogError}</p>}
+            <div className="dialog-two">
+              <button type="button" className="dialog-ghost" onClick={() => setDialogOpen(false)} disabled={saving}>
+                Huỷ
+              </button>
+              <button type="submit" className="dialog-primary" disabled={saving}>
+                {saving ? 'Đang lưu...' : 'Lưu'}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+    </Page>
   )
 }
 
@@ -2639,12 +3021,12 @@ function Placeholder({ title }) {
 const PROFILE_PAGE = { id: 'profile', label: 'Trang chủ sân' }
 
 // Tải ảnh bìa cơ sở lên (API có sẵn POST /api/chu-san/co-so/anh, multipart, trường tepAnh)
-async function uploadBranchImage(token, file) {
+async function uploadBranchImage(token, file, maCoSo) {
   const body = new FormData()
   body.append('tepAnh', file)
   let res
   try {
-    res = await fetch(`${API_URL}/api/chu-san/co-so/anh`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body })
+    res = await fetch(`${API_URL}/api/chu-san/co-so/${maCoSo ? `${maCoSo}/` : ''}anh`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body })
   } catch {
     throw new ApiError(0, 'Không kết nối được máy chủ. Vui lòng thử lại sau.')
   }
@@ -2822,6 +3204,20 @@ function AdminApp({ user, onLogout }) {
   const [bookings, setBookings] = useState(INITIAL_BOOKINGS)
   const [cancelHours, setCancelHours] = useState(12)
 
+  // Chủ sân mới chưa có cơ sở nào thì mở sẵn trang Quản lý cơ sở để thêm cơ sở đầu tiên
+  useEffect(() => {
+    if (user.vaiTro !== 'owner') return
+    let cancelled = false
+    callApi('/api/chu-san/co-so', { token: user.maTruyCap })
+      .then((data) => {
+        if (!cancelled && Array.isArray(data) && data.length === 0) setActive('branches')
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [user.vaiTro, user.maTruyCap])
+
   const branches = [ALL_BRANCHES, ...new Set(courts.map((c) => c.branch))]
   const filters = { date, setDate, branch, setBranch, branches }
   const current = MENU.find((m) => m.id === active) ?? PROFILE_PAGE
@@ -2840,6 +3236,8 @@ function AdminApp({ user, onLogout }) {
         return <BookingsPage user={user} filters={filters} />
       case 'refunds':
         return <RefundsPage user={user} />
+      case 'branches':
+        return <BranchesPage user={user} />
       case 'courts':
         return <CourtsPage user={user} />
       case 'pricing':
