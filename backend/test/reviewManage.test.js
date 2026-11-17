@@ -13,7 +13,7 @@ function datLai() {
       { maDanhGia: 3, soSao: 1, biAn: 0 },
     ],
     coSo: { diemTrungBinh: '3.0', soDanhGia: 3 },
-    // Đánh giá được chọn để phản hồi / ẩn (kết quả của SELECT ... FOR UPDATE OF dg).
+    // Đánh giá được chọn để phản hồi / ẩn (kết quả của SELECT ... FOR UPDATE).
     mucDanhGia: {
       maDanhGia: 3, maKhachHang: 7, maCoSo: 12, biAn: 0, phanHoiCu: null, maChuSan: 4, tenCoSo: 'Sân Hoa Lư',
     },
@@ -24,7 +24,7 @@ function datLai() {
 const ketNoiGia = {
   async query(cauTruyVan, thamSo = []) {
     cacTruyVan.push({ cauTruyVan, thamSo });
-    if (/FROM DanhGia dg JOIN CoSo cs ON cs\.MaCoSo=dg\.MaCoSo\s+WHERE dg\.MaDanhGia=\? FOR UPDATE OF dg/.test(cauTruyVan)) {
+    if (/FROM DanhGia dg JOIN CoSo cs ON cs\.MaCoSo=dg\.MaCoSo\s+WHERE dg\.MaDanhGia=\? FOR UPDATE/.test(cauTruyVan)) {
       return [Number(thamSo[0]) === du.mucDanhGia?.maDanhGia ? [du.mucDanhGia] : []];
     }
     if (/FROM CoSo WHERE MaCoSo=\? FOR UPDATE/.test(cauTruyVan)) return [[{ maCoSo: 12 }]];

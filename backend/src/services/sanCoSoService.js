@@ -61,12 +61,12 @@ async function demLichSu(ketNoi, cacMaSan) {
 
 // Khoá dòng sân (cùng khoá với lúc khách đặt) để không có đơn mới chen vào giữa lúc kiểm tra và đóng.
 async function khoaSan(ketNoi, nguoi, maSan) {
+  await ketNoi.query('SELECT MaSan FROM San WHERE MaSan=? FOR UPDATE', [maSan]);
   const [[san]] = await ketNoi.query(
     `SELECT s.MaSan AS maSan, s.MaCoSo AS maCoSo, s.TenSan AS tenSan, s.TrangThai AS trangThai,
        cs.MaChuSan AS maChuSan, cs.TrangThai AS trangThaiCoSo, cs.TenCoSo AS tenCoSo
      FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     WHERE s.MaSan=? ${laAdmin(nguoi) ? '' : 'AND cs.MaChuSan=?'}
-     FOR UPDATE OF s`,
+     WHERE s.MaSan=? ${laAdmin(nguoi) ? '' : 'AND cs.MaChuSan=?'}`,
     laAdmin(nguoi) ? [maSan] : [maSan, nguoi.maNguoiDung]);
   if (!san) throw AppError.khongTimThay('Không tìm thấy sân');
   return san;

@@ -8,17 +8,18 @@ const SO_DON_TOI_DA_MOI_LAN = 200;
 
 let dangChay = false;
 
-// Một lần quét, trong MỘT giao dịch. `FOR UPDATE ... SKIP LOCKED` để hai tiến trình (hoặc job và người dùng)
-// không giẫm lên nhau: dòng đang bị khoá bởi nơi khác sẽ để lần quét sau.
+// Một lần quét, trong MỘT giao dịch. `FOR UPDATE` (chỉ khoá dòng DatSan; không dùng `OF`/`SKIP LOCKED` vì MariaDB không hỗ trợ)
+// để hai tiến trình không giẫm lên nhau; câu UPDATE bên dưới còn kiểm lại `TrangThai='confirmed'`.
 async function chayMotLan() {
   return thucHienGiaoDich(async (ketNoi) => {
     const [cacDon] = await ketNoi.query(
       `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaKhachHang AS maKhachHang, d.Nguon AS nguon,
-         d.MaLichCoDinh AS maLichCoDinh, cs.TenCoSo AS tenCoSo
-       FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+         d.MaLichCoDinh AS maLichCoDinh,
+         (SELECT cs.TenCoSo FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo WHERE s.MaSan=d.MaSan) AS tenCoSo
+       FROM DatSan d
        WHERE d.TrangThai='confirmed' AND TIMESTAMP(d.NgayChoi, d.GioKetThuc)<=NOW()
        ORDER BY d.MaDatSan LIMIT ?
-       FOR UPDATE OF d SKIP LOCKED`,
+       FOR UPDATE`,
       [SO_DON_TOI_DA_MOI_LAN]);
     if (!cacDon.length) return { soDonHoanThanh: 0, soThongBao: 0 };
 

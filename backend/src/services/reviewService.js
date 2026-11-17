@@ -67,7 +67,7 @@ async function phanHoiDanhGia(maChuSan, maDanhGia, noiDung) {
       `SELECT dg.MaDanhGia AS maDanhGia, dg.MaKhachHang AS maKhachHang, dg.MaCoSo AS maCoSo,
          dg.BiAn AS biAn, dg.PhanHoiChuSan AS phanHoiCu, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo
        FROM DanhGia dg JOIN CoSo cs ON cs.MaCoSo=dg.MaCoSo
-       WHERE dg.MaDanhGia=? FOR UPDATE OF dg`, [maDanhGia]);
+       WHERE dg.MaDanhGia=? FOR UPDATE`, [maDanhGia]);
     if (!danhGia) throw AppError.khongTimThay('Không tìm thấy đánh giá');
     if (Number(danhGia.maChuSan) !== Number(maChuSan)) {
       throw AppError.khongDuQuyen('Bạn không có quyền phản hồi đánh giá của cơ sở khác');
@@ -127,7 +127,7 @@ async function anHienDanhGia(maQuanTri, maDanhGia, { an, lyDo }) {
       `SELECT dg.MaDanhGia AS maDanhGia, dg.MaKhachHang AS maKhachHang, dg.MaCoSo AS maCoSo,
          dg.BiAn AS biAn, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo
        FROM DanhGia dg JOIN CoSo cs ON cs.MaCoSo=dg.MaCoSo
-       WHERE dg.MaDanhGia=? FOR UPDATE OF dg`, [maDanhGia]);
+       WHERE dg.MaDanhGia=? FOR UPDATE`, [maDanhGia]);
     if (!danhGia) throw AppError.khongTimThay('Không tìm thấy đánh giá');
     if (!!Number(danhGia.biAn) === !!an) {
       throw AppError.biTrung(

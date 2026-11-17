@@ -23,7 +23,7 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
       `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.TrangThai AS trangThai, d.TenKhach AS tenKhach,
          s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-       WHERE d.MaDatSan=? AND d.MaKhachHang=? AND d.Nguon='app' FOR UPDATE OF d`,
+       WHERE d.MaDatSan=? AND d.MaKhachHang=? AND d.Nguon='app' FOR UPDATE`,
       [maDatSan, maKhachHang]);
     if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
     if (!TRANG_THAI_CO_THE_KHIEU_NAI.includes(don.trangThai)) {

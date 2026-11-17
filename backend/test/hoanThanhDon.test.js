@@ -16,7 +16,7 @@ function datLai(cacDon) {
 const ketNoiGia = {
   async query(cauTruyVan, thamSo = []) {
     cacTruyVan.push({ cauTruyVan, thamSo });
-    if (/FROM DatSan d JOIN San s ON s\.MaSan=d\.MaSan JOIN CoSo cs/.test(cauTruyVan)) {
+    if (/FROM DatSan d\s+WHERE d\.TrangThai=.confirmed./.test(cauTruyVan)) {
       // WHERE d.TrangThai='confirmed' AND TIMESTAMP(NgayChoi, GioKetThuc) <= NOW()
       return [du.cacDon.filter((don) => don.trangThai === 'confirmed' && don.quaGio)];
     }
@@ -61,13 +61,13 @@ test('job: đơn qua giờ → completed + đúng 1 thông báo nhắc đánh gi
     'booking', 5, 'review_reminder:5']);
 });
 
-test('job: truy vấn chọn đúng điều kiện, khoá dòng SKIP LOCKED, dùng placeholder', async () => {
+test('job: truy vấn chọn đúng điều kiện, khoá dòng FOR UPDATE (không OF/SKIP LOCKED, tương thích MariaDB), dùng placeholder', async () => {
   datLai([{ maDatSan: 5, maDon: 'BK5' }]);
   await chayMotLan();
   const chon = cacTruyVan[0].cauTruyVan;
   assert.match(chon, /d\.TrangThai='confirmed'/);
   assert.match(chon, /TIMESTAMP\(d\.NgayChoi, d\.GioKetThuc\)<=NOW\(\)/);
-  assert.match(chon, /FOR UPDATE OF d SKIP LOCKED/);
+  assert.match(chon, /FOR UPDATE`?$/);
   const capNhat = cacTruyVan.find((muc) => /UPDATE DatSan SET TrangThai='completed'/.test(muc.cauTruyVan));
   assert.match(capNhat.cauTruyVan, /MaDatSan IN \(\?\)/);
   assert.deepEqual(capNhat.thamSo, [5]);
