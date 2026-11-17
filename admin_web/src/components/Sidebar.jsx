@@ -52,7 +52,7 @@ export default function Sidebar({ tabHienTai, doiTab, soChoXuLy = {}, nguoiDung,
           </div>
           <div className="truncate text-left">
             <div className="font-bold text-xs text-slate-900 truncate">{nguoiDung?.hoTen}</div>
-            <div className="text-[10px] text-slate-500 truncate">{nguoiDung?.tenDangNhap}</div>
+            <div className="text-[10px] text-slate-500 truncate">{nguoiDung?.email}</div>
           </div>
         </div>
         <button

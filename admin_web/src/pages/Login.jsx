@@ -8,7 +8,7 @@ const MAT_KHAU_MAC_DINH = 'password123';
 
 export default function Login() {
   const { dangNhap, thongBaoPhien } = useAuth();
-  const [tenDangNhap, setTenDangNhap] = useState(TAI_KHOAN_MAC_DINH);
+  const [email, setEmail] = useState(TAI_KHOAN_MAC_DINH);
   const [matKhau, setMatKhau] = useState(MAT_KHAU_MAC_DINH);
   const [ghiNho, setGhiNho] = useState(true);
   const [hienMatKhau, setHienMatKhau] = useState(false);
@@ -19,7 +19,7 @@ export default function Login() {
   const guiDangNhap = async (suKien) => {
     suKien.preventDefault();
     const loiMoi = {};
-    if (!tenDangNhap.trim()) loiMoi.tenDangNhap = 'Nhập email hoặc tên đăng nhập';
+    if (!email.trim()) loiMoi.email = 'Nhập email';
     if (!matKhau) loiMoi.matKhau = 'Nhập mật khẩu';
     setLoiTruong(loiMoi);
     setLoi('');
@@ -27,7 +27,7 @@ export default function Login() {
 
     setDangGui(true);
     try {
-      await dangNhap(tenDangNhap.trim(), matKhau, ghiNho);
+      await dangNhap(email.trim(), matKhau, ghiNho);
     } catch (e) {
       const loiTuMayChu = {};
       if (Array.isArray(e.chiTiet)) {
@@ -64,20 +64,20 @@ export default function Login() {
 
         <form onSubmit={guiDangNhap} className="space-y-5 text-xs" noValidate>
           <div>
-            <label htmlFor="tenDangNhap" className="block font-semibold text-slate-300 mb-2">
-              Email hoặc tên đăng nhập
+            <label htmlFor="email" className="block font-semibold text-slate-300 mb-2">
+              Email
             </label>
             <input
-              id="tenDangNhap"
-              type="text"
+              id="email"
+              type="email"
               autoComplete="username"
               autoFocus
-              value={tenDangNhap}
-              onChange={(e) => setTenDangNhap(e.target.value)}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="admin@badminton.vn"
-              className={lopNhap(loiTruong.tenDangNhap)}
+              className={lopNhap(loiTruong.email)}
             />
-            {loiTruong.tenDangNhap && <p className="mt-1.5 text-rose-400 font-semibold">{loiTruong.tenDangNhap}</p>}
+            {loiTruong.email && <p className="mt-1.5 text-rose-400 font-semibold">{loiTruong.email}</p>}
           </div>
 
           <div>
