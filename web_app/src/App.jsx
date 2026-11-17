@@ -75,14 +75,15 @@ function priceAt(khungGias, thoiDiem) {
   return Number(cuoiTuan ? k.giaCuoiTuanKhachVangLai : k.giaNgayThuongKhachVangLai)
 }
 
-// Ngân hàng thuộc sở hữu nhà nước Việt Nam (và Techcombank theo yêu cầu) kèm mã ngân hàng (BIN)
+// Ngân hàng trong nước (nhà nước, và Techcombank/MB Bank theo yêu cầu). `code` là mã ngân hàng
+// đúng với danh sách của API (GET /api/tai-khoan/ngan-hang); API chỉ nhận mã, tên do BE tự lấy.
 const BANKS = [
-  { name: 'Vietcombank', code: '970436' },
-  { name: 'VietinBank', code: '970415' },
-  { name: 'BIDV', code: '970418' },
-  { name: 'Agribank', code: '970405' },
-  { name: 'Techcombank', code: '970407' },
-  { name: 'MB Bank (Ngân hàng Quân đội)', code: '970422' },
+  { code: 'VCB', name: 'Vietcombank' },
+  { code: 'CTG', name: 'VietinBank' },
+  { code: 'BIDV', name: 'BIDV' },
+  { code: 'VBA', name: 'Agribank' },
+  { code: 'TCB', name: 'Techcombank' },
+  { code: 'MB', name: 'MB Bank' },
 ]
 
 // Biểu tượng cờ lê và thùng rác (SVG)
@@ -2940,19 +2941,12 @@ async function registerApi(form) {
       soDienThoai: form.phone.replace(/\s/g, ''),
       email: form.email,
       matKhau: form.password,
-      // Chưa có API nào ghi HoSoChuSan.TenDoanhNghiep: backend hiện bỏ qua trường này (đang chờ bạn quyết định thêm API)
       tenDoanhNghiep: form.company,
+      // API đăng ký chủ sân nhận luôn tài khoản nhận tiền: chỉ gửi mã ngân hàng (VD: VCB), BE tự lấy tên
+      maNganHang: form.bankCode,
+      soTaiKhoan: form.accountNumber,
+      xacNhanMatKhau: form.confirm,
     },
-  })
-}
-
-// Lưu tài khoản ngân hàng nhận tiền của chủ sân vào HoSoChuSan (API có sẵn PUT /api/chu-san/dang-ky/ngan-hang),
-// dùng token vừa nhận khi đăng ký. Chủ tài khoản = họ tên đăng ký.
-async function saveBankApi(token, { bankName, bankCode, accountNumber, accountHolder }) {
-  return callApi('/api/chu-san/dang-ky/ngan-hang', {
-    method: 'PUT',
-    token,
-    body: { tenNganHang: bankName, maNganHang: bankCode, soTaiKhoan: accountNumber, chuTaiKhoan: accountHolder },
   })
 }
 
@@ -3204,7 +3198,7 @@ function LoginPage({ onLogin, onGoRegister, notice, defaultIdentity }) {
 }
 
 function RegisterPage({ onRegistered, onGoLogin }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', company: '', bankName: '', bankCode: '', accountNumber: '', password: '', confirm: '' })
+  const [form, setForm] = useState({ name: '', email: '', phone: '', company: '', bankCode: '', accountNumber: '', password: '', confirm: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -3219,11 +3213,10 @@ function RegisterPage({ onRegistered, onGoLogin }) {
     const email = form.email.trim().toLowerCase()
     const phone = parseVnPhone(form.phone)
     const company = form.company.trim()
-    const bankName = form.bankName.trim()
     const bankCode = form.bankCode.trim()
     const accountNumber = form.accountNumber.replace(/\s/g, '')
 
-    if (!name || !email || !form.phone.trim() || !company || !bankName || !bankCode || !accountNumber || !form.password || !form.confirm) {
+    if (!name || !email || !form.phone.trim() || !company || !bankCode || !accountNumber || !form.password || !form.confirm) {
       setError('Vui lòng nhập đầy đủ thông tin.')
       return
     }
@@ -3247,12 +3240,8 @@ function RegisterPage({ onRegistered, onGoLogin }) {
       setError('Tên doanh nghiệp từ 2 đến 150 ký tự.')
       return
     }
-    if (bankName.length < 2 || bankName.length > 100) {
-      setError('Tên ngân hàng từ 2 đến 100 ký tự.')
-      return
-    }
-    if (bankCode.length < 2 || bankCode.length > 20) {
-      setError('Mã ngân hàng từ 2 đến 20 ký tự.')
+    if (!BANKS.some((b) => b.code === bankCode)) {
+      setError('Vui lòng chọn ngân hàng.')
       return
     }
     if (!/^\d{6,20}$/.test(accountNumber)) {
@@ -3272,15 +3261,9 @@ function RegisterPage({ onRegistered, onGoLogin }) {
     setError('')
     try {
       // Tài khoản mới ở trạng thái chờ duyệt: bỏ qua token trả về, bắt buộc đăng nhập lại sau khi được duyệt
-      const created = await registerApi({ name, email, phone, company, password: form.password })
-      // Tài khoản đã tạo (NguoiDung + HoSoChuSan trạng thái nháp). Lưu tiếp tài khoản ngân hàng vào HoSoChuSan.
-      let bankError = ''
-      try {
-        await saveBankApi(created.maTruyCap, { bankName, bankCode, accountNumber, accountHolder: name })
-      } catch (err) {
-        bankError = describeApiError(err)
-      }
-      onRegistered({ email, bankError })
+      await registerApi({ name, email, phone, company, password: form.password, confirm: form.confirm, bankCode, accountNumber })
+      // API tạo luôn hồ sơ chủ sân (đã gồm tài khoản ngân hàng) ở trạng thái chờ duyệt
+      onRegistered({ email, bankError: '' })
     } catch (err) {
       setError(describeApiError(err))
     } finally {
@@ -3311,19 +3294,12 @@ function RegisterPage({ onRegistered, onGoLogin }) {
           <input className="input" type="text" placeholder="Công ty TNHH Cầu Lông Thành Công" autoComplete="organization" value={form.company} onChange={update('company')} />
         </label>
         <label className="field-block auth-field">
-          <span className="label">Tên ngân hàng</span>
-          <select
-            className="input"
-            value={form.bankName}
-            onChange={(e) => {
-              const bank = BANKS.find((b) => b.name === e.target.value)
-              setForm((prev) => ({ ...prev, bankName: e.target.value, bankCode: bank?.code ?? '' }))
-            }}
-          >
+          <span className="label">Ngân hàng</span>
+          <select className="input" value={form.bankCode} onChange={update('bankCode')}>
             <option value="">Chọn ngân hàng</option>
             {BANKS.map((b) => (
-              <option key={b.code} value={b.name}>
-                {b.name}
+              <option key={b.code} value={b.code}>
+                {b.code} - {b.name}
               </option>
             ))}
           </select>
