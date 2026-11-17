@@ -83,31 +83,23 @@ async function chay() {
 
   nhom('2. Chủ sân: đăng ký → chưa duyệt bị chặn');
   const emailChu = `chu${hau}@test.vn`;
-  r = await goi('POST', '/tai-khoan/dang-ky-chu-san', { body: { matKhau, hoTen: 'Chủ Sân Thử', soDienThoai: '0988000111', email: emailChu } });
-  kiemTra('đăng ký chủ sân (201), trạng thái duyệt = draft', r.ma === 201 && r.du?.duLieu?.nguoiDung?.trangThaiDuyet === 'draft', tomTat(r));
+  r = await goi('POST', '/tai-khoan/dang-ky-chu-san', { body: { matKhau, xacNhanMatKhau: matKhau, hoTen: 'Chủ Sân Thử', soDienThoai: '0988000111', email: emailChu, tenDoanhNghiep: 'Công ty Sân Thử', maNganHang: 'MB', soTaiKhoan: '0123456789' } });
+  kiemTra('đăng ký chủ sân (201), trạng thái duyệt = pending, có thông báo', r.ma === 201 && r.du?.duLieu?.nguoiDung?.trangThaiDuyet === 'pending' && !!r.du?.duLieu?.nguoiDung?.thongBaoDuyet, tomTat(r));
   r = await goi('POST', '/tai-khoan/dang-nhap-web', { body: { email: emailChu, matKhau } });
   const tokenChu = r.du?.duLieu?.maTruyCap;
   kiemTra('đăng nhập web chủ sân', r.ma === 200 && !!tokenChu, tomTat(r));
   r = await goi('POST', '/tai-khoan/dang-nhap', { body: { email: emailChu, matKhau } });
   kiemTra('chủ sân đăng nhập cổng mobile → 403', r.ma === 403, tomTat(r));
   r = await goi('GET', '/chu-san/co-so', { token: tokenChu });
-  kiemTra('chưa duyệt gọi /chu-san/co-so → 403', r.ma === 403, tomTat(r));
+  kiemTra('chưa duyệt gọi /chu-san/co-so → 403 OWNER_PENDING', r.ma === 403 && r.du?.loi?.maLoi === 'OWNER_PENDING', tomTat(r));
   r = await goi('GET', '/chu-san/dang-ky', { token: tokenChu });
-  kiemTra('xem trạng thái đăng ký', r.ma === 200, tomTat(r));
+  kiemTra('xem hồ sơ: doanh nghiệp + ngân hàng đã điền sẵn', r.ma === 200 && r.du?.duLieu?.tenDoanhNghiep === 'Công ty Sân Thử' && r.du?.duLieu?.thongTinNganHang?.soTaiKhoan === '0123456789' && r.du?.duLieu?.thongTinNganHang?.tenNganHang === 'MB Bank', tomTat(r));
   r = await goi('POST', '/chu-san/dang-ky/gui-duyet', { token: tokenChu });
-  kiemTra('gửi duyệt khi chưa đủ bước → 400', r.ma === 400, tomTat(r));
+  kiemTra('đang pending, gửi duyệt lại → 409', r.ma === 409, tomTat(r));
 
-  nhom('3. Chủ sân điền hồ sơ (đăng ký) → gửi duyệt');
+  nhom('3. Chủ sân đang pending: chưa sửa được cơ sở/bảng giá');
   const coSo = { tenCoSo: `Sân Thử ${hau}`, diaChi: '1 Đường Thử, Phường 1', tinhThanh: 'TP. Hồ Chí Minh', quanHuyen: 'Quận 1', soDienThoai: '0988000111', linkBanDo: 'https://maps.google.com/?q=1,1', gioMoCua: '06:00', gioDongCua: '22:00', soPhutDatToiThieu: 60 };
-  r = await goi('PUT', '/chu-san/dang-ky/co-so', { token: tokenChu, body: coSo });
-  kiemTra('lưu thông tin cơ sở', r.ma === 200, tomTat(r));
   const khungGia = [{ gioBatDau: '06:00', gioKetThuc: '22:00', giaNgayThuongKhachVangLai: 80000, giaNgayThuongKhachCoDinh: 70000, giaCuoiTuanKhachVangLai: 100000, giaCuoiTuanKhachCoDinh: 90000 }];
-  r = await goi('PUT', '/chu-san/dang-ky/bang-gia', { token: tokenChu, body: { khungGias: khungGia } });
-  kiemTra('lưu bảng giá', r.ma === 200, tomTat(r));
-  r = await goi('PUT', '/chu-san/dang-ky/ngan-hang', { token: tokenChu, body: { tenNganHang: 'MB Bank', maNganHang: 'MB', soTaiKhoan: '0123456789', chuTaiKhoan: 'CHU SAN THU' } });
-  kiemTra('lưu ngân hàng', r.ma === 200, tomTat(r));
-  r = await goi('POST', '/chu-san/dang-ky/gui-duyet', { token: tokenChu });
-  kiemTra('gửi duyệt → pending', r.ma === 200 && r.du?.duLieu?.trangThaiDuyet === 'pending', tomTat(r));
   r = await goi('PUT', '/chu-san/dang-ky/co-so', { token: tokenChu, body: coSo });
   kiemTra('đang chờ duyệt thì không sửa được → 409', r.ma === 409, tomTat(r));
 
@@ -130,9 +122,13 @@ async function chay() {
   kiemTra('khách gọi API chủ sân → 403', r.ma === 403, tomTat(r));
 
   nhom('5. Chủ sân sau duyệt: sân con, cơ sở, khoá giờ');
+  r = await goi('POST', '/chu-san/co-so', { token: tokenChu, body: coSo });
+  kiemTra('sau duyệt: tạo cơ sở đầu tiên', r.ma === 201 || r.ma === 200, tomTat(r));
+  r = await goi('PUT', '/chu-san/co-so/bang-gia', { token: tokenChu, body: { khungGias: khungGia } });
+  kiemTra('sau duyệt: lưu bảng giá', r.ma === 200, tomTat(r));
   r = await goi('GET', '/chu-san/co-so', { token: tokenChu });
   const maCoSo = r.du?.duLieu?.[0]?.maCoSo;
-  kiemTra('GET /chu-san/co-so trả DANH SÁCH, cơ sở đầu active', r.ma === 200 && Array.isArray(r.du?.duLieu) && r.du.duLieu.length === 1 && r.du.duLieu[0].trangThai === 'active', tomTat(r));
+  kiemTra('GET /chu-san/co-so trả DANH SÁCH 1 cơ sở', r.ma === 200 && Array.isArray(r.du?.duLieu) && r.du.duLieu.length === 1, tomTat(r));
   r = await goi('POST', '/chu-san/san', { token: tokenChu, body: { tenSan: 'Sân 1' } });
   const maSan = r.du?.duLieu?.maSan;
   kiemTra('tạo sân 1', r.ma === 201 || r.ma === 200, tomTat(r));
@@ -270,8 +266,6 @@ async function chay() {
     r = await goi('GET', `/chu-san/bao-cao/khach-hang/chi-tiet?${truyVan}`, { token: tokenChu });
     kiemTra('thống kê khách: chi tiết 1 khách', r.ma === 200 && r.du?.duLieu?.khach?.soLuotDat >= 1, tomTat(r));
   }
-  r = await goi('GET', '/chu-san/rut-tien/so-du', { token: tokenChu });
-  kiemTra('số dư rút tiền', r.ma === 200, tomTat(r));
   r = await goi('GET', '/chu-san/dat-san', { token: tokenChu });
   const donCuaChu = r.du?.duLieu?.cacDon || [];
   kiemTra('chủ sân thấy đơn khách vừa đặt (2 đơn)', r.ma === 200 && donCuaChu.length === 2, tomTat(r));

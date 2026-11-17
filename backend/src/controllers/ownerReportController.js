@@ -10,6 +10,3 @@ exports.layDoanhThu = xuLy((yeuCau) => dichVu.layDoanhThu(layMaChuSan(yeuCau), y
 exports.layTopKhach = xuLy((yeuCau) => dichVu.layTopKhach(layMaChuSan(yeuCau), yeuCau.query));
 exports.layTopSan = xuLy((yeuCau) => dichVu.layTopSan(layMaChuSan(yeuCau), yeuCau.query));
 exports.layCongNo = xuLy((yeuCau) => dichVu.layCongNo(layMaChuSan(yeuCau)));
-exports.laySoDuRutTien = xuLy((yeuCau) => dichVu.laySoDuRutTien(layMaChuSan(yeuCau)));
-exports.taoYeuCauRutTien = xuLy((yeuCau) =>
-  dichVu.taoYeuCauRutTien(layMaChuSan(yeuCau)), daTao);

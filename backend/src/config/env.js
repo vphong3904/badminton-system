@@ -12,6 +12,8 @@ const cauHinh = {
     matKhau: process.env.DB_PASSWORD || '',
     ten: process.env.DB_NAME || 'db_sancaulong',
   },
+  // Job nền chuyển đơn confirmed đã qua giờ chơi → completed + nhắc đánh giá (chu kỳ, phút; tối thiểu 1).
+  jobHoanThanhPhut: Math.max(Number(process.env.JOB_HOAN_THANH_PHUT) || 5, 1),
   khoaBiMat: process.env.JWT_SECRET || 'dev_secret',
   thoiHanMaTruyCap: process.env.JWT_EXPIRES_IN || '7d',
   nguonTruyCap: process.env.CORS_ORIGIN || '*',

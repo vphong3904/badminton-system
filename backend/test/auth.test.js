@@ -39,14 +39,26 @@ const ketNoiGia = {
       return [{ insertId: nguoiDung.maNguoiDung }];
     }
     if (/INSERT INTO HoSoChuSan/.test(cauTruyVan)) {
-      hoSosChuSan.push({ maNguoiDung: thamSo[0], trangThaiDuyet: 'draft' });
+      assert.match(cauTruyVan, /'pending', NOW\(\)/, 'hồ sơ phải vào thẳng pending');
+      hoSosChuSan.push({
+        maNguoiDung: thamSo[0],
+        tenDoanhNghiep: thamSo[1],
+        tenNganHang: thamSo[2],
+        maNganHang: thamSo[3],
+        soTaiKhoan: thamSo[4],
+        chuTaiKhoan: thamSo[5],
+        trangThaiDuyet: 'pending',
+      });
       return [{}];
     }
     if (/FROM NguoiDung nd\s+LEFT JOIN HoSoChuSan hs/.test(cauTruyVan)) {
       const nguoiDung = nguoiDungs.find((muc) => muc.maNguoiDung === thamSo[0]);
+      const hoSo = nguoiDung && hoSosChuSan.find((muc) => muc.maNguoiDung === nguoiDung.maNguoiDung);
       return [[nguoiDung && {
         ...taoNguoiDungCongKhai(nguoiDung),
-        trangThaiDuyet: hoSosChuSan.find((hoSo) => hoSo.maNguoiDung === nguoiDung.maNguoiDung)?.trangThaiDuyet,
+        trangThaiDuyet: hoSo?.trangThaiDuyet,
+        tenDoanhNghiep: hoSo?.tenDoanhNghiep,
+        lyDoTuChoi: hoSo?.lyDoTuChoi,
       }]];
     }
     if (/FROM NguoiDung WHERE Email = \?/.test(cauTruyVan)) {
@@ -137,20 +149,62 @@ test('Sai mật khẩu, trùng email và dữ liệu không hợp lệ', async (
   })).maTrangThai, 400);
 });
 
-test('Chủ sân đăng ký và đăng nhập đúng nền tảng', async () => {
-  const ketQuaDangKy = await guiYeuCauPost('/tai-khoan/dang-ky-chu-san', {
-    ...thongTinDangKy,
-    email: 'b@x.com',
-  });
-  assert.equal(ketQuaDangKy.noiDung.duLieu.nguoiDung.trangThaiDuyet, 'draft');
+const thongTinDangKyChuSan = {
+  ...thongTinDangKy,
+  email: 'b@x.com',
+  tenDoanhNghiep: 'Công ty Thể thao B',
+  maNganHang: 'MB',
+  soTaiKhoan: '0123456789',
+  xacNhanMatKhau: 'matkhau123',
+};
+
+test('Chủ sân đăng ký: hồ sơ pending, điền sẵn doanh nghiệp + ngân hàng, vẫn đăng nhập được', async () => {
+  const ketQuaDangKy = await guiYeuCauPost('/tai-khoan/dang-ky-chu-san', thongTinDangKyChuSan);
+  assert.equal(ketQuaDangKy.maTrangThai, 201);
+  const nguoiDung = ketQuaDangKy.noiDung.duLieu.nguoiDung;
+  assert.equal(nguoiDung.trangThaiDuyet, 'pending');
+  assert.equal(nguoiDung.tenDoanhNghiep, 'Công ty Thể thao B');
+  assert.match(nguoiDung.thongBaoDuyet, /đang đợi duyệt/);
+
+  const hoSo = hoSosChuSan.find((muc) => muc.maNguoiDung === nguoiDung.maNguoiDung);
+  assert.equal(hoSo.trangThaiDuyet, 'pending');
+  assert.equal(hoSo.tenDoanhNghiep, 'Công ty Thể thao B');
+  assert.equal(hoSo.tenNganHang, 'MB Bank');
+  assert.equal(hoSo.maNganHang, 'MB');
+  assert.equal(hoSo.soTaiKhoan, '0123456789');
+  assert.equal(hoSo.chuTaiKhoan, 'Nguyen A');
+
   assert.equal((await guiYeuCauPost('/tai-khoan/dang-nhap', {
     email: 'b@x.com',
     matKhau: 'matkhau123',
   })).maTrangThai, 403);
-  assert.equal((await guiYeuCauPost('/tai-khoan/dang-nhap-web', {
+  const dangNhapWeb = await guiYeuCauPost('/tai-khoan/dang-nhap-web', {
     email: 'b@x.com',
     matKhau: 'matkhau123',
-  })).maTrangThai, 200);
+  });
+  assert.equal(dangNhapWeb.maTrangThai, 200);
+  assert.equal(dangNhapWeb.noiDung.duLieu.nguoiDung.trangThaiDuyet, 'pending');
+  assert.match(dangNhapWeb.noiDung.duLieu.nguoiDung.thongBaoDuyet, /đang đợi duyệt/);
+});
+
+test('Đăng ký chủ sân kiểm tra đủ trường mới', async () => {
+  const thuLai = (thayDoi) => guiYeuCauPost('/tai-khoan/dang-ky-chu-san', {
+    ...thongTinDangKyChuSan, email: 'c@x.com', ...thayDoi,
+  });
+  const truongLoi = async (thayDoi) => (await thuLai(thayDoi)).noiDung.loi.chiTiet.map((muc) => muc.truong);
+
+  assert.deepEqual(await truongLoi({ xacNhanMatKhau: 'khac12345' }), ['xacNhanMatKhau']);
+  assert.deepEqual(await truongLoi({ tenDoanhNghiep: '  ' }), ['tenDoanhNghiep']);
+  assert.deepEqual(await truongLoi({ maNganHang: 'KHONGCO' }), ['maNganHang']);
+  assert.deepEqual(await truongLoi({ soTaiKhoan: '12ab' }), ['soTaiKhoan']);
+  const thieu = await guiYeuCauPost('/tai-khoan/dang-ky-chu-san', thongTinDangKy);
+  assert.equal(thieu.maTrangThai, 400);
+  assert.equal((await thuLai({ email: 'b@x.com' })).maTrangThai, 409);
+});
+
+test('Danh sách ngân hàng công khai', async () => {
+  const phanHoi = await fetch(`${diaChiCoSo}/tai-khoan/ngan-hang`).then((r) => r.json());
+  assert.ok(phanHoi.duLieu.some((nganHang) => nganHang.maNganHang === 'MB' && nganHang.tenNganHang));
 });
 
 test('Không có mã truy cập thì bị từ chối', async () => {

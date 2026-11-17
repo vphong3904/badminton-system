@@ -39,5 +39,12 @@ test('OpenAPI JSON liệt kê API khách, thanh toán, chủ sân và quản tr�
   assert.ok(taiLieu.paths['/api/chu-san/bao-cao/khach-hang'].get);
   assert.ok(taiLieu.paths['/api/chu-san/bao-cao/khach-hang/chi-tiet'].get);
   assert.ok(taiLieu.paths['/api/quan-tri/nhat-ky'].get);
+  // Luồng đánh giá: khách sửa/xoá, chủ sân phản hồi, admin ẩn/hiện.
+  assert.ok(taiLieu.paths['/api/khach/dat-san/{maDatSan}/danh-gia'].patch);
+  assert.ok(taiLieu.paths['/api/khach/dat-san/{maDatSan}/danh-gia'].delete);
+  assert.ok(taiLieu.paths['/api/chu-san/danh-gia'].get);
+  assert.ok(taiLieu.paths['/api/chu-san/danh-gia/{maDanhGia}/phan-hoi'].patch);
+  assert.ok(taiLieu.paths['/api/quan-tri/danh-gia'].get);
+  assert.ok(taiLieu.paths['/api/quan-tri/danh-gia/{maDanhGia}/an'].patch);
   assert.ok(taiLieu.components.securitySchemes.BearerAuth);
 });

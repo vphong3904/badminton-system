@@ -49,7 +49,7 @@ test('Đổi mật khẩu: mới phải khác cũ và đạt chính sách', () =
   assert.equal(loi(auth.doiMatKhau.body, { matKhauCu: 'cu', matKhauMoi: 'matkhaumoi1' }), null);
 });
 
-test('Sửa hồ sơ: cho số liên hệ 10–11 số (BE service mới bắt số di động khi ĐỔI số)', () => {
+test('Sửa hồ sơ: cho số liên hệ (di động 10 số hoặc số bàn 11 số; BE service mới bắt số di động khi ĐỔI số)', () => {
   assert.equal(loi(auth.capNhatThongTinCaNhan.body, { soDienThoai: '02838123456' }), null);
   assert.ok(loi(auth.capNhatThongTinCaNhan.body, {}));
 });
@@ -66,7 +66,7 @@ test('Đặt sân: tên + SĐT bắt buộc, giờ theo mốc 30 phút', () => {
   assert.deepEqual(loi(customer.datLe.body, { ...datHopLe, tenKhach: undefined }),
     ['Vui lòng nhập tên (tối thiểu 2 ký tự).']);
   assert.deepEqual(loi(customer.datLe.body, { ...datHopLe, soDienThoai: '12' }),
-    ['Số điện thoại không hợp lệ (10–11 số, bắt đầu bằng 0).']);
+    ['Số điện thoại không hợp lệ (di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0).']);
   assert.deepEqual(loi(customer.datLe.body, { ...datHopLe, ghiChu: 'x'.repeat(501) }),
     ['Ghi chú tối đa 500 ký tự.']);
   assert.ok(loi(customer.datLe.body, { ...datHopLe, gioBatDau: '18:15' }));

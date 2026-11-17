@@ -1,6 +1,7 @@
 const ungDung = require('./app');
 const cauHinh = require('./config/env');
 const { pool } = require('./config/db');
+const { batDauJob: batDauJobHoanThanhDon } = require('./jobs/hoanThanhDon');
 
 async function khoiDongServer() {
     try {
@@ -16,6 +17,9 @@ async function khoiDongServer() {
         ungDung.listen(cauHinh.cong, () => {
             console.log(`🚀 API chạy tại http://localhost:${cauHinh.cong}/api`);
         });
+
+        // Job nền: đơn confirmed đã qua giờ chơi → completed + nhắc khách đánh giá.
+        batDauJobHoanThanhDon();
 
     } catch (loi) {
         console.error('❌ Kết nối MySQL thất bại:', loi.message);

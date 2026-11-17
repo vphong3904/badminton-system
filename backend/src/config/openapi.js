@@ -95,7 +95,7 @@ const maSan = [thamSoDuongDan('maSan')];
 const maDatSan = [thamSoDuongDan('maDatSan')];
 const maThanhToan = [thamSoDuongDan('maThanhToan')];
 const maNguoiDung = [thamSoDuongDan('maNguoiDung')];
-const maYeuCau = [thamSoDuongDan('maYeuCau')];
+const maDanhGia = [thamSoDuongDan('maDanhGia')];
 
 module.exports = {
   openapi: '3.0.3',
@@ -114,6 +114,8 @@ module.exports = {
     { name: 'Tài khoản' },
     { name: 'Khách hàng' },
     { name: 'Thanh toán' },
+    { name: 'Thông báo' },
+    { name: 'Đánh giá', description: 'Khách sửa/xoá đánh giá, chủ sân phản hồi, admin ẩn/hiện đánh giá vi phạm' },
     { name: 'Chủ sân' },
     { name: 'Quản trị' },
   ],
@@ -128,7 +130,10 @@ module.exports = {
       post: endpoint('Đăng ký tài khoản khách hàng', 'Tài khoản', { body: 'DangKy' }),
     },
     '/api/tai-khoan/dang-ky-chu-san': {
-      post: endpoint('Đăng ký tài khoản chủ sân', 'Tài khoản', { body: 'DangKy' }),
+      post: endpoint('Đăng ký tài khoản chủ sân (hồ sơ vào thẳng pending, chờ admin duyệt)', 'Tài khoản', { body: 'DangKyChuSan' }),
+    },
+    '/api/tai-khoan/ngan-hang': {
+      get: endpoint('Danh sách ngân hàng cho ô chọn khi đăng ký chủ sân', 'Tài khoản'),
     },
     '/api/tai-khoan/dang-nhap': {
       post: endpoint('Đăng nhập khách hàng', 'Tài khoản', { body: 'DangNhap' }),
@@ -203,7 +208,41 @@ module.exports = {
       get: endpoint('Xem hóa đơn nháp và hướng dẫn thanh toán', 'Khách hàng', { auth: true, params: maDatSan }),
     },
     '/api/khach/dat-san/{maDatSan}/huy': {
-      post: endpoint('Hủy đơn đặt sân', 'Khách hàng', { auth: true, params: maDatSan }),
+      post: endpoint(
+        'Hủy đơn đặt sân. Đơn đã thanh toán hoàn theo chính sách: còn ≥24h hoàn 100%, 12–24h hoàn 50%, '
+        + 'dưới 12h không hoàn; có hoàn thì tạo yêu cầu hoàn tiền cho chủ sân và gửi thông báo',
+        'Khách hàng',
+        { auth: true, params: maDatSan }),
+    },
+    '/api/khach/dat-san/{maDatSan}/khieu-nai': {
+      post: endpoint(
+        'Khách khiếu nại chủ sân (đơn đã thanh toán thành công hoặc đã hủy; mỗi đơn 1 lần; trả 201)',
+        'Khách hàng',
+        { auth: true, params: maDatSan, body: 'KhieuNaiMoi', responses: { 404: response.Loi, 409: response.Loi } }),
+    },
+    '/api/khach/khieu-nai': {
+      get: endpoint('Danh sách khiếu nại của khách', 'Khách hàng', { auth: true }),
+    },
+    '/api/thong-bao': {
+      get: endpoint('Danh sách thông báo của người đăng nhập (mới nhất trước) + số chưa đọc', 'Thông báo', {
+        auth: true,
+        query: [
+          thamSoTruyVan('trang', 'Trang, mặc định 1'),
+          thamSoTruyVan('soLuong', 'Số dòng mỗi trang (1–50), mặc định 30'),
+          thamSoTruyVan('chiChuaDoc', 'true = chỉ thông báo chưa đọc'),
+        ],
+      }),
+    },
+    '/api/thong-bao/chua-doc': {
+      get: endpoint('Đếm thông báo chưa đọc (cho chấm đỏ ở chuông)', 'Thông báo', { auth: true }),
+    },
+    '/api/thong-bao/da-doc-tat-ca': {
+      post: endpoint('Đánh dấu tất cả thông báo là đã đọc', 'Thông báo', { auth: true }),
+    },
+    '/api/thong-bao/{maThongBao}/da-doc': {
+      patch: endpoint('Đánh dấu một thông báo là đã đọc', 'Thông báo', {
+        auth: true, params: [thamSoDuongDan('maThongBao')],
+      }),
     },
     '/api/khach/dat-san/{maDatSan}/danh-gia': {
       post: endpoint('Đánh giá cơ sở sau khi chơi xong và đã thanh toán (đơn completed, mỗi đơn 1 đánh giá; trả 201)', 'Khách hàng', {
@@ -212,6 +251,19 @@ module.exports = {
         body: 'DanhGiaMoi',
         responses: { 404: response.Loi, 409: response.Loi },
       }),
+      patch: endpoint(
+        'Khách sửa đánh giá của mình (soSao và/hoặc noiDung, ít nhất 1 trường) trong 7 ngày kể từ lúc đánh giá; '
+        + 'quá hạn → 409 REVIEW_EDIT_EXPIRED; đánh giá đã bị ẩn → 409 REVIEW_HIDDEN; tính lại điểm cơ sở. '
+        + 'maDatSan là buổi đang giữ đánh giá (maDatSanDanhGia trong GET /khach/dat-san)',
+        'Đánh giá', {
+          auth: true,
+          params: maDatSan,
+          body: 'SuaDanhGia',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
+      delete: endpoint(
+        'Khách xoá đánh giá của mình (không giới hạn thời gian), tính lại điểm cơ sở; sau đó được đánh giá lại',
+        'Đánh giá', { auth: true, params: maDatSan, responses: { 404: response.Loi } }),
     },
     '/api/khach/dat-san/{maDatSan}/tai-khoan-hoan-tien': {
       put: endpoint('Cập nhật tài khoản nhận tiền hoàn', 'Khách hàng', {
@@ -244,6 +296,24 @@ module.exports = {
         },
       },
     },
+    '/api/chu-san/ngan-hang': {
+      patch: endpoint('Đổi tài khoản nhận tiền (mọi trạng thái hồ sơ): chọn maNganHang + số tài khoản', 'Chủ sân', { auth: true, body: 'DoiNganHang' }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/dong': {
+      patch: endpoint('Đóng tạm cơ sở (409 HAS_ACTIVE_BOOKINGS nếu còn khách/lịch cố định)', 'Chủ sân', { auth: true, params: maCoSo, body: 'LyDoDongXoa' }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/mo': {
+      patch: endpoint('Mở lại cơ sở đã đóng', 'Chủ sân', { auth: true, params: maCoSo }),
+    },
+    '/api/chu-san/san/{maSan}/dong': {
+      patch: endpoint('Đóng tạm sân (409 HAS_ACTIVE_BOOKINGS nếu còn khách/lịch cố định)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
+    },
+    '/api/chu-san/san/{maSan}/mo': {
+      patch: endpoint('Mở lại sân đã đóng', 'Chủ sân', { auth: true, params: maSan }),
+    },
+    '/api/chu-san/san/{maSan}': {
+      delete: endpoint('Xoá sân (phải đóng trước; 409 MUST_CLOSE_FIRST / HAS_ACTIVE_BOOKINGS / HAS_BOOKING_HISTORY)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
+    },
     '/api/chu-san/dang-ky': {
       get: endpoint('Xem tiến độ đăng ký chủ sân', 'Chủ sân', { auth: true }),
     },
@@ -255,6 +325,9 @@ module.exports = {
     },
     '/api/chu-san/dang-ky/ngan-hang': {
       put: endpoint('Lưu tài khoản nhận tiền', 'Chủ sân', { auth: true, body: 'NganHang' }),
+    },
+    '/api/chu-san/dang-ky/doanh-nghiep': {
+      put: endpoint('Sửa tên doanh nghiệp (khi hồ sơ bị từ chối)', 'Chủ sân', { auth: true, body: 'DoanhNghiep' }),
     },
     '/api/chu-san/dang-ky/gui-duyet': {
       post: endpoint('Gửi hồ sơ chủ sân để quản trị duyệt', 'Chủ sân', { auth: true }),
@@ -310,6 +383,28 @@ module.exports = {
         auth: true,
         params: [thamSoDuongDan('maKhoa')],
       }),
+    },
+    '/api/chu-san/danh-gia': {
+      get: endpoint('Chủ sân xem đánh giá của các cơ sở của mình (kể cả đã bị ẩn, có cờ biAn), mới nhất trước', 'Đánh giá', {
+        auth: true,
+        query: [
+          thamSoTruyVan('maCoSo', 'Chỉ lấy đánh giá của cơ sở này'),
+          thamSoTruyVan('soSao', 'Lọc theo số sao 1–5'),
+          thamSoTruyVan('chuaPhanHoi', 'true = chỉ đánh giá chưa phản hồi · false = chỉ đánh giá đã phản hồi'),
+          thamSoTruyVan('trang', 'Trang, từ 1 (mặc định 1)'),
+          thamSoTruyVan('soLuong', 'Số dòng mỗi trang, 1–50 (mặc định 20)'),
+        ],
+      }),
+    },
+    '/api/chu-san/danh-gia/{maDanhGia}/phan-hoi': {
+      patch: endpoint(
+        'Chủ sân phản hồi đánh giá của cơ sở mình (2–1000 ký tự; ghi đè được phản hồi cũ); đánh giá đã ẩn → 409; báo khách review_replied',
+        'Đánh giá', {
+          auth: true,
+          params: maDanhGia,
+          body: 'PhanHoiDanhGia',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
     },
     '/api/chu-san/dat-san': {
       get: endpoint('Danh sách đơn đặt sân của khách tại cơ sở của tôi', 'Chủ sân', {
@@ -438,11 +533,23 @@ module.exports = {
     '/api/chu-san/bao-cao/cong-no': {
       get: endpoint('Xem công nợ khách đặt tại sân', 'Chủ sân', { auth: true }),
     },
-    '/api/chu-san/rut-tien/so-du': {
-      get: endpoint('Xem số dư có thể rút', 'Chủ sân', { auth: true }),
+    '/api/quan-tri/san/{maSan}/dong': {
+      patch: endpoint('Đóng tạm sân (cùng điều kiện với chủ sân)', 'Quản trị', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
     },
-    '/api/chu-san/rut-tien': {
-      post: endpoint('Tạo yêu cầu rút tiền', 'Chủ sân', { auth: true }),
+    '/api/quan-tri/san/{maSan}/mo': {
+      patch: endpoint('Mở lại sân', 'Quản trị', { auth: true, params: maSan }),
+    },
+    '/api/quan-tri/san/{maSan}': {
+      delete: endpoint('Xoá sân (phải đóng trước)', 'Quản trị', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
+    },
+    '/api/quan-tri/co-so/{maCoSo}/dong': {
+      patch: endpoint('Đóng tạm cơ sở', 'Quản trị', { auth: true, params: maCoSo, body: 'LyDoDongXoa' }),
+    },
+    '/api/quan-tri/co-so/{maCoSo}/mo': {
+      patch: endpoint('Mở lại cơ sở', 'Quản trị', { auth: true, params: maCoSo }),
+    },
+    '/api/quan-tri/co-so/{maCoSo}': {
+      delete: endpoint('Xoá cơ sở (phải đóng trước)', 'Quản trị', { auth: true, params: maCoSo, body: 'LyDoDongXoa' }),
     },
     '/api/quan-tri/chu-san/cho-duyet': {
       get: endpoint('Liệt kê hồ sơ chủ sân chờ duyệt', 'Quản trị', { auth: true }),
@@ -488,22 +595,47 @@ module.exports = {
         body: 'MaGiaoDichHoan',
       }),
     },
-    '/api/quan-tri/rut-tien': {
-      get: endpoint('Xem hàng đợi yêu cầu rút tiền', 'Quản trị', { auth: true }),
-    },
-    '/api/quan-tri/rut-tien/{maYeuCau}/da-chi': {
-      patch: endpoint('Ghi nhận đã chi tiền cho chủ sân', 'Quản trị', {
+    '/api/quan-tri/khieu-nai': {
+      get: endpoint('Admin đọc danh sách khiếu nại chủ sân (mặc định chờ xử lý, cũ nhất trước)', 'Quản trị', {
         auth: true,
-        params: maYeuCau,
-        body: 'MaGiaoDich',
+        query: [
+          thamSoTruyVan('trangThai', 'pending | upheld | rejected | all (mặc định pending)'),
+          thamSoTruyVan('gioiHan', 'Số dòng tối đa (1–100)'),
+        ],
       }),
     },
-    '/api/quan-tri/rut-tien/{maYeuCau}/tu-choi': {
-      patch: endpoint('Từ chối yêu cầu rút tiền', 'Quản trị', {
+    '/api/quan-tri/khieu-nai/{maKhieuNai}/xu-ly': {
+      patch: endpoint(
+        'Admin xử lý khiếu nại: upheld → cộng 1 lần vi phạm (1 cảnh cáo, 2 cảnh cáo nghiêm trọng, 3 khóa tài khoản chủ sân); rejected → bác bỏ (cần ghiChu)',
+        'Quản trị',
+        {
+          auth: true,
+          params: [thamSoDuongDan('maKhieuNai')],
+          body: 'XuLyKhieuNai',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
+    },
+    '/api/quan-tri/danh-gia': {
+      get: endpoint('Admin xem đánh giá (mặc định tất cả) kèm tên cơ sở, tên chủ sân, tên khách', 'Đánh giá', {
         auth: true,
-        params: maYeuCau,
-        body: 'LyDoTuChoi',
+        query: [
+          thamSoTruyVan('trangThai', 'hien | an | all (mặc định all)'),
+          thamSoTruyVan('maCoSo', 'Lọc theo cơ sở'),
+          thamSoTruyVan('soSao', 'Lọc theo số sao 1–5'),
+          thamSoTruyVan('trang', 'Trang, từ 1 (mặc định 1)'),
+          thamSoTruyVan('soLuong', 'Số dòng mỗi trang, 1–50 (mặc định 20)'),
+        ],
       }),
+    },
+    '/api/quan-tri/danh-gia/{maDanhGia}/an': {
+      patch: endpoint(
+        'Admin ẩn (an=true, bắt buộc lyDo 3–255 ký tự) hoặc hiện lại (an=false) đánh giá; tính lại điểm cơ sở (chỉ đánh giá hiển thị), ghi nhật ký an_danh_gia / hien_danh_gia, báo khách và chủ sân',
+        'Đánh giá', {
+          auth: true,
+          params: maDanhGia,
+          body: 'AnHienDanhGia',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
     },
     '/api/quan-tri/nhat-ky': {
       get: endpoint('Tra cứu nhật ký hệ thống', 'Quản trị', {
@@ -535,6 +667,25 @@ module.exports = {
           soDienThoai: { type: 'string', pattern: '^0[35789][0-9]{8}$', description: 'Số di động VN; nhận cả +84 và tự chuẩn hoá về 0xxxxxxxxx', example: '0901234567' },
           email: { type: 'string', format: 'email', example: 'khach@example.com' },
         },
+      },
+      DangKyChuSan: {
+        type: 'object',
+        required: ['hoTen', 'email', 'soDienThoai', 'tenDoanhNghiep', 'maNganHang', 'soTaiKhoan', 'matKhau', 'xacNhanMatKhau'],
+        properties: {
+          hoTen: { type: 'string', minLength: 2, maxLength: 100, example: 'Nguyen Van A' },
+          email: { type: 'string', format: 'email', example: 'chusan@example.com' },
+          soDienThoai: { type: 'string', pattern: '^0[35789][0-9]{8}$', example: '0901234567' },
+          tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150, example: 'Công ty TNHH Thể thao ABC' },
+          maNganHang: { type: 'string', description: 'Mã ngân hàng lấy từ GET /api/tai-khoan/ngan-hang (BE tự điền tên ngân hàng)', example: 'MB' },
+          soTaiKhoan: { type: 'string', pattern: '^[0-9]{6,20}$', example: '0123456789' },
+          matKhau: { type: 'string', format: 'password', minLength: 8, maxLength: 72, example: 'MatKhau123' },
+          xacNhanMatKhau: { type: 'string', format: 'password', description: 'Phải trùng matKhau', example: 'MatKhau123' },
+        },
+      },
+      DoanhNghiep: {
+        type: 'object',
+        required: ['tenDoanhNghiep'],
+        properties: { tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150 } },
       },
       DangNhap: {
         type: 'object',
@@ -598,12 +749,69 @@ module.exports = {
           },
         ],
       },
+      KhieuNaiMoi: {
+        type: 'object',
+        required: ['noiDung'],
+        properties: {
+          noiDung: { type: 'string', minLength: 10, maxLength: 1000 },
+          giaiDoan: { type: 'string', enum: ['at_cancel', 'after_cancel'], description: 'at_cancel: bấm ngay sau khi hủy' },
+        },
+      },
+      XuLyKhieuNai: {
+        type: 'object',
+        required: ['quyetDinh'],
+        properties: {
+          quyetDinh: { type: 'string', enum: ['upheld', 'rejected'] },
+          ghiChu: { type: 'string', minLength: 3, maxLength: 500, description: 'Bắt buộc khi rejected' },
+        },
+      },
       DanhGiaMoi: {
         type: 'object',
         required: ['soSao'],
         properties: {
           soSao: { type: 'integer', minimum: 1, maximum: 5, example: 5 },
           noiDung: { type: 'string', maxLength: 1000, description: 'Không bắt buộc', example: 'Sân đẹp, đèn sáng, chủ sân nhiệt tình.' },
+        },
+      },
+      SuaDanhGia: {
+        type: 'object',
+        minProperties: 1,
+        properties: {
+          soSao: { type: 'integer', minimum: 1, maximum: 5, example: 4 },
+          noiDung: { type: 'string', maxLength: 1000, description: 'Chuỗi rỗng = xoá bình luận' },
+        },
+      },
+      PhanHoiDanhGia: {
+        type: 'object',
+        required: ['noiDung'],
+        properties: {
+          noiDung: { type: 'string', minLength: 2, maxLength: 1000, description: 'Đã trim', example: 'Cảm ơn bạn đã ủng hộ sân!' },
+        },
+      },
+      AnHienDanhGia: {
+        type: 'object',
+        required: ['an'],
+        properties: {
+          an: { type: 'boolean', description: 'true = ẩn · false = hiện lại' },
+          lyDo: { type: 'string', minLength: 3, maxLength: 255, description: 'Bắt buộc khi an=true', example: 'Ngôn từ xúc phạm' },
+        },
+      },
+      DanhGiaChiTiet: {
+        type: 'object',
+        properties: {
+          maDanhGia: { type: 'integer' },
+          maDatSan: { type: 'integer' },
+          maDon: { type: 'string' },
+          maCoSo: { type: 'integer' },
+          tenCoSo: { type: 'string' },
+          tenKhach: { type: 'string' },
+          tenChuSan: { type: 'string', description: 'Chỉ có ở API admin' },
+          soSao: { type: 'integer', minimum: 1, maximum: 5 },
+          noiDung: { type: 'string', nullable: true },
+          ngayTao: { type: 'string' },
+          phanHoiChuSan: { type: 'string', nullable: true },
+          ngayPhanHoi: { type: 'string', nullable: true },
+          biAn: { type: 'boolean' },
         },
       },
       TaiKhoanHoanTien: {
@@ -660,6 +868,19 @@ module.exports = {
             },
           },
         },
+      },
+      DoiNganHang: {
+        type: 'object',
+        required: ['maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
+        properties: {
+          maNganHang: { type: 'string', description: 'Mã từ GET /api/tai-khoan/ngan-hang (BE tự điền tên)', example: 'MB' },
+          soTaiKhoan: { type: 'string', example: '0123456789' },
+          chuTaiKhoan: { type: 'string', example: 'NGUYEN VAN A' },
+        },
+      },
+      LyDoDongXoa: {
+        type: 'object',
+        properties: { lyDo: { type: 'string', maxLength: 255, description: 'Tuỳ chọn, ghi vào nhật ký' } },
       },
       NganHang: {
         type: 'object',

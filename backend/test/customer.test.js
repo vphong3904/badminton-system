@@ -1,9 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-process.env.BANK_ACCOUNT_NUMBER = '1234567890';
-process.env.BANK_CODE = 'VCB';
-
 const cacTruyVan = [];
 let coDonTrung = false;
 let maDatSanTiepTheo = 100;
@@ -42,6 +39,9 @@ const ketNoiGia = {
     }
     if (/FROM KhoaSan k JOIN San s/.test(cauTruyVan)) {
       return [[{ maSan: 4, gioBatDau: '10:00:00', gioKetThuc: '11:30:00' }]];
+    }
+    if (/FROM HoSoChuSan h/.test(cauTruyVan)) {
+      return [[{ tenNganHang: 'Vietcombank', maNganHang: 'VCB', soTaiKhoan: '1234567890', chuTaiKhoan: 'NGUYEN VAN A' }]];
     }
     if (/SELECT HoTen AS hoTen/.test(cauTruyVan)) {
       return [[{ hoTen: 'Khach Test', soDienThoai: '0901234567' }]];
@@ -104,6 +104,7 @@ test('Tạo đơn lẻ tính giá, phí và mã QR theo schema db_sancaulong', a
   assert.equal(ketQua.cacDon[0].tongTien, 100000);
   assert.match(ketQua.anhQrUrl, /^https:\/\/img\.vietqr\.io\/image\/VCB-1234567890-compact2\.png/);
   assert.match(ketQua.anhQrUrl, /addInfo=BK/);
+  assert.match(ketQua.anhQrUrl, /accountName=NGUYEN\+VAN\+A/);
   const truyVanDatSan = cacTruyVan.find((muc) => /INSERT INTO DatSan/.test(muc.cauTruyVan));
   assert.deepEqual(truyVanDatSan.thamSo.slice(5, 16), [
     'walk_in', null, 3, ngayMai, '12:00', '13:00', 60, 100000, 10000, 90000, 10,

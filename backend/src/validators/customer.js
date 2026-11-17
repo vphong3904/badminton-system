@@ -102,3 +102,32 @@ exports.thongTinHoanTien = {
       .min(2, 'Vui lòng nhập tên chủ tài khoản.').max(100, 'Tên chủ tài khoản tối đa 100 ký tự.'),
   }),
 };
+
+// Khiếu nại chủ sân (đơn đã thanh toán thành công / đã huỷ).
+exports.guiKhieuNai = {
+  params: z.object({ maDatSan: maSo }),
+  body: z.object({
+    noiDung: z.string({ error: 'Vui lòng nhập nội dung khiếu nại.' }).trim()
+      .min(10, 'Nội dung khiếu nại tối thiểu 10 ký tự.')
+      .max(1000, 'Nội dung khiếu nại tối đa 1000 ký tự.'),
+    // 'at_cancel': bấm ngay sau khi huỷ; còn lại BE tự suy ra từ trạng thái đơn.
+    giaiDoan: z.enum(['at_cancel', 'after_cancel']).optional(),
+  }),
+};
+
+// Sửa đánh giá của mình (trong 7 ngày): ít nhất 1 trong 2 trường. Xoá chỉ cần :maDatSan.
+exports.suaDanhGia = {
+  params: z.object({ maDatSan: maSo }),
+  body: z.object({
+    soSao: z.number({ error: 'Vui lòng chọn số sao.' })
+      .int('Vui lòng chọn số sao.')
+      .min(1, 'Vui lòng chọn số sao.')
+      .max(5, 'Số sao tối đa là 5.').optional(),
+    noiDung: z.string({ error: 'Bình luận không hợp lệ.' }).trim()
+      .max(1000, 'Bình luận tối đa 1000 ký tự.').optional(),
+  }).refine((duLieu) => duLieu.soSao !== undefined || duLieu.noiDung !== undefined, {
+    message: 'Cần sửa số sao hoặc bình luận.',
+    path: ['soSao'],
+  }),
+};
+exports.xoaDanhGia = { params: z.object({ maDatSan: maSo }) };

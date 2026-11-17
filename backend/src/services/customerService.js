@@ -3,8 +3,13 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { doiGioRaPhut } = require('../utils/time');
 const { taoAnhQrUrl, layTaiKhoanChuSan, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
+const { guiThongBao, dinhDangTien, baoDanhGiaMoi } = require('./notificationService');
+const { tinhLaiDiemCoSo } = require('./reviewService');
+const { ganTrangThaiHienThi, tinhTrangThaiHienThi } = require('../utils/trangThaiDon');
+const { tinhSoTienHoan, MAC_DINH: HOAN_MAC_DINH } = require('../utils/chinhSachHoanTien');
 
 const GIOI_HAN_DAT_CO_DINH_NGAY = 90;
+const SO_NGAY_SUA_DANH_GIA = 7;
 
 function kiemTraNgay(ngay) {
   const ngayDate = /^\d{4}-\d{2}-\d{2}$/.test(ngay) ? new Date(`${ngay}T00:00:00Z`) : null;
@@ -23,6 +28,12 @@ function taoDanhSachNgay(ngayBatDau, ngayKetThuc) {
   }
   return Array.from({ length: soNgay }, (_muc, viTri) =>
     new Date(Date.parse(`${ngayBatDau}T00:00:00Z`) + viTri * 86_400_000).toISOString().slice(0, 10));
+}
+
+// 'YYYY-MM-DD' (hoặc Date) → 'dd/mm/yyyy' để đưa vào nội dung thông báo.
+function dinhDangNgay(ngay) {
+  const [nam, thang, ngayTrongThang] = String(ngay).slice(0, 10).split('-');
+  return `${ngayTrongThang}/${thang}/${nam}`;
 }
 
 function taoMaDon() {
@@ -236,6 +247,31 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
       `INSERT INTO ThanhToan (MaDatSan, SoTien, NoiDungChuyenKhoan)
        VALUES (?,?,?)`,
       [cacDon[0].maDatSan, tongTien, cacDon[0].maDon]);
+    // Thông báo "Đặt lịch thành công" cho khách + báo chủ sân có đơn mới (đơn chưa được duyệt).
+    const khungGio = `${duLieu.gioBatDau}–${duLieu.gioKetThuc}`;
+    const moTaLich = cacNgay.length === 1
+      ? `ngày ${dinhDangNgay(cacNgay[0])}, ${khungGio}`
+      : `${cacNgay.length} buổi từ ${dinhDangNgay(cacNgay[0])} đến ${dinhDangNgay(cacNgay.at(-1))}, ${khungGio}`;
+    await guiThongBao(ketNoi, {
+      maNguoiDung,
+      loai: 'booking_created',
+      tieuDe: 'Đặt lịch thành công',
+      noiDung: `Bạn đã đặt ${san.tenSan} - ${san.tenCoSo} ${moTaLich} (mã ${cacDon[0].maDon}). `
+        + `Vui lòng chuyển khoản ${dinhDangTien(tongTien)} và gửi ảnh để chủ sân duyệt.`,
+      loaiThamChieu: 'booking',
+      maThamChieu: cacDon[0].maDatSan,
+      khoa: `booking_created:${cacDon[0].maDatSan}`,
+    });
+    await guiThongBao(ketNoi, {
+      maNguoiDung: san.maChuSan,
+      loai: 'new_booking_for_owner',
+      tieuDe: 'Có đơn đặt sân mới',
+      noiDung: `${lienHe.tenKhach} đặt ${san.tenSan} - ${san.tenCoSo} ${moTaLich} `
+        + `(${dinhDangTien(tongTien)}). Đơn đang chờ khách thanh toán.`,
+      loaiThamChieu: 'booking',
+      maThamChieu: cacDon[0].maDatSan,
+      khoa: `new_booking_for_owner:${cacDon[0].maDatSan}`,
+    });
     return {
       maLichCoDinh,
       cacDon,
@@ -435,11 +471,13 @@ async function lietKeDatSan(maNguoiDung) {
        t.TrangThai AS trangThaiThanhToan, t.PhuongThuc AS phuongThucThanhToan,
        t.MaGiaoDichNganHang AS maGiaoDichNganHang, t.NgayThanhToan AS ngayThanhToan,
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
-       t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan,
+       t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan, t.LyDoLoi AS lyDoLoi,
        d.TenKhach AS tenKhach, d.SoDienThoaiLienHe AS soDienThoaiLienHe,
        s.MaSan AS maSan, s.TenSan AS tenSan,
        cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi, cs.LinkBanDo AS linkBanDo,
-       dg.MaDanhGia AS maDanhGia, dg.SoSao AS soSaoDanhGia
+       dg.MaDanhGia AS maDanhGia, dg.SoSao AS soSaoDanhGia, dg.NoiDung AS noiDungDanhGia, dg.MaDatSan AS maDatSanDanhGia,
+       dg.BiAn AS danhGiaBiAn, (dg.NgayTao + INTERVAL ${SO_NGAY_SUA_DANH_GIA} DAY >= NOW()) AS trongHanSuaDanhGia,
+       kn.MaKhieuNai AS maKhieuNai, kn.TrangThai AS trangThaiKhieuNai
      FROM DatSan d
      JOIN San s ON s.MaSan=d.MaSan
      JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
@@ -447,18 +485,37 @@ async function lietKeDatSan(maNguoiDung) {
        WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
      END
-     LEFT JOIN DanhGia dg ON dg.MaDatSan=d.MaDatSan
+     -- Đánh giá của đơn; đơn thuộc lịch cố định thì dùng chung đánh giá của cả lịch (mỗi lịch 1 đánh giá).
+     LEFT JOIN DanhGia dg ON dg.MaDanhGia=(
+       SELECT x.MaDanhGia FROM DanhGia x JOIN DatSan dx ON dx.MaDatSan=x.MaDatSan
+       WHERE dx.MaDatSan=d.MaDatSan OR (d.MaLichCoDinh IS NOT NULL AND dx.MaLichCoDinh=d.MaLichCoDinh)
+       ORDER BY (dx.MaDatSan=d.MaDatSan) DESC, x.MaDanhGia LIMIT 1)
+     LEFT JOIN KhieuNai kn ON kn.MaDatSan=d.MaDatSan
      WHERE d.MaKhachHang=? ORDER BY d.NgayChoi DESC, d.GioBatDau DESC`,
     [maNguoiDung]);
-  return cacDon.map(({ maDanhGia, ...don }) => {
+  return cacDon.map(({
+    maDanhGia, maKhieuNai, lyDoLoi, danhGiaBiAn, trongHanSuaDanhGia, ...don
+  }) => {
     const daDanhGia = maDanhGia != null;
-    return {
+    const daKhieuNai = maKhieuNai != null;
+    // Lý do chủ sân từ chối ảnh chuyển khoản: chỉ có nghĩa khi thanh toán đang chờ gửi lại.
+    const lyDoTuChoi = don.trangThaiThanhToan === 'pending' && lyDoLoi ? lyDoLoi : null;
+    return ganTrangThaiHienThi({
       ...don,
+      lyDoTuChoi,
+      // Nút "Khiếu nại chủ sân": đơn app đã thanh toán thành công hoặc đã huỷ, chưa khiếu nại lần nào.
+      daKhieuNai,
+      coTheKhieuNai: !daKhieuNai && don.nguon === 'app'
+        && ['confirmed', 'completed', 'cancelled'].includes(don.trangThai),
       daDanhGia,
       soSaoDanhGia: daDanhGia ? Number(don.soSaoDanhGia) : null,
-      // Đã chơi xong + đã thanh toán + chưa đánh giá → FE hiện nút "Đánh giá sân".
+      // Buổi đang giữ đánh giá (chính đơn này, hoặc buổi khác cùng lịch cố định): FE sửa/xoá theo mã này.
+      maDatSanDanhGia: daDanhGia ? Number(don.maDatSanDanhGia) : null,
+      // Đã chơi xong (completed) + đã thanh toán + chưa đánh giá (kể cả theo lịch cố định) → nút "Đánh giá sân".
       coTheDanhGia: !daDanhGia && coTheDanhGiaDon(don.trangThai, don.trangThaiThanhToan),
-    };
+      // Sửa được trong 7 ngày kể từ lúc đánh giá và khi chưa bị admin ẩn (server tính, FE chỉ hiển thị).
+      coTheSuaDanhGia: daDanhGia && !Number(danhGiaBiAn) && !!Number(trongHanSuaDanhGia),
+    });
   });
 }
 
@@ -471,7 +528,8 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
        TIMESTAMPDIFF(SECOND, NOW(), d.HetHanGiuCho) AS conLaiGiay,
        t.MaThanhToan AS maThanhToan, t.SoTien AS soTien, t.TrangThai AS trangThaiThanhToan,
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan, t.AnhChuyenKhoan AS anhChuyenKhoanUrl,
-       t.NgayGuiAnh AS ngayGuiAnh, t.LyDoLoi AS lyDoLoi
+       t.NgayGuiAnh AS ngayGuiAnh, t.LyDoLoi AS lyDoLoi,
+       t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan
      FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
        WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
@@ -479,13 +537,26 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
      WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
     [maDatSan, maNguoiDung]);
   if (!hoaDon) throw AppError.khongTimThay('Không tìm thấy hóa đơn');
-  const { lyDoLoi, ...phanConLai } = hoaDon;
+  const { lyDoLoi, trangThaiHoanTien, soTienHoan, ...phanConLai } = hoaDon;
+  // Thêm trangThaiHienThi/nhanTrangThai/nhomTrangThai (backend tính, app chỉ hiển thị).
+  const kemTrangThai = (duLieu) => {
+    const { ma, nhan, nhom } = tinhTrangThaiHienThi({
+      trangThai: hoaDon.trangThaiDatSan,
+      trangThaiThanhToan: hoaDon.trangThaiThanhToan,
+      trangThaiHoanTien,
+      soTienHoan,
+      lyDoTuChoi: duLieu.lyDoTuChoi,
+    });
+    return { ...duLieu, trangThaiHienThi: ma, nhanTrangThai: nhan, nhomTrangThai: nhom };
+  };
   if (!['pending', 'confirming'].includes(hoaDon.trangThaiThanhToan)) {
-    return { ...phanConLai, anhQrUrl: null, taiKhoanNhan: null, chuaCauHinhThanhToan: false, lyDoTuChoi: null };
+    return kemTrangThai({
+      ...phanConLai, anhQrUrl: null, taiKhoanNhan: null, chuaCauHinhThanhToan: false, lyDoTuChoi: null,
+    });
   }
   // Tài khoản của chủ sân; null nếu chủ sân chưa nhập ngân hàng: vẫn trả hoá đơn, chưa có QR.
   const taiKhoan = await layTaiKhoanNhanTheoDatSan(pool, maDatSan);
-  return {
+  return kemTrangThai({
     ...phanConLai,
     anhQrUrl: taoAnhQrUrl(hoaDon.noiDungChuyenKhoan, Number(hoaDon.soTien), taiKhoan),
     chuaCauHinhThanhToan: !taiKhoan,
@@ -497,7 +568,7 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
       chuTaiKhoan: taiKhoan.chuTaiKhoan,
     },
     lyDoTuChoi: hoaDon.trangThaiThanhToan === 'pending' ? lyDoLoi : null,
-  };
+  });
 }
 
 async function huyDatSan(maNguoiDung, maDatSan) {
@@ -527,16 +598,21 @@ async function huyDatSan(maNguoiDung, maDatSan) {
       : [{ maDatSan, ngay: donDatSan.ngay, gioBatDau: donDatSan.gioBatDau, tongTien: donDatSan.tongTien }];
     if (!danhSachMaDon.length) throw AppError.biTrung('Không còn buổi nào có thể hủy');
 
+    // Chính sách hoàn tiền (đơn đã thanh toán): còn ≥24h → 100%; 12–24h → 50%; <12h → không hoàn.
     let soTienHoan = 0;
-    if (donDatSan.trangThaiThanhToan === 'success') {
-      const gioMienPhi = await layCauHinh(ketNoi, 'cancel_free_hours');
-      const tiLeHoanMuon = await layCauHinh(ketNoi, 'late_cancel_refund_percent');
+    let tongDaTra = 0;
+    const daThanhToan = donDatSan.trangThaiThanhToan === 'success';
+    if (daThanhToan) {
+      const cauHinhHoan = {
+        gioMienPhi: await layCauHinh(ketNoi, 'cancel_free_hours') || HOAN_MAC_DINH.gioMienPhi,
+        gioNuaTien: await layCauHinh(ketNoi, 'cancel_half_hours') || HOAN_MAC_DINH.gioNuaTien,
+        tiLeNuaTien: await layCauHinh(ketNoi, 'late_cancel_refund_percent') || HOAN_MAC_DINH.tiLeNuaTien,
+      };
       for (const muc of danhSachMaDon) {
         const batDau = new Date(`${muc.ngay}T${String(muc.gioBatDau).slice(0, 8)}+07:00`);
         const conGio = (batDau.getTime() - Date.now()) / 3_600_000;
-        soTienHoan += conGio >= gioMienPhi
-          ? Number(muc.tongTien)
-          : Math.round(Number(muc.tongTien) * tiLeHoanMuon / 100);
+        tongDaTra += Number(muc.tongTien);
+        soTienHoan += tinhSoTienHoan(muc.tongTien, conGio, cauHinhHoan);
       }
     }
     await ketNoi.query(
@@ -560,14 +636,80 @@ async function huyDatSan(maNguoiDung, maDatSan) {
           [donDatSan.maThanhToan]);
       }
     }
+
+    // Thông báo: khách luôn nhận một thông báo; chủ sân chỉ nhận khi đơn đã trả tiền (có việc phải làm/biết).
+    const [[thongTinDon]] = await ketNoi.query(
+      `SELECT d.MaDon AS maDon, d.TenKhach AS tenKhach, s.TenSan AS tenSan,
+         cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan
+       FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+       WHERE d.MaDatSan=?`, [maDatSan]);
+    const tiLeHoan = tongDaTra > 0 ? Math.round(soTienHoan * 100 / tongDaTra) : 0;
+    if (thongTinDon) {
+      const nhanDon = `${thongTinDon.tenSan} - ${thongTinDon.tenCoSo} (mã ${thongTinDon.maDon})`;
+      if (soTienHoan > 0) {
+        await guiThongBao(ketNoi, {
+          maNguoiDung,
+          loai: 'refund_requested',
+          tieuDe: 'Yêu cầu hoàn tiền đã được gửi',
+          noiDung: `Bạn đã huỷ ${nhanDon}. Yêu cầu hoàn ${dinhDangTien(soTienHoan)} (${tiLeHoan}%) `
+            + 'đã được gửi đến chủ sân. Bạn sẽ nhận thông báo khi chủ sân hoàn tiền.',
+          loaiThamChieu: 'booking',
+          maThamChieu: Number(maDatSan),
+          khoa: `refund_requested:${maDatSan}`,
+        });
+        await guiThongBao(ketNoi, {
+          maNguoiDung: thongTinDon.maChuSan,
+          loai: 'refund_requested',
+          tieuDe: 'Có yêu cầu hoàn tiền mới',
+          noiDung: `${thongTinDon.tenKhach} huỷ ${nhanDon}. Vui lòng chuyển khoản hoàn `
+            + `${dinhDangTien(soTienHoan)} (${tiLeHoan}%) cho khách rồi bấm "Đã hoàn tiền".`,
+          loaiThamChieu: 'payment',
+          maThamChieu: donDatSan.maThanhToan,
+          khoa: `refund_requested_owner:${maDatSan}`,
+        });
+      } else {
+        await guiThongBao(ketNoi, {
+          maNguoiDung,
+          loai: 'booking_cancelled',
+          tieuDe: 'Đã huỷ đơn đặt sân',
+          noiDung: daThanhToan
+            ? `Bạn đã huỷ ${nhanDon}. Đơn huỷ trong vòng ${HOAN_MAC_DINH.gioNuaTien} giờ trước giờ chơi nên không được hoàn tiền.`
+            : `Bạn đã huỷ ${nhanDon}.`,
+          loaiThamChieu: 'booking',
+          maThamChieu: Number(maDatSan),
+          khoa: `booking_cancelled:${maDatSan}`,
+        });
+        if (daThanhToan) {
+          await guiThongBao(ketNoi, {
+            maNguoiDung: thongTinDon.maChuSan,
+            loai: 'booking_cancelled',
+            tieuDe: 'Khách đã huỷ đơn',
+            noiDung: `${thongTinDon.tenKhach} huỷ ${nhanDon} sát giờ chơi, không phát sinh hoàn tiền.`,
+            loaiThamChieu: 'booking',
+            maThamChieu: Number(maDatSan),
+            khoa: `booking_cancelled_owner:${maDatSan}`,
+          });
+        }
+      }
+    }
+
+    let thongBaoHuy = null;
+    if (soTienHoan > 0) {
+      thongBaoHuy = 'Yêu cầu hoàn tiền đã được gửi đến chủ sân. Chủ sân sẽ hoàn tiền cho bạn trong thời gian sớm nhất.';
+    } else if (daThanhToan) {
+      thongBaoHuy = `Đơn huỷ trong vòng ${HOAN_MAC_DINH.gioNuaTien} giờ trước giờ chơi nên không được hoàn tiền.`;
+    }
     return {
       daHuy: true,
+      maDatSan: Number(maDatSan),
+      daThanhToan,
       soTienHoanDuKien: soTienHoan,
+      tiLeHoan,
       // Chủ sân hoàn tiền; khách có thể (không bắt buộc) bổ sung TK nhận hoàn để chủ sân chuyển nhanh.
       canCapNhatTaiKhoanHoan: soTienHoan > 0,
-      thongBao: soTienHoan > 0
-        ? 'Tiền sẽ được chủ sân hoàn lại trong thời gian sớm nhất.'
-        : null,
+      // FE hiện nút "Khiếu nại chủ sân" ngay sau khi huỷ.
+      coTheKhieuNai: true,
+      thongBao: thongBaoHuy,
     };
   });
 }
@@ -640,13 +782,15 @@ async function layDanhSachDanhGia(maCoSo, { trang = 1, soLuong = 20 } = {}) {
   return { danhSach, trang, soLuong, tongSo: Number(tong.tongSo) };
 }
 
-// Khách đánh giá cơ sở sau khi chơi xong và đã thanh toán. Mỗi đơn 1 đánh giá (UNIQUE MaDatSan).
-// Ghi đánh giá + tính lại CoSo.DiemTrungBinh/SoDanhGia trong cùng giao dịch.
+// Khách đánh giá cơ sở sau khi chơi xong và đã thanh toán. Mỗi đơn 1 đánh giá (UNIQUE MaDatSan);
+// đơn thuộc lịch cố định thì cả lịch chỉ 1 đánh giá (buổi đầu tiên được đánh giá).
+// Ghi đánh giá + tính lại CoSo.DiemTrungBinh/SoDanhGia + thông báo, tất cả trong một giao dịch.
 async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
   return thucHienGiaoDich(async (ketNoi) => {
     await hetHanDatSan(maNguoiDung, ketNoi);
     const [[don]] = await ketNoi.query(
       `SELECT d.MaDatSan AS maDatSan, d.TrangThai AS trangThai, s.MaCoSo AS maCoSo,
+         d.MaLichCoDinh AS maLichCoDinh,
          COALESCE((SELECT MIN(d2.MaDatSan) FROM DatSan d2
                    WHERE d2.MaLichCoDinh=d.MaLichCoDinh), d.MaDatSan) AS maDatSanThanhToan
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan
@@ -672,8 +816,18 @@ async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
       'SELECT MaDanhGia FROM DanhGia WHERE MaDatSan=?', [maDatSan]);
     if (daCo) throw loiDaDanhGia();
 
-    // Khoá dòng cơ sở để 2 đánh giá cùng lúc không tính điểm trung bình chồng nhau.
+    // Khoá dòng cơ sở để 2 đánh giá cùng lúc không tính điểm trung bình chồng nhau
+    // (và để kiểm tra "mỗi lịch cố định 1 đánh giá" bên dưới không bị 2 buổi vượt qua cùng lúc).
     await ketNoi.query('SELECT MaCoSo FROM CoSo WHERE MaCoSo=? FOR UPDATE', [don.maCoSo]);
+    if (don.maLichCoDinh) {
+      const [[daCoTheoLich]] = await ketNoi.query(
+        `SELECT dg.MaDanhGia AS maDanhGia FROM DanhGia dg
+         JOIN DatSan dl ON dl.MaDatSan=dg.MaDatSan
+         WHERE dl.MaLichCoDinh=? LIMIT 1`, [don.maLichCoDinh]);
+      if (daCoTheoLich) {
+        throw AppError.biTrung('Bạn đã đánh giá lịch cố định này rồi.', 'REVIEW_EXISTS');
+      }
+    }
     let maDanhGia;
     try {
       const [ketQua] = await ketNoi.query(
@@ -685,17 +839,13 @@ async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
       if (loi.code === 'ER_DUP_ENTRY') throw loiDaDanhGia();
       throw loi;
     }
-    await ketNoi.query(
-      `UPDATE CoSo SET
-         DiemTrungBinh=COALESCE((SELECT ROUND(AVG(SoSao),1) FROM DanhGia WHERE MaCoSo=? AND BiAn=0), 0),
-         SoDanhGia=(SELECT COUNT(*) FROM DanhGia WHERE MaCoSo=? AND BiAn=0)
-       WHERE MaCoSo=?`,
-      [don.maCoSo, don.maCoSo, don.maCoSo]);
-    const [[coSo]] = await ketNoi.query(
-      'SELECT DiemTrungBinh AS diemTrungBinh, SoDanhGia AS soDanhGia FROM CoSo WHERE MaCoSo=?',
-      [don.maCoSo]);
+    const diem = await tinhLaiDiemCoSo(ketNoi, don.maCoSo);
     const [[danhGia]] = await ketNoi.query(
       'SELECT NgayTao AS ngayTao FROM DanhGia WHERE MaDanhGia=?', [maDanhGia]);
+    // Thông báo chủ sân + cảm ơn khách (best-effort, không làm hỏng việc gửi đánh giá).
+    await baoDanhGiaMoi(ketNoi, {
+      maDanhGia, maCoSo: don.maCoSo, maKhachHang: maNguoiDung, soSao, noiDung,
+    });
     return {
       maDanhGia,
       maDatSan: Number(maDatSan),
@@ -703,8 +853,64 @@ async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
       soSao,
       noiDung: noiDung || null,
       ngayTao: danhGia.ngayTao,
-      diemTrungBinh: Number(coSo.diemTrungBinh),
-      soDanhGia: Number(coSo.soDanhGia),
+      ...diem,
+    };
+  });
+}
+
+// Lấy (và khoá) đánh giá của khách theo đơn; 404 nếu không phải của khách / chưa có.
+async function layDanhGiaCuaKhach(ketNoi, maNguoiDung, maDatSan) {
+  const [[danhGia]] = await ketNoi.query(
+    `SELECT MaDanhGia AS maDanhGia, MaCoSo AS maCoSo, SoSao AS soSao, NoiDung AS noiDung,
+       BiAn AS biAn, NgayTao AS ngayTao,
+       (NgayTao + INTERVAL ${SO_NGAY_SUA_DANH_GIA} DAY < NOW()) AS quaHanSua
+     FROM DanhGia WHERE MaDatSan=? AND MaKhachHang=? FOR UPDATE`,
+    [maDatSan, maNguoiDung]);
+  if (!danhGia) throw AppError.khongTimThay('Không tìm thấy đánh giá');
+  return danhGia;
+}
+
+// Khách sửa đánh giá của mình (soSao và/hoặc noiDung) trong vòng 7 ngày kể từ lúc đánh giá.
+// `maDatSan` là buổi đang giữ đánh giá (lietKeDatSan trả maDatSanDanhGia).
+async function suaDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const danhGia = await layDanhGiaCuaKhach(ketNoi, maNguoiDung, maDatSan);
+    if (Number(danhGia.quaHanSua)) {
+      throw AppError.biTrung(
+        `Đã quá ${SO_NGAY_SUA_DANH_GIA} ngày kể từ lúc đánh giá nên không thể sửa.`, 'REVIEW_EDIT_EXPIRED');
+    }
+    if (Number(danhGia.biAn)) {
+      throw AppError.biTrung('Đánh giá đã bị ẩn nên không thể sửa.', 'REVIEW_HIDDEN');
+    }
+    const soSaoMoi = soSao !== undefined ? soSao : Number(danhGia.soSao);
+    const noiDungMoi = noiDung !== undefined ? (noiDung || null) : danhGia.noiDung;
+    // Khoá dòng cơ sở trước khi tính lại điểm.
+    await ketNoi.query('SELECT MaCoSo FROM CoSo WHERE MaCoSo=? FOR UPDATE', [danhGia.maCoSo]);
+    await ketNoi.query(
+      'UPDATE DanhGia SET SoSao=?, NoiDung=? WHERE MaDanhGia=?',
+      [soSaoMoi, noiDungMoi, danhGia.maDanhGia]);
+    const diem = await tinhLaiDiemCoSo(ketNoi, danhGia.maCoSo);
+    return {
+      maDanhGia: danhGia.maDanhGia,
+      maDatSan: Number(maDatSan),
+      maCoSo: danhGia.maCoSo,
+      soSao: soSaoMoi,
+      noiDung: noiDungMoi,
+      ngayTao: danhGia.ngayTao,
+      ...diem,
+    };
+  });
+}
+
+// Khách xoá đánh giá của mình (không giới hạn thời gian) rồi được đánh giá lại.
+async function xoaDanhGia(maNguoiDung, maDatSan) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const danhGia = await layDanhGiaCuaKhach(ketNoi, maNguoiDung, maDatSan);
+    await ketNoi.query('SELECT MaCoSo FROM CoSo WHERE MaCoSo=? FOR UPDATE', [danhGia.maCoSo]);
+    await ketNoi.query('DELETE FROM DanhGia WHERE MaDanhGia=?', [danhGia.maDanhGia]);
+    const diem = await tinhLaiDiemCoSo(ketNoi, danhGia.maCoSo);
+    return {
+      maDanhGia: danhGia.maDanhGia, maDatSan: Number(maDatSan), maCoSo: danhGia.maCoSo, daXoa: true, ...diem,
     };
   });
 }
@@ -726,6 +932,8 @@ module.exports = {
   capNhatTaiKhoanHoan,
   layDanhSachDanhGia,
   guiDanhGia,
+  suaDanhGia,
+  xoaDanhGia,
   // Dùng chung cho đơn do chủ sân tạo (ownerBookingService).
   layThongTinSan,
   kiemTraKhungDat,

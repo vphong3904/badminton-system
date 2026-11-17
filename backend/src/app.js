@@ -39,6 +39,7 @@ ungDung.get('/api/suc-khoe/co-so-du-lieu', xuLyBatDongBo(async (_yeuCau, phanHoi
 ungDung.use('/api/tai-khoan', require('./routes/auth'));
 ungDung.use('/api/khach', require('./routes/customer'));
 ungDung.use('/api/thanh-toan', require('./routes/payment'));
+ungDung.use('/api/thong-bao', require('./routes/notification'));
 ungDung.use('/api/chu-san', require('./routes/owner'));
 ungDung.use('/api/quan-tri', require('./routes/admin'));
 ungDung.use(khongTimThayDuongDan);

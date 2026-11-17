@@ -1,4 +1,5 @@
 const dichVu = require('../services/customerService');
+const dichVuKhieuNai = require('../services/complaintService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thanhCong, daTao } = require('../utils/response');
 
@@ -25,6 +26,10 @@ exports.huyDatSan = xuLy((yeuCau) =>
   dichVu.huyDatSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.guiDanhGia = xuLy((yeuCau) =>
   dichVu.guiDanhGia(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body), daTao);
+exports.suaDanhGia = xuLy((yeuCau) =>
+  dichVu.suaDanhGia(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body));
+exports.xoaDanhGia = xuLy((yeuCau) =>
+  dichVu.xoaDanhGia(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.capNhatTaiKhoanHoan = xuLy((yeuCau) =>
   dichVu.capNhatTaiKhoanHoan(
     yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body));
@@ -34,3 +39,7 @@ exports.themYeuThich = xuLy((yeuCau) =>
   dichVu.themYeuThich(yeuCau.nguoiDung.maNguoiDung, yeuCau.body.maCoSo), daTao);
 exports.boYeuThich = xuLy((yeuCau) =>
   dichVu.boYeuThich(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maCoSo));
+exports.guiKhieuNai = xuLy((yeuCau) =>
+  dichVuKhieuNai.guiKhieuNai(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body), daTao);
+exports.lietKeKhieuNai = xuLy((yeuCau) =>
+  dichVuKhieuNai.lietKeKhieuNaiCuaKhach(yeuCau.nguoiDung.maNguoiDung));

@@ -3,6 +3,7 @@ const cauHinh = require('../config/env');
 const { pool } = require('../config/db');
 const AppError = require('../utils/AppError');
 const xuLyBatDongBo = require('../utils/asyncHandler');
+const { thongBaoTheoTrangThai, MA_LOI_THEO_TRANG_THAI } = require('../utils/hoSoChuSan');
 
 const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
   const ketQuaUyQuyen = /^Bearer\s+(.+)$/i.exec(yeuCau.headers.authorization || '');
@@ -30,10 +31,16 @@ const kiemTraVaiTro = (...cacVaiTro) => (yeuCau, _phanHoi, goiTiep) =>
 
 const kiemTraChuSanDaDuyet = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
   const [[hoSo]] = await pool.query(
-    'SELECT TrangThaiDuyet AS trangThaiDuyet FROM HoSoChuSan WHERE MaNguoiDung = ?',
+    `SELECT TrangThaiDuyet AS trangThaiDuyet, LyDoTuChoi AS lyDoTuChoi
+     FROM HoSoChuSan WHERE MaNguoiDung = ?`,
     [yeuCau.nguoiDung.maNguoiDung]);
-  if (!hoSo || hoSo.trangThaiDuyet !== 'approved') {
-    throw AppError.khongDuQuyen('Tài khoản chủ sân chưa được admin duyệt');
+  if (!hoSo) throw AppError.khongDuQuyen('Tài khoản chủ sân chưa có hồ sơ');
+  if (hoSo.trangThaiDuyet !== 'approved') {
+    // 403 kèm mã riêng (OWNER_PENDING / OWNER_REJECTED) để web hiện đúng màn thông báo.
+    throw new AppError(
+      403,
+      thongBaoTheoTrangThai(hoSo.trangThaiDuyet, hoSo.lyDoTuChoi),
+      MA_LOI_THEO_TRANG_THAI[hoSo.trangThaiDuyet] || 'FORBIDDEN');
   }
   goiTiep();
 });

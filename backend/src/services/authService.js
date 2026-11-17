@@ -4,6 +4,8 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const cauHinh = require('../config/env');
 const AppError = require('../utils/AppError');
 const { chuanHoaSoDienThoai, kiemTraSoDiDong } = require('../validators/quyTac');
+const { timNganHang } = require('../utils/nganHang');
+const { thongBaoTheoTrangThai } = require('../utils/hoSoChuSan');
 
 function taoThongTinNguoiDung(nguoiDung) {
   const thongTin = {
@@ -14,7 +16,13 @@ function taoThongTinNguoiDung(nguoiDung) {
     email: nguoiDung.email,
     trangThai: nguoiDung.trangThai,
   };
-  if (nguoiDung.vaiTro === 'owner') thongTin.trangThaiDuyet = nguoiDung.trangThaiDuyet;
+  if (nguoiDung.vaiTro === 'owner') {
+    thongTin.trangThaiDuyet = nguoiDung.trangThaiDuyet;
+    thongTin.tenDoanhNghiep = nguoiDung.tenDoanhNghiep ?? null;
+    thongTin.lyDoTuChoi = nguoiDung.lyDoTuChoi ?? null;
+    // Chưa được duyệt vẫn đăng nhập bình thường; web hiện thông báo này thay cho chức năng quản lý.
+    thongTin.thongBaoDuyet = thongBaoTheoTrangThai(nguoiDung.trangThaiDuyet, nguoiDung.lyDoTuChoi);
+  }
   return thongTin;
 }
 
@@ -36,9 +44,7 @@ async function dangKy(vaiTro, duLieuDangKy) {
           vaiTro, matKhauMaHoa, duLieuDangKy.hoTen,
           duLieuDangKy.soDienThoai, duLieuDangKy.email,
         ]);
-      if (vaiTro === 'owner') {
-        await ketNoi.query('INSERT INTO HoSoChuSan (MaNguoiDung) VALUES (?)', [ketQua.insertId]);
-      }
+      if (vaiTro === 'owner') await taoHoSoChuSan(ketNoi, ketQua.insertId, duLieuDangKy);
       return ketQua.insertId;
     });
     const nguoiDung = await layNguoiDung(maNguoiDung);
@@ -49,6 +55,26 @@ async function dangKy(vaiTro, duLieuDangKy) {
     }
     throw loi;
   }
+}
+
+// Đăng ký chủ sân: hồ sơ vào thẳng `pending` (chờ admin duyệt) và điền sẵn thông tin cơ bản:
+// tên doanh nghiệp + tài khoản nhận tiền (tên ngân hàng lấy theo mã; chủ tài khoản mặc định = họ tên).
+async function taoHoSoChuSan(ketNoi, maNguoiDung, duLieuDangKy) {
+  const nganHang = timNganHang(duLieuDangKy.maNganHang);
+  if (!nganHang) {
+    throw AppError.duLieuKhongHopLe('Dữ liệu không hợp lệ', [
+      { truong: 'maNganHang', thongBao: 'Ngân hàng không hợp lệ.' },
+    ]);
+  }
+  await ketNoi.query(
+    `INSERT INTO HoSoChuSan
+       (MaNguoiDung, TenDoanhNghiep, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan,
+        TrangThaiDuyet, NgayGuiDuyet)
+     VALUES (?,?,?,?,?,?, 'pending', NOW())`,
+    [
+      maNguoiDung, duLieuDangKy.tenDoanhNghiep, nganHang.tenNganHang, nganHang.maNganHang,
+      duLieuDangKy.soTaiKhoan, duLieuDangKy.hoTen,
+    ]);
 }
 
 async function dangNhap(email, matKhau, cacVaiTroDuocPhep) {
@@ -77,7 +103,8 @@ async function layNguoiDung(maNguoiDung) {
   const [[nguoiDung]] = await pool.query(
     `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro,
        nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.Email AS email,
-       nd.TrangThai AS trangThai, hs.TrangThaiDuyet AS trangThaiDuyet
+       nd.TrangThai AS trangThai, hs.TrangThaiDuyet AS trangThaiDuyet,
+       hs.TenDoanhNghiep AS tenDoanhNghiep, hs.LyDoTuChoi AS lyDoTuChoi
      FROM NguoiDung nd
      LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung = nd.MaNguoiDung
      WHERE nd.MaNguoiDung = ?`,

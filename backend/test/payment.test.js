@@ -182,7 +182,8 @@ test('Chủ sân từ chối: quay về pending kèm lý do, khách gửi lại 
 
 test('QR VietQR dùng đúng tài khoản cấu hình, không còn SePay', () => {
   const { taoAnhQrUrl } = require('../src/utils/vietqr');
-  const url = new URL(taoAnhQrUrl('BK261112ABC123', 75000));
+  const url = new URL(taoAnhQrUrl('BK261112ABC123', 75000, {
+    maNganHang: 'VIB', soTaiKhoan: 'BLC2603003960', chuTaiKhoan: 'TRINH THI NGOC LAN' }));
   assert.equal(url.hostname, 'img.vietqr.io');
   assert.equal(url.pathname, '/image/VIB-BLC2603003960-compact2.png');
   assert.equal(url.searchParams.get('amount'), '75000');

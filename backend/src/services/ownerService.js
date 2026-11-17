@@ -1,8 +1,11 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { kiemTraKhungGia } = require('../utils/time');
+const { thongBaoTheoTrangThai } = require('../utils/hoSoChuSan');
+const { timNganHang } = require('../utils/nganHang');
+const sanCoSo = require('./sanCoSoService');
 
-const TRANG_THAI_DUOC_SUA = ['draft', 'rejected'];
+const TRANG_THAI_DUOC_SUA = ['rejected'];
 
 async function layHoSo(maChuSan) {
   const [[hoSo]] = await pool.query(
@@ -79,6 +82,7 @@ async function chonCoSo(maChuSan, maCoSo) {
   return maCoSo ? layCoSoTheoMa(maChuSan, maCoSo) : batBuocCoSo(maChuSan);
 }
 
+// (cơ sở `closed` do chủ sân tự đóng thì KHÔNG tự mở lại ở đây — phải gọi PATCH /co-so/:maCoSo/mo)
 // Cơ sở mới tạo ở trạng thái ẩn; tự hiện cho khách khi đã có ≥1 sân hoạt động + có bảng giá
 // và chủ sân đã được admin duyệt. Chỉ chuyển hidden → active (không đụng cơ sở bị admin khoá).
 async function kichHoatNeuSanSang(maCoSo, ketNoi = pool) {
@@ -106,9 +110,13 @@ async function trangThaiDangKy(maChuSan) {
   const khungGias = coSo ? await layBangGia(coSo.maCoSo) : [];
   return {
     trangThaiDuyet: hoSo.trangThaiDuyet,
+    thongBaoDuyet: thongBaoTheoTrangThai(hoSo.trangThaiDuyet, hoSo.lyDoTuChoi),
     lyDoTuChoi: hoSo.lyDoTuChoi,
     ngayGuiDuyet: hoSo.ngayGuiDuyet,
-    cacBuoc: { coSo: !!coSo, bangGia: khungGias.length > 0, nganHang: !!hoSo.soTaiKhoan },
+    tenDoanhNghiep: hoSo.tenDoanhNghiep,
+    cacBuoc: {
+      doanhNghiep: !!hoSo.tenDoanhNghiep, coSo: !!coSo, bangGia: khungGias.length > 0, nganHang: !!hoSo.soTaiKhoan,
+    },
     coSo,
     khungGias,
     thongTinNganHang: {
@@ -189,12 +197,36 @@ async function luuBuocNganHang(maChuSan, thongTinNganHang) {
   return trangThaiDangKy(maChuSan);
 }
 
+// Đổi tài khoản nhận tiền ở MỌI trạng thái hồ sơ (khách chuyển khoản trực tiếp vào đây).
+// Chủ sân chọn ngân hàng bằng `maNganHang` (danh sách GET /tai-khoan/ngan-hang); BE tự lấy tên.
+async function doiNganHang(maChuSan, { maNganHang, soTaiKhoan, chuTaiKhoan }) {
+  const nganHang = timNganHang(maNganHang);
+  if (!nganHang) throw AppError.duLieuKhongHopLe('Ngân hàng không hợp lệ');
+  await thucHienGiaoDich(async (ketNoi) => {
+    const [[cu]] = await ketNoi.query(
+      'SELECT MaNganHang AS maNganHang, SoTaiKhoan AS soTaiKhoan FROM HoSoChuSan WHERE MaNguoiDung=? FOR UPDATE',
+      [maChuSan]);
+    if (!cu) throw AppError.khongDuQuyen('Tài khoản chủ sân chưa có hồ sơ');
+    await ketNoi.query(
+      'UPDATE HoSoChuSan SET TenNganHang=?, MaNganHang=?, SoTaiKhoan=?, ChuTaiKhoan=? WHERE MaNguoiDung=?',
+      [nganHang.tenNganHang, nganHang.maNganHang, soTaiKhoan, chuTaiKhoan, maChuSan]);
+    const che = (so) => (so ? `***${String(so).slice(-4)}` : '(trống)');
+    await ketNoi.query(
+      `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
+       VALUES (?,?,?,?,?)`,
+      [maChuSan, 'doi_ngan_hang', 'HoSoChuSan', maChuSan,
+        `${cu.maNganHang || '-'} ${che(cu.soTaiKhoan)} -> ${nganHang.maNganHang} ${che(soTaiKhoan)}`]);
+  });
+  return (await trangThaiDangKy(maChuSan)).thongTinNganHang;
+}
+
+// Gửi lại hồ sơ sau khi bị từ chối. Đăng ký mới đã vào thẳng `pending` với đủ tên doanh nghiệp +
+// tài khoản nhận tiền, nên chỉ cần 2 mục này; cơ sở/bảng giá làm sau khi được duyệt.
 async function guiHoSoDuyet(maChuSan) {
   await xacNhanDuocSua(maChuSan);
   const trangThai = await trangThaiDangKy(maChuSan);
   const mucConThieu = Object.entries({
-    'thông tin sân': trangThai.cacBuoc.coSo,
-    'bảng giá': trangThai.cacBuoc.bangGia,
+    'tên doanh nghiệp': trangThai.cacBuoc.doanhNghiep,
     'tài khoản ngân hàng': trangThai.cacBuoc.nganHang,
   }).filter(([, hoanTat]) => !hoanTat).map(([tenMuc]) => tenMuc);
   if (mucConThieu.length) throw AppError.duLieuKhongHopLe(`Chưa hoàn thành: ${mucConThieu.join(', ')}`);
@@ -202,6 +234,12 @@ async function guiHoSoDuyet(maChuSan) {
     `UPDATE HoSoChuSan SET TrangThaiDuyet='pending', NgayGuiDuyet=NOW(), LyDoTuChoi=NULL,
        MaQuanTriDuyet=NULL, NgayDuyet=NULL WHERE MaNguoiDung=?`,
     [maChuSan]);
+  return trangThaiDangKy(maChuSan);
+}
+
+async function luuBuocDoanhNghiep(maChuSan, { tenDoanhNghiep }) {
+  await xacNhanDuocSua(maChuSan);
+  await pool.query('UPDATE HoSoChuSan SET TenDoanhNghiep=? WHERE MaNguoiDung=?', [tenDoanhNghiep, maChuSan]);
   return trangThaiDangKy(maChuSan);
 }
 
@@ -293,6 +331,10 @@ async function laySanCuaChu(maChuSan, maSan) {
 
 async function capNhatSan(maChuSan, maSan, duLieuSan) {
   const san = await laySanCuaChu(maChuSan, maSan);
+  // Chuyển sang bảo trì = đóng sân: phải qua cùng điều kiện (không còn khách/lịch cố định).
+  if (duLieuSan.trangThai === 'maintenance' && san.trangThai !== 'maintenance') {
+    await sanCoSo.dongSan({ maNguoiDung: maChuSan, vaiTro: 'owner' }, san.maSan);
+  }
   try {
     await pool.query(
       'UPDATE San SET TenSan=?, TrangThai=? WHERE MaSan=?',
@@ -379,6 +421,8 @@ module.exports = {
   luuBuocCoSo,
   luuBuocBangGia,
   luuBuocNganHang,
+  doiNganHang,
+  luuBuocDoanhNghiep,
   guiHoSoDuyet,
   capNhatCoSo,
   thayBangGia,

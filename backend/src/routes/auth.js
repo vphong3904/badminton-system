@@ -5,7 +5,8 @@ const kiemTraHopLe = require('../middlewares/validate');
 const { xacThucNguoiDung } = require('../middlewares/auth');
 
 dinhTuyen.post('/dang-ky', kiemTraHopLe(kiemTraDuLieu.dangKy), dieuKhien.dangKyKhachHang);
-dinhTuyen.post('/dang-ky-chu-san', kiemTraHopLe(kiemTraDuLieu.dangKy), dieuKhien.dangKyChuSan);
+dinhTuyen.get('/ngan-hang', dieuKhien.layDanhSachNganHang);
+dinhTuyen.post('/dang-ky-chu-san', kiemTraHopLe(kiemTraDuLieu.dangKyChuSan), dieuKhien.dangKyChuSan);
 dinhTuyen.post('/dang-nhap', kiemTraHopLe(kiemTraDuLieu.dangNhap), dieuKhien.dangNhapDiDong);
 dinhTuyen.post('/dang-nhap-web', kiemTraHopLe(kiemTraDuLieu.dangNhap), dieuKhien.dangNhapWeb);
 dinhTuyen.get('/ca-nhan', xacThucNguoiDung, dieuKhien.layThongTinCaNhan);

@@ -8,7 +8,8 @@ const MAU_TEN = /^\p{L}[\p{L}\s'.-]*$/u;
 const MAU_EMAIL_CO_BAN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const MAU_EMAIL_CHAT = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 const MAU_DI_DONG = /^0[35789]\d{8}$/;
-const MAU_LIEN_HE = /^0\d{9,10}$/;
+// Số liên hệ: di động 10 số (03/05/07/08/09) HOẶC số bàn 11 số (đầu 02 + mã vùng).
+const MAU_LIEN_HE = /^0([35789]\d{8}|2\d{9})$/;
 // Ký tự người dùng được gõ trong ô SĐT; chữ cái hay ký hiệu lạ bị từ chối thay vì bị lặng lẽ bỏ đi.
 const MAU_KY_TU_SDT = /^\+?[\d\s.()-]+$/;
 
@@ -63,7 +64,7 @@ function kiemTraSoLienHe(giaTri) {
   const chu = String(giaTri ?? '').trim();
   if (!chu) return 'Vui lòng nhập số điện thoại.';
   if (!MAU_KY_TU_SDT.test(chu) || !MAU_LIEN_HE.test(chuanHoaSoDienThoai(chu))) {
-    return 'Số điện thoại không hợp lệ (10–11 số, bắt đầu bằng 0).';
+    return 'Số điện thoại không hợp lệ (di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0).';
   }
   return null;
 }

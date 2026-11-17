@@ -1,5 +1,6 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
+const { baoKhachDaHoanTien } = require('./notificationService');
 
 async function ghiNhatKy(ketNoi, maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet) {
   await ketNoi.query(
@@ -13,6 +14,7 @@ async function lietKeHoSoChoDuyet() {
     `SELECT hs.MaNguoiDung AS maNguoiDung, nd.HoTen AS hoTen,
        nd.Email AS email, nd.SoDienThoai AS soDienThoai,
        hs.TenDoanhNghiep AS tenDoanhNghiep, hs.NgayGuiDuyet AS ngayGuiDuyet,
+       hs.TenNganHang AS tenNganHang, hs.SoTaiKhoan AS soTaiKhoan, hs.ChuTaiKhoan AS chuTaiKhoan,
        cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi,
        cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen
      FROM HoSoChuSan hs JOIN NguoiDung nd ON nd.MaNguoiDung=hs.MaNguoiDung
@@ -37,9 +39,12 @@ async function duyetHoSo(maQuanTri, maNguoiDung, duLieu) {
         duLieu.trangThai === 'rejected' ? duLieu.lyDoTuChoi : null,
         maNguoiDung,
       ]);
+    // Chỉ đổi cơ sở active/hidden; không đụng cơ sở đã đóng hoặc bị admin khoá.
     await ketNoi.query(
-      'UPDATE CoSo SET TrangThai=? WHERE MaChuSan=?',
-      [duLieu.trangThai === 'approved' ? 'active' : 'hidden', maNguoiDung]);
+      duLieu.trangThai === 'approved'
+        ? "UPDATE CoSo SET TrangThai='active' WHERE MaChuSan=? AND TrangThai='hidden'"
+        : "UPDATE CoSo SET TrangThai='hidden' WHERE MaChuSan=? AND TrangThai='active'",
+      [maNguoiDung]);
     await ghiNhatKy(
       ketNoi, maQuanTri, duLieu.trangThai === 'approved' ? 'duyet_chu_san' : 'tu_choi_chu_san',
       'HoSoChuSan', maNguoiDung, duLieu.lyDoTuChoi);
@@ -122,43 +127,8 @@ async function hoanTatHoanTien(maQuanTri, maThanhToan, maGiaoDichHoan) {
       [maGiaoDichHoan, maThanhToan]);
     if (!ketQua.affectedRows) throw AppError.biTrung('Thanh toán không ở trạng thái chờ hoàn tất hoàn tiền');
     await ghiNhatKy(ketNoi, maQuanTri, 'hoan_tat_hoan_tien', 'ThanhToan', maThanhToan, maGiaoDichHoan);
+    await baoKhachDaHoanTien(ketNoi, maThanhToan, maGiaoDichHoan);
     return { maThanhToan, trangThaiHoanTien: 'refunded' };
-  });
-}
-
-async function lietKeRutTien() {
-  const [cacYeuCau] = await pool.query(
-    `SELECT r.MaYeuCau AS maYeuCau, r.MaChuSan AS maChuSan,
-       nd.HoTen AS tenChuSan, nd.SoDienThoai AS soDienThoai,
-       r.SoTien AS soTien, r.TenNganHang AS tenNganHang, r.MaNganHang AS maNganHang,
-       r.SoTaiKhoan AS soTaiKhoan, r.ChuTaiKhoan AS chuTaiKhoan, r.NgayYeuCau AS ngayYeuCau
-     FROM YeuCauRutTien r JOIN NguoiDung nd ON nd.MaNguoiDung=r.MaChuSan
-     WHERE r.TrangThai='pending' ORDER BY r.NgayYeuCau`);
-  return cacYeuCau;
-}
-
-async function xacNhanChiRutTien(maQuanTri, maYeuCau, maGiaoDich) {
-  return thucHienGiaoDich(async (ketNoi) => {
-    const [ketQua] = await ketNoi.query(
-      `UPDATE YeuCauRutTien SET TrangThai='paid', MaQuanTriXuLy=?, NgayXuLy=NOW(), MaGiaoDich=?
-       WHERE MaYeuCau=? AND TrangThai='pending'`,
-      [maQuanTri, maGiaoDich, maYeuCau]);
-    if (!ketQua.affectedRows) throw AppError.biTrung('Yêu cầu rút tiền không còn chờ xử lý');
-    await ghiNhatKy(ketNoi, maQuanTri, 'xac_nhan_chi_tien', 'YeuCauRutTien', maYeuCau, maGiaoDich);
-    return { maYeuCau, trangThai: 'paid' };
-  });
-}
-
-async function tuChoiRutTien(maQuanTri, maYeuCau, lyDoTuChoi) {
-  return thucHienGiaoDich(async (ketNoi) => {
-    const [ketQua] = await ketNoi.query(
-      `UPDATE YeuCauRutTien SET TrangThai='rejected', MaQuanTriXuLy=?, NgayXuLy=NOW(),
-         LyDoTuChoi=? WHERE MaYeuCau=? AND TrangThai='pending'`,
-      [maQuanTri, lyDoTuChoi, maYeuCau]);
-    if (!ketQua.affectedRows) throw AppError.biTrung('Yêu cầu rút tiền không còn chờ xử lý');
-    await ketNoi.query('UPDATE DatSan SET MaYeuCauRutTien=NULL WHERE MaYeuCauRutTien=?', [maYeuCau]);
-    await ghiNhatKy(ketNoi, maQuanTri, 'tu_choi_rut_tien', 'YeuCauRutTien', maYeuCau, lyDoTuChoi);
-    return { maYeuCau, trangThai: 'rejected' };
   });
 }
 
@@ -193,8 +163,5 @@ module.exports = {
   lietKeHoanTien,
   xuLyHoanTien,
   hoanTatHoanTien,
-  lietKeRutTien,
-  xacNhanChiRutTien,
-  tuChoiRutTien,
   lietKeNhatKy,
 };

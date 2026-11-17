@@ -4,6 +4,8 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { doiGioRaPhut } = require('../utils/time');
 const khach = require('./customerService');
+const { baoKhachDaHoanTien } = require('./notificationService');
+const { ganTrangThaiHienThi } = require('../utils/trangThaiDon');
 
 const SO_DONG_MAC_DINH = 20;
 
@@ -56,12 +58,18 @@ async function lietKeDon(maChuSan, boLoc) {
   const huong = sapXep === 'cu-nhat' ? 'ASC' : 'DESC';
   const [cacDon] = await pool.query(
     `SELECT ${COT_DON}, t.TrangThai AS trangThaiThanhToan,
-       t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh
+       t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh,
+       t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan, t.LyDoLoi AS lyDoLoi
      ${tuHang} WHERE ${loc}
      ORDER BY d.NgayChoi ${huong}, d.GioBatDau ${huong}, d.MaDatSan ${huong}
      LIMIT ? OFFSET ?`,
     [...thamSo, soDong, (trang - 1) * soDong]);
-  return { cacDon, trang, soDongMoiTrang: soDong, tong, sapXep };
+  // Thêm trangThaiHienThi/nhanTrangThai/nhomTrangThai (cùng bảng trạng thái với app khách).
+  const cacDonKemTrangThai = cacDon.map(({ lyDoLoi, ...don }) => ganTrangThaiHienThi({
+    ...don,
+    lyDoTuChoi: don.trangThaiThanhToan === 'pending' && lyDoLoi ? lyDoLoi : null,
+  }));
+  return { cacDon: cacDonKemTrangThai, trang, soDongMoiTrang: soDong, tong, sapXep };
 }
 
 // Chi tiết 1 đơn = hoá đơn: tiền khách trả, phí nền tảng, tiền chủ sân nhận, trạng thái thanh toán.
@@ -133,6 +141,8 @@ async function hoanThanhHoanTien(maChuSan, maThanhToan, maGiaoDichHoan) {
     if (!dong) throw AppError.khongTimThay('Không tìm thấy yêu cầu hoàn tiền');
     throw AppError.biTrung('Yêu cầu hoàn tiền không ở trạng thái chờ hoàn');
   }
+  // Chủ sân đã hoàn tiền → báo khách.
+  await baoKhachDaHoanTien(pool, maThanhToan, maGiaoDichHoan);
   return { maThanhToan: Number(maThanhToan), trangThaiHoanTien: 'refunded' };
 }
 

@@ -30,19 +30,58 @@ exports.hoanTien = {
   params: z.object({ maThanhToan: maSo }),
   body: z.object({ maGiaoDichHoan: z.string().trim().min(3).max(100) }),
 };
-exports.maYeuCauRutTien = { params: z.object({ maYeuCau: maSo }) };
-exports.daChiRutTien = {
-  params: z.object({ maYeuCau: maSo }),
-  body: z.object({ maGiaoDich: z.string().trim().min(3).max(100) }),
-};
-exports.tuChoiRutTien = {
-  params: z.object({ maYeuCau: maSo }),
-  body: z.object({ lyDoTuChoi: z.string().trim().min(3).max(255) }),
-};
+const lyDoTuyChon = z.object({ lyDo: z.string().trim().min(2).max(255).optional() }).default({});
+exports.dongXoaSan = { params: z.object({ maSan: maSo }), body: lyDoTuyChon };
+exports.dongXoaCoSo = { params: z.object({ maCoSo: maSo }), body: lyDoTuyChon };
+exports.maSan = { params: z.object({ maSan: maSo }) };
+exports.maCoSo = { params: z.object({ maCoSo: maSo }) };
 exports.danhSachNhatKy = {
   query: z.object({
     tuNgay: ngay.optional(),
     denNgay: ngay.optional(),
     gioiHan: z.coerce.number().int().min(1).max(100).default(50),
+  }),
+};
+
+exports.danhSachKhieuNai = {
+  query: z.object({
+    trangThai: z.enum(['pending', 'upheld', 'rejected', 'all']).default('pending'),
+    gioiHan: z.coerce.number().int().min(1).max(100).default(50),
+  }),
+};
+exports.xuLyKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    quyetDinh: z.enum(['upheld', 'rejected']),
+    ghiChu: z.string().trim().min(3, 'Ghi chú tối thiểu 3 ký tự.').max(500, 'Ghi chú tối đa 500 ký tự.').optional(),
+  }).refine((duLieu) => duLieu.quyetDinh !== 'rejected' || !!duLieu.ghiChu, {
+    message: 'Cần nêu lý do khi bác bỏ khiếu nại',
+    path: ['ghiChu'],
+  }),
+};
+
+// Quản lý đánh giá: xem toàn bộ, ẩn/hiện đánh giá vi phạm.
+exports.danhSachDanhGia = {
+  query: z.object({
+    trangThai: z.enum(['hien', 'an', 'all'], { error: 'trangThai chỉ nhận hien, an hoặc all.' }).default('all'),
+    maCoSo: maSo.optional(),
+    soSao: z.coerce.number({ error: 'Số sao phải từ 1 đến 5.' })
+      .int('Số sao phải từ 1 đến 5.').min(1, 'Số sao phải từ 1 đến 5.').max(5, 'Số sao phải từ 1 đến 5.').optional(),
+    trang: z.coerce.number({ error: 'Trang phải là số nguyên từ 1.' })
+      .int('Trang phải là số nguyên từ 1.').min(1, 'Trang phải là số nguyên từ 1.').default(1),
+    soLuong: z.coerce.number({ error: 'Số lượng phải từ 1 đến 50.' })
+      .int('Số lượng phải từ 1 đến 50.')
+      .min(1, 'Số lượng phải từ 1 đến 50.').max(50, 'Số lượng phải từ 1 đến 50.').default(20),
+  }),
+};
+exports.anHienDanhGia = {
+  params: z.object({ maDanhGia: maSo }),
+  body: z.object({
+    an: z.boolean({ error: 'Trường an phải là true hoặc false.' }),
+    lyDo: z.string({ error: 'Lý do không hợp lệ.' }).trim()
+      .min(3, 'Lý do tối thiểu 3 ký tự.').max(255, 'Lý do tối đa 255 ký tự.').optional(),
+  }).refine((duLieu) => duLieu.an !== true || !!duLieu.lyDo, {
+    message: 'Cần nêu lý do khi ẩn đánh giá',
+    path: ['lyDo'],
   }),
 };

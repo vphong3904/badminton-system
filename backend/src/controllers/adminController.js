@@ -1,5 +1,7 @@
 const dichVu = require('../services/adminService');
 const dichVuThanhToan = require('../services/paymentService');
+const dichVuKhieuNai = require('../services/complaintService');
+const dichVuDanhGia = require('../services/reviewService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thanhCong } = require('../utils/response');
 
@@ -22,11 +24,20 @@ exports.xuLyHoanTien = xuLy((yeuCau) =>
 exports.hoanTatHoanTien = xuLy((yeuCau) =>
   dichVu.hoanTatHoanTien(
     layMaQuanTri(yeuCau), yeuCau.params.maThanhToan, yeuCau.body.maGiaoDichHoan));
-exports.lietKeRutTien = xuLy(() => dichVu.lietKeRutTien());
-exports.xacNhanChiRutTien = xuLy((yeuCau) =>
-  dichVu.xacNhanChiRutTien(
-    layMaQuanTri(yeuCau), yeuCau.params.maYeuCau, yeuCau.body.maGiaoDich));
-exports.tuChoiRutTien = xuLy((yeuCau) =>
-  dichVu.tuChoiRutTien(
-    layMaQuanTri(yeuCau), yeuCau.params.maYeuCau, yeuCau.body.lyDoTuChoi));
+const dichVuSanCoSo = require('../services/sanCoSoService');
+const nguoi = (yeuCau) => ({ maNguoiDung: layMaQuanTri(yeuCau), vaiTro: 'admin' });
+exports.dongSan = xuLy((yeuCau) => dichVuSanCoSo.dongSan(nguoi(yeuCau), yeuCau.params.maSan, yeuCau.body.lyDo));
+exports.moSan = xuLy((yeuCau) => dichVuSanCoSo.moSan(nguoi(yeuCau), yeuCau.params.maSan));
+exports.xoaSan = xuLy((yeuCau) => dichVuSanCoSo.xoaSan(nguoi(yeuCau), yeuCau.params.maSan, yeuCau.body.lyDo));
+exports.dongCoSo = xuLy((yeuCau) => dichVuSanCoSo.dongCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
+exports.moCoSo = xuLy((yeuCau) => dichVuSanCoSo.moCoSo(nguoi(yeuCau), yeuCau.params.maCoSo));
+exports.xoaCoSo = xuLy((yeuCau) => dichVuSanCoSo.xoaCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
 exports.lietKeNhatKy = xuLy((yeuCau) => dichVu.lietKeNhatKy(yeuCau.query));
+exports.lietKeKhieuNai = xuLy((yeuCau) => dichVuKhieuNai.lietKeKhieuNai(yeuCau.query));
+exports.xuLyKhieuNai = xuLy((yeuCau) =>
+  dichVuKhieuNai.xuLyKhieuNai(layMaQuanTri(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));
+
+// Quản lý đánh giá.
+exports.lietKeDanhGia = xuLy((yeuCau) => dichVuDanhGia.lietKeDanhGiaQuanTri(yeuCau.query));
+exports.anHienDanhGia = xuLy((yeuCau) =>
+  dichVuDanhGia.anHienDanhGia(layMaQuanTri(yeuCau), yeuCau.params.maDanhGia, yeuCau.body));

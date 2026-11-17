@@ -3,12 +3,14 @@ const { z } = require('zod');
 const gioPhut = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải dạng HH:MM');
 const maSo = z.coerce.number().int().positive();
 
+const quyTac = require('./quyTac');
+
 const coSo = z.object({
   tenCoSo: z.string().trim().min(2).max(150),
   diaChi: z.string().trim().min(5).max(255),
   tinhThanh: z.string().trim().min(2).max(80),
   quanHuyen: z.string().trim().min(2).max(80),
-  soDienThoai: z.string().trim().regex(/^(0|\+84)\d{9,10}$/),
+  soDienThoai: quyTac.soDienThoaiLienHe,
   zalo: z.string().trim().max(30).optional(),
   linkBanDo: z.string().url().max(500),
   // Toạ độ để app khách tìm "sân gần tôi". Bỏ trống = giữ nguyên giá trị đang lưu.
@@ -50,6 +52,21 @@ exports.nganHang = {
     chuTaiKhoan: z.string().trim().min(2).max(100),
   }),
 };
+// Đổi tài khoản nhận tiền (mọi trạng thái hồ sơ): chỉ cần mã ngân hàng, BE tự lấy tên.
+exports.doiNganHang = {
+  body: z.object({
+    maNganHang: z.string().trim().min(2).max(20)
+      .refine((ma) => !!require('../utils/nganHang').timNganHang(ma), 'Ngân hàng không hợp lệ.'),
+    soTaiKhoan: z.string().trim().regex(/^\d{6,20}$/, 'Số tài khoản phải gồm 6–20 chữ số.'),
+    chuTaiKhoan: z.string().trim().min(2).max(100),
+  }),
+};
+const lyDoTuyChon = z.object({ lyDo: z.string().trim().min(2).max(255).optional() }).default({});
+exports.dongXoaSan = { params: z.object({ maSan: maSo }), body: lyDoTuyChon };
+exports.dongXoaCoSo = { params: maCoSoTrongDuongDan, body: lyDoTuyChon };
+exports.doanhNghiep = {
+  body: z.object({ tenDoanhNghiep: z.string().trim().min(2, 'Tên doanh nghiệp tối thiểu 2 ký tự.').max(150, 'Tên doanh nghiệp tối đa 150 ký tự.') }),
+};
 exports.san = {
   body: z.object({
     maCoSo: maSo.optional(),
@@ -84,3 +101,26 @@ exports.danhSachKhoaSan = {
   }),
 };
 exports.maKhoaSan = { params: z.object({ maKhoa: maSo }) };
+
+// Đánh giá của các cơ sở của chủ sân: xem + phản hồi.
+exports.danhSachDanhGia = {
+  query: z.object({
+    maCoSo: maSo.optional(),
+    soSao: z.coerce.number({ error: 'Số sao phải từ 1 đến 5.' })
+      .int('Số sao phải từ 1 đến 5.').min(1, 'Số sao phải từ 1 đến 5.').max(5, 'Số sao phải từ 1 đến 5.').optional(),
+    chuaPhanHoi: z.enum(['true', 'false'], { error: 'chuaPhanHoi chỉ nhận true hoặc false.' })
+      .transform((giaTri) => giaTri === 'true').optional(),
+    trang: z.coerce.number({ error: 'Trang phải là số nguyên từ 1.' })
+      .int('Trang phải là số nguyên từ 1.').min(1, 'Trang phải là số nguyên từ 1.').default(1),
+    soLuong: z.coerce.number({ error: 'Số lượng phải từ 1 đến 50.' })
+      .int('Số lượng phải từ 1 đến 50.')
+      .min(1, 'Số lượng phải từ 1 đến 50.').max(50, 'Số lượng phải từ 1 đến 50.').default(20),
+  }),
+};
+exports.phanHoiDanhGia = {
+  params: z.object({ maDanhGia: maSo }),
+  body: z.object({
+    noiDung: z.string({ error: 'Vui lòng nhập nội dung phản hồi.' }).trim()
+      .min(2, 'Phản hồi tối thiểu 2 ký tự.').max(1000, 'Phản hồi tối đa 1000 ký tự.'),
+  }),
+};

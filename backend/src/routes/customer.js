@@ -26,7 +26,15 @@ dinhTuyen.get('/dat-san/:maDatSan/hoa-don-nhap', kiemTraHopLe(kiemTraDuLieu.maDa
 dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.huyDatSan);
 dinhTuyen.post('/dat-san/:maDatSan/danh-gia',
   kiemTraHopLe(kiemTraDuLieu.guiDanhGia), dieuKhien.guiDanhGia);
+dinhTuyen.patch('/dat-san/:maDatSan/danh-gia',
+  kiemTraHopLe(kiemTraDuLieu.suaDanhGia), dieuKhien.suaDanhGia);
+dinhTuyen.delete('/dat-san/:maDatSan/danh-gia',
+  kiemTraHopLe(kiemTraDuLieu.xoaDanhGia), dieuKhien.xoaDanhGia);
 dinhTuyen.put('/dat-san/:maDatSan/tai-khoan-hoan-tien',
   kiemTraHopLe(kiemTraDuLieu.thongTinHoanTien), dieuKhien.capNhatTaiKhoanHoan);
+
+dinhTuyen.post('/dat-san/:maDatSan/khieu-nai',
+  kiemTraHopLe(kiemTraDuLieu.guiKhieuNai), dieuKhien.guiKhieuNai);
+dinhTuyen.get('/khieu-nai', dieuKhien.lietKeKhieuNai);
 
 module.exports = dinhTuyen;

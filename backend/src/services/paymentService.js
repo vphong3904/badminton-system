@@ -4,6 +4,7 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { taoAnhQrUrl, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
 const { thuMucTepTaiLen, layDuongDanTep } = require('../middlewares/upload');
+const { guiThongBao, dinhDangTien } = require('./notificationService');
 
 // Luồng thanh toán (không dùng cổng thanh toán tự động):
 //  1) khách đặt sân → ThanhToan 'pending', giữ chỗ hold_minutes
@@ -160,6 +161,27 @@ async function guiAnhChuyenKhoan(maNguoiDung, maDatSan, tep) {
         `UPDATE DatSan SET HetHanGiuCho=DATE_ADD(NOW(), INTERVAL ? MINUTE)
          WHERE ${cungDot.sql} AND TrangThai='pending_payment'`,
         [phut, ...cungDot.thamSo]);
+      // Báo chủ sân có ảnh chuyển khoản cần duyệt (không để lỗi thông báo làm hỏng việc gửi ảnh).
+      try {
+        const [[don]] = await ketNoi.query(
+          `SELECT d.MaDon AS maDon, d.TenKhach AS tenKhach, s.TenSan AS tenSan,
+             cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan
+           FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+           WHERE d.MaDatSan=?`, [thanhToan.maDatSan]);
+        if (don) {
+          await guiThongBao(ketNoi, {
+            maNguoiDung: don.maChuSan,
+            loai: 'new_booking_for_owner',
+            tieuDe: 'Khách đã gửi ảnh chuyển khoản',
+            noiDung: `${don.tenKhach} đã chuyển khoản ${dinhDangTien(thanhToan.soTien)} cho ${don.tenSan} - `
+              + `${don.tenCoSo} (mã ${don.maDon}). Vui lòng kiểm tra và duyệt đơn.`,
+            loaiThamChieu: 'booking',
+            maThamChieu: thanhToan.maDatSan,
+          });
+        }
+      } catch (loi) {
+        console.error('[thong-bao] Không báo được cho chủ sân:', loi.message);
+      }
       return { maThanhToan: thanhToan.maThanhToan, anhCu: cu?.anh || null, phut };
     });
     if (ketQua.hetHan) throw AppError.biTrung('Thời gian giữ chỗ đã hết hạn');
@@ -182,8 +204,11 @@ async function layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan) {
   const laAdmin = vaiTro === 'admin';
   const [[thanhToan]] = await ketNoi.query(
     `SELECT t.MaThanhToan AS maThanhToan, t.MaDatSan AS maDatSanThanhToan, t.TrangThai AS trangThai,
-       t.AnhChuyenKhoan AS anhChuyenKhoan,
-       d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.TrangThai AS trangThaiDatSan
+       t.AnhChuyenKhoan AS anhChuyenKhoan, t.SoTien AS soTien,
+       d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.TrangThai AS trangThaiDatSan,
+       d.MaKhachHang AS maKhachHang, d.MaDon AS maDon, d.NgayChoi AS ngay,
+       d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
+       s.TenSan AS tenSan, cs.TenCoSo AS tenCoSo
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        JOIN ThanhToan t ON t.MaDatSan=CASE
          WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
@@ -232,6 +257,17 @@ async function xacNhanThanhToan(maNguoiDung, maDatSan, vaiTro = 'owner') {
        WHERE ${thanhToan.cungDot.sql} AND TrangThai='pending_payment'`,
       thanhToan.cungDot.thamSo);
     await ghiNhatKyAdmin(ketNoi, vaiTro, maNguoiDung, 'xac_nhan_thanh_toan', thanhToan.maThanhToan);
+    // Đơn được duyệt → báo khách giữ sân thành công.
+    await guiThongBao(ketNoi, {
+      maNguoiDung: thanhToan.maKhachHang,
+      loai: 'payment_success',
+      tieuDe: 'Đơn đặt sân đã được duyệt',
+      noiDung: `Chủ sân đã xác nhận thanh toán ${dinhDangTien(thanhToan.soTien)} cho ${thanhToan.tenSan} - `
+        + `${thanhToan.tenCoSo} (mã ${thanhToan.maDon}). Sân đã được giữ cho bạn.`,
+      loaiThamChieu: 'booking',
+      maThamChieu: thanhToan.maDatSan,
+      khoa: `payment_success:${thanhToan.maThanhToan}`,
+    });
     return {
       maDatSan: Number(maDatSan),
       maThanhToan: thanhToan.maThanhToan,
@@ -257,6 +293,15 @@ async function tuChoiThanhToan(maNguoiDung, maDatSan, lyDo, vaiTro = 'owner') {
        WHERE ${thanhToan.cungDot.sql} AND TrangThai='pending_payment'`,
       [phut, ...thanhToan.cungDot.thamSo]);
     await ghiNhatKyAdmin(ketNoi, vaiTro, maNguoiDung, 'tu_choi_thanh_toan', thanhToan.maThanhToan, lyDo);
+    await guiThongBao(ketNoi, {
+      maNguoiDung: thanhToan.maKhachHang,
+      loai: 'payment_failed',
+      tieuDe: 'Thanh toán chưa được xác nhận',
+      noiDung: `Chủ sân chưa xác nhận thanh toán đơn ${thanhToan.maDon}. Lý do: ${lyDo}. `
+        + 'Vui lòng gửi lại ảnh chuyển khoản trong thời gian giữ chỗ.',
+      loaiThamChieu: 'booking',
+      maThamChieu: thanhToan.maDatSan,
+    });
     return {
       maDatSan: Number(maDatSan),
       maThanhToan: thanhToan.maThanhToan,
