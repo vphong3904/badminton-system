@@ -14,20 +14,27 @@ function xacDinhMucXuLy(soLanViPham) {
   return MUC_XU_LY[soLanViPham] || 'none';
 }
 
-// Đơn có thể khiếu nại: đơn của chính khách, đặt qua app, đã thanh toán thành công hoặc đã huỷ.
-const TRANG_THAI_CO_THE_KHIEU_NAI = ['confirmed', 'completed', 'cancelled'];
+// Đơn có thể khiếu nại: đơn của chính khách, đặt qua app, đã huỷ và chủ sân đã hoàn tiền xong (refunded).
+const TRANG_THAI_CO_THE_KHIEU_NAI = ['cancelled'];
 
 async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
   return thucHienGiaoDich(async (ketNoi) => {
     const [[don]] = await ketNoi.query(
       `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.TrangThai AS trangThai, d.TenKhach AS tenKhach,
-         s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan
+         s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan,
+         (SELECT t.TrangThaiHoanTien FROM ThanhToan t WHERE t.MaDatSan=CASE
+            WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+            ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
+          END LIMIT 1) AS trangThaiHoanTien
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        WHERE d.MaDatSan=? AND d.MaKhachHang=? AND d.Nguon='app' FOR UPDATE`,
       [maDatSan, maKhachHang]);
     if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
     if (!TRANG_THAI_CO_THE_KHIEU_NAI.includes(don.trangThai)) {
-      throw AppError.duLieuKhongHopLe('Chỉ khiếu nại được đơn đã thanh toán thành công hoặc đã huỷ.');
+      throw AppError.duLieuKhongHopLe('Chỉ khiếu nại được đơn đã huỷ và đã được hoàn tiền.');
+    }
+    if (don.trangThaiHoanTien !== 'refunded') {
+      throw AppError.duLieuKhongHopLe('Chỉ khiếu nại được sau khi đơn đã được hoàn tiền (refunded).');
     }
     const [[daCo]] = await ketNoi.query(
       'SELECT MaKhieuNai AS maKhieuNai FROM KhieuNai WHERE MaDatSan=?', [maDatSan]);

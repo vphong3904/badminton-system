@@ -1,3 +1,4 @@
+const fs = require('fs/promises');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool, thucHienGiaoDich } = require('../config/db');
@@ -6,6 +7,7 @@ const AppError = require('../utils/AppError');
 const { chuanHoaSoDienThoai, kiemTraSoDiDong } = require('../validators/quyTac');
 const { timNganHang } = require('../utils/nganHang');
 const { thongBaoTheoTrangThai } = require('../utils/hoSoChuSan');
+const { ANH_MAC_DINH, luuAnh, xoaAnh } = require('../middlewares/upload');
 
 function taoThongTinNguoiDung(nguoiDung) {
   const thongTin = {
@@ -15,6 +17,7 @@ function taoThongTinNguoiDung(nguoiDung) {
     soDienThoai: nguoiDung.soDienThoai,
     email: nguoiDung.email,
     trangThai: nguoiDung.trangThai,
+    anhDaiDien: nguoiDung.anhDaiDien ?? ANH_MAC_DINH.avatar,
   };
   if (nguoiDung.vaiTro === 'owner') {
     thongTin.trangThaiDuyet = nguoiDung.trangThaiDuyet;
@@ -103,7 +106,7 @@ async function layNguoiDung(maNguoiDung) {
   const [[nguoiDung]] = await pool.query(
     `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro,
        nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.Email AS email,
-       nd.TrangThai AS trangThai, hs.TrangThaiDuyet AS trangThaiDuyet,
+       nd.TrangThai AS trangThai, nd.AnhDaiDien AS anhDaiDien, hs.TrangThaiDuyet AS trangThaiDuyet,
        hs.TenDoanhNghiep AS tenDoanhNghiep, hs.LyDoTuChoi AS lyDoTuChoi
      FROM NguoiDung nd
      LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung = nd.MaNguoiDung
@@ -158,4 +161,22 @@ async function doiMatKhau(maNguoiDung, matKhauCu, matKhauMoi) {
     [await bcrypt.hash(matKhauMoi, 10), maNguoiDung]);
 }
 
-module.exports = { dangKy, dangNhap, layNguoiDung, capNhatThongTin, doiMatKhau };
+// Ảnh đại diện: uploads/avatar/u<maNguoiDung>-<ms>-<4hex>.<đuôi>; ảnh cũ bị xoá (trừ ảnh mặc định).
+async function capNhatAnhDaiDien(maNguoiDung, tep) {
+  const [[cu]] = await pool.query('SELECT AnhDaiDien AS anh FROM NguoiDung WHERE MaNguoiDung=?', [maNguoiDung]);
+  if (!cu) {
+    await fs.unlink(tep.path).catch(() => {});
+    throw AppError.khongTimThay('Không tìm thấy người dùng');
+  }
+  const duongDan = await luuAnh(tep, 'avatar', `u${maNguoiDung}`);
+  try {
+    await pool.query('UPDATE NguoiDung SET AnhDaiDien=? WHERE MaNguoiDung=?', [duongDan, maNguoiDung]);
+  } catch (loi) {
+    await xoaAnh(duongDan);
+    throw loi;
+  }
+  await xoaAnh(cu.anh);
+  return { anhDaiDien: duongDan };
+}
+
+module.exports = { dangKy, dangNhap, layNguoiDung, capNhatThongTin, doiMatKhau, capNhatAnhDaiDien };

@@ -24,6 +24,8 @@ exports.layHoaDonNhap = xuLy((yeuCau) =>
   dichVu.layHoaDonNhap(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.huyDatSan = xuLy((yeuCau) =>
   dichVu.huyDatSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
+exports.xemTruocHuy = xuLy((yeuCau) =>
+  dichVu.xemTruocHuy(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.guiDanhGia = xuLy((yeuCau) =>
   dichVu.guiDanhGia(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body), daTao);
 exports.suaDanhGia = xuLy((yeuCau) =>

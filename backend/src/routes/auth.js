@@ -3,6 +3,7 @@ const dieuKhien = require('../controllers/authController');
 const kiemTraDuLieu = require('../validators/auth');
 const kiemTraHopLe = require('../middlewares/validate');
 const { xacThucNguoiDung } = require('../middlewares/auth');
+const { taiAnhDaiDien } = require('../middlewares/upload');
 
 dinhTuyen.post('/dang-ky', kiemTraHopLe(kiemTraDuLieu.dangKy), dieuKhien.dangKyKhachHang);
 dinhTuyen.get('/ngan-hang', dieuKhien.layDanhSachNganHang);
@@ -11,6 +12,7 @@ dinhTuyen.post('/dang-nhap', kiemTraHopLe(kiemTraDuLieu.dangNhap), dieuKhien.dan
 dinhTuyen.post('/dang-nhap-web', kiemTraHopLe(kiemTraDuLieu.dangNhap), dieuKhien.dangNhapWeb);
 dinhTuyen.get('/ca-nhan', xacThucNguoiDung, dieuKhien.layThongTinCaNhan);
 dinhTuyen.patch('/ca-nhan', xacThucNguoiDung, kiemTraHopLe(kiemTraDuLieu.capNhatThongTinCaNhan), dieuKhien.capNhatThongTinCaNhan);
+dinhTuyen.post('/ca-nhan/anh', xacThucNguoiDung, taiAnhDaiDien.single('tepAnh'), dieuKhien.capNhatAnhDaiDien);
 dinhTuyen.post('/doi-mat-khau', xacThucNguoiDung, kiemTraHopLe(kiemTraDuLieu.doiMatKhau), dieuKhien.doiMatKhau);
 
 module.exports = dinhTuyen;

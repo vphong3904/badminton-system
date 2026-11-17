@@ -1,9 +1,18 @@
 const cauHinh = require('../config/env');
 
+// Dữ liệu cũ có thể lưu mã BIN dạng số; đổi về mã VietQR viết tắt để hiển thị và tạo QR thống nhất.
+const BIN_SANG_MA = {
+  970436: 'VCB', 970415: 'CTG', 970418: 'BIDV', 970405: 'VBA', 970422: 'MB', 970407: 'TCB',
+  970416: 'ACB', 970432: 'VPB', 970423: 'TPB', 970403: 'STB', 970437: 'HDB', 970441: 'VIB',
+  970443: 'SHB', 970448: 'OCB', 970426: 'MSB', 970429: 'SCB', 970431: 'EIB', 970449: 'LPB',
+  970440: 'SEAB',
+};
+
 // Tài khoản nhận tiền của chủ sân sở hữu sân được đặt (HoSoChuSan, chủ sân nhập khi đăng ký).
 // Chưa có thì dùng tài khoản dự phòng BANK_* trong .env (nếu có); không có cả hai thì trả null.
 function chuanHoaTaiKhoan(hang) {
-  const maNganHang = (hang?.maNganHang || '').trim();
+  const maGoc = (hang?.maNganHang || '').trim();
+  const maNganHang = BIN_SANG_MA[maGoc] || maGoc;
   const soTaiKhoan = (hang?.soTaiKhoan || '').trim();
   if (!maNganHang || !soTaiKhoan) return null;
   return {

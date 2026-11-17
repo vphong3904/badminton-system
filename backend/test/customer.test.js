@@ -68,9 +68,9 @@ const ketNoiGia = {
     if (/UPDATE DatSan/.test(cauTruyVan)) return [{ affectedRows: 0 }];
     if (/COUNT\(\*\) FROM San s WHERE s\.MaCoSo=cs\.MaCoSo/.test(cauTruyVan)) {
       return [[
-        { maCoSo: 1, tenCoSo: 'Co so A', soSan: 4, tienIch: '["parking","toilet"]' },
-        { maCoSo: 2, tenCoSo: 'Co so B', soSan: 3, tienIch: ['canteen'] },
-        { maCoSo: 3, tenCoSo: 'Co so C', soSan: 2, tienIch: null },
+        { maCoSo: 1, tenCoSo: 'Co so A', soSan: 4 },
+        { maCoSo: 2, tenCoSo: 'Co so B', soSan: 3 },
+        { maCoSo: 3, tenCoSo: 'Co so C', soSan: 2 },
       ]];
     }
     throw new Error(`Chưa giả lập truy vấn: ${cauTruyVan}`);
@@ -157,10 +157,7 @@ test('Lịch ngày từ chối ngày không hợp lệ', async () => {
   await assert.rejects(dichVu.layLichNgay(12, '2026-13-45'), /Ngày không hợp lệ/);
 });
 
-test('Danh sách cơ sở cho trang chủ chuẩn hóa tiện ích về mảng', async () => {
+test('Danh sách cơ sở cho trang chủ trả đủ các cơ sở', async () => {
   const ketQua = await dichVu.layDanhSachCoSo();
   assert.equal(ketQua.length, 3);
-  assert.deepEqual(ketQua[0].tienIch, ['parking', 'toilet']);
-  assert.deepEqual(ketQua[1].tienIch, ['canteen']);
-  assert.deepEqual(ketQua[2].tienIch, []);
 });

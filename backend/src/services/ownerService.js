@@ -3,7 +3,10 @@ const AppError = require('../utils/AppError');
 const { kiemTraKhungGia } = require('../utils/time');
 const { thongBaoTheoTrangThai } = require('../utils/hoSoChuSan');
 const { timNganHang } = require('../utils/nganHang');
+const { layToaDoTuLink } = require('../utils/toaDoBanDo');
 const sanCoSo = require('./sanCoSoService');
+const fs = require('fs/promises');
+const { ANH_MAC_DINH, luuAnh, xoaAnh } = require('../middlewares/upload');
 
 const TRANG_THAI_DUOC_SUA = ['rejected'];
 
@@ -22,13 +25,13 @@ async function layHoSo(maChuSan) {
 // Câu SELECT cơ sở dùng chung cho danh sách / chi tiết / "cơ sở đầu tiên".
 const CHON_CO_SO = `
   SELECT cs.MaCoSo AS maCoSo, cs.MaChuSan AS maChuSan, cs.TenCoSo AS tenCoSo,
-    cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai, cs.Zalo AS zalo,
+    cs.DiaChi AS diaChi, cs.SoDienThoai AS soDienThoai,
     cs.LinkBanDo AS linkBanDo, cs.ViDo AS viDo, cs.KinhDo AS kinhDo, cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen,
     cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
     cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.GiaThapNhat AS giaThapNhat,
     cs.TrangThai AS trangThai,
-    (SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo
-     ORDER BY LaAnhBia DESC, ThuTu, MaAnh LIMIT 1) AS duongDanAnh,
+    COALESCE((SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo
+     ORDER BY LaAnhBia DESC, ThuTu, MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh,
     (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo) AS soSan,
     (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active') AS soSanHoatDong
   FROM CoSo cs`;
@@ -128,30 +131,43 @@ async function trangThaiDangKy(maChuSan) {
   };
 }
 
+// Toạ độ KHÔNG do chủ sân nhập: tự đọc từ link Google Maps (kể cả link rút gọn maps.app.goo.gl).
+// Không đọc được: giữ toạ độ cũ nếu link không đổi; link mới mà không đọc được thì để trống
+// (tránh tính khoảng cách theo vị trí cũ đã sai).
+async function tinhToaDo(linkBanDo, coSoHienTai) {
+  const toaDo = await layToaDoTuLink(linkBanDo);
+  if (toaDo) return toaDo;
+  if (coSoHienTai && coSoHienTai.linkBanDo === linkBanDo) {
+    return { viDo: coSoHienTai.viDo ?? null, kinhDo: coSoHienTai.kinhDo ?? null };
+  }
+  return { viDo: null, kinhDo: null };
+}
+
 async function luuBuocCoSo(maChuSan, duLieuCoSo) {
   await xacNhanDuocSua(maChuSan);
   const coSoHienTai = await layCoSo(maChuSan);
+  const toaDo = await tinhToaDo(duLieuCoSo.linkBanDo, coSoHienTai);
   const duLieuLuu = [
-    duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai, duLieuCoSo.zalo ?? null,
+    duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai,
     duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh, duLieuCoSo.quanHuyen,
     duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
-    duLieuCoSo.soPhutDatToiThieu, duLieuCoSo.viDo ?? null, duLieuCoSo.kinhDo ?? null,
+    duLieuCoSo.soPhutDatToiThieu, toaDo.viDo, toaDo.kinhDo,
   ];
 
   if (coSoHienTai) {
     const khungGias = await layBangGia(coSoHienTai.maCoSo);
     kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
     await pool.query(
-      `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
+      `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, LinkBanDo=?,
        TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?,
-       ViDo=COALESCE(?,ViDo), KinhDo=COALESCE(?,KinhDo)
+       ViDo=?, KinhDo=?
        WHERE MaCoSo=?`,
       [...duLieuLuu, coSoHienTai.maCoSo]);
   } else {
     await pool.query(
-      `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
+      `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, LinkBanDo,
        TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, ViDo, KinhDo)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [maChuSan, ...duLieuLuu]);
   }
   return trangThaiDangKy(maChuSan);
@@ -247,16 +263,17 @@ async function capNhatCoSo(maChuSan, duLieuCoSo, maCoSo) {
   const coSo = await chonCoSo(maChuSan, maCoSo);
   const khungGias = await layBangGia(coSo.maCoSo);
   kiemTraKhungGia(khungGias, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua);
+  const toaDo = await tinhToaDo(duLieuCoSo.linkBanDo, coSo);
   await pool.query(
-    `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, Zalo=?, LinkBanDo=?,
+    `UPDATE CoSo SET TenCoSo=?, DiaChi=?, SoDienThoai=?, LinkBanDo=?,
        TinhThanh=?, QuanHuyen=?, MoTa=?, GioMoCua=?, GioDongCua=?, SoPhutDatToiThieu=?,
-       ViDo=COALESCE(?,ViDo), KinhDo=COALESCE(?,KinhDo)
+       ViDo=?, KinhDo=?
      WHERE MaCoSo=?`,
     [
-      duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai, duLieuCoSo.zalo ?? null,
+      duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai,
       duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh, duLieuCoSo.quanHuyen,
       duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua, duLieuCoSo.gioDongCua,
-      duLieuCoSo.soPhutDatToiThieu, duLieuCoSo.viDo ?? null, duLieuCoSo.kinhDo ?? null,
+      duLieuCoSo.soPhutDatToiThieu, toaDo.viDo, toaDo.kinhDo,
       coSo.maCoSo,
     ]);
   return layCoSoTheoMa(maChuSan, coSo.maCoSo);
@@ -264,26 +281,40 @@ async function capNhatCoSo(maChuSan, duLieuCoSo, maCoSo) {
 
 // Thêm cơ sở thứ 2, 3… (chỉ sau khi được duyệt). Bắt đầu ở trạng thái ẩn cho tới khi có sân + giá.
 async function taoCoSoMoi(maChuSan, duLieuCoSo) {
+  const toaDo = await tinhToaDo(duLieuCoSo.linkBanDo, null);
   const [ketQua] = await pool.query(
-    `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo,
+    `INSERT INTO CoSo (MaChuSan, TenCoSo, DiaChi, SoDienThoai, LinkBanDo,
        TinhThanh, QuanHuyen, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, ViDo, KinhDo, TrangThai)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'hidden')`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'hidden')`,
     [
       maChuSan, duLieuCoSo.tenCoSo, duLieuCoSo.diaChi, duLieuCoSo.soDienThoai,
-      duLieuCoSo.zalo ?? null, duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh,
+      duLieuCoSo.linkBanDo, duLieuCoSo.tinhThanh,
       duLieuCoSo.quanHuyen, duLieuCoSo.moTa ?? null, duLieuCoSo.gioMoCua,
       duLieuCoSo.gioDongCua, duLieuCoSo.soPhutDatToiThieu,
-      duLieuCoSo.viDo ?? null, duLieuCoSo.kinhDo ?? null,
+      toaDo.viDo, toaDo.kinhDo,
     ]);
   return layCoSoTheoMa(maChuSan, ketQua.insertId);
 }
 
-async function capNhatAnhCoSo(maChuSan, duongDan, maCoSo) {
-  const coSo = await chonCoSo(maChuSan, maCoSo);
-  await thucHienGiaoDich(async (ketNoi) => {
-    await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=0 WHERE MaCoSo=?', [coSo.maCoSo]);
-    await ketNoi.query('INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia) VALUES (?,?,1)', [coSo.maCoSo, duongDan]);
-  });
+// Ảnh mới thành ảnh bìa; ảnh cũ giữ trong gallery. File lưu uploads/coso/cs<maCoSo>-<ms>-<4hex>.<đuôi>.
+async function capNhatAnhCoSo(maChuSan, tep, maCoSo) {
+  let coSo;
+  try {
+    coSo = await chonCoSo(maChuSan, maCoSo);
+  } catch (loi) {
+    await fs.unlink(tep.path).catch(() => {});
+    throw loi;
+  }
+  const duongDan = await luuAnh(tep, 'coso', `cs${coSo.maCoSo}`);
+  try {
+    await thucHienGiaoDich(async (ketNoi) => {
+      await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=0 WHERE MaCoSo=?', [coSo.maCoSo]);
+      await ketNoi.query('INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia) VALUES (?,?,1)', [coSo.maCoSo, duongDan]);
+    });
+  } catch (loi) {
+    await xoaAnh(duongDan);
+    throw loi;
+  }
   return { duongDanAnh: duongDan };
 }
 

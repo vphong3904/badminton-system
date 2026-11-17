@@ -145,6 +145,9 @@ module.exports = {
       get: endpoint('Xem thông tin cá nhân', 'Tài khoản', { auth: true }),
       patch: endpoint('Cập nhật thông tin cá nhân', 'Tài khoản', { auth: true, body: 'CapNhatCaNhan' }),
     },
+    '/api/tai-khoan/ca-nhan/anh': {
+      post: endpoint('Đổi ảnh đại diện (multipart, trường tepAnh)', 'Tài khoản', { auth: true }),
+    },
     '/api/tai-khoan/doi-mat-khau': {
       post: endpoint('Đổi mật khẩu', 'Tài khoản', { auth: true, body: 'DoiMatKhau' }),
     },
@@ -207,6 +210,13 @@ module.exports = {
     '/api/khach/dat-san/{maDatSan}/hoa-don-nhap': {
       get: endpoint('Xem hóa đơn nháp và hướng dẫn thanh toán', 'Khách hàng', { auth: true, params: maDatSan }),
     },
+    '/api/khach/dat-san/{maDatSan}/huy-xem-truoc': {
+      get: endpoint(
+        'Xem trước kết quả hủy (không ghi DB): trả daThanhToan, soTienHoan, tiLeHoan (100/50/0), soGioConLai '
+        + 'để app hiện cảnh báo trước khi khách xác nhận hủy',
+        'Khách hàng',
+        { auth: true, params: maDatSan, responses: { 404: response.Loi, 409: response.Loi } }),
+    },
     '/api/khach/dat-san/{maDatSan}/huy': {
       post: endpoint(
         'Hủy đơn đặt sân. Đơn đã thanh toán hoàn theo chính sách: còn ≥24h hoàn 100%, 12–24h hoàn 50%, '
@@ -216,7 +226,7 @@ module.exports = {
     },
     '/api/khach/dat-san/{maDatSan}/khieu-nai': {
       post: endpoint(
-        'Khách khiếu nại chủ sân (đơn đã thanh toán thành công hoặc đã hủy; mỗi đơn 1 lần; trả 201)',
+        'Khách khiếu nại chủ sân (chỉ đơn đã hủy và hoàn tiền xong — hoàn tiền refunded; mỗi đơn 1 lần; trả 201)',
         'Khách hàng',
         { auth: true, params: maDatSan, body: 'KhieuNaiMoi', responses: { 404: response.Loi, 409: response.Loi } }),
     },
@@ -836,8 +846,11 @@ module.exports = {
           tinhThanh: { type: 'string' },
           quanHuyen: { type: 'string' },
           soDienThoai: { type: 'string' },
-          zalo: { type: 'string' },
-          linkBanDo: { type: 'string', format: 'uri' },
+          linkBanDo: {
+            type: 'string', format: 'uri',
+            description: 'Link Google Maps (kể cả maps.app.goo.gl). Backend tự đọc vĩ độ/kinh độ từ link này để tính "sân gần tôi"; không gửi viDo/kinhDo.',
+            example: 'https://maps.app.goo.gl/AbCdEf123',
+          },
           moTa: { type: 'string' },
           gioMoCua: { type: 'string', example: '06:00' },
           gioDongCua: { type: 'string', example: '22:00' },

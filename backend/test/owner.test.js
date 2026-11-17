@@ -8,7 +8,7 @@ const duLieuCoSo = {
   tinhThanh: 'Ha Noi',
   quanHuyen: 'Cau Giay',
   soDienThoai: '0901234567',
-  linkBanDo: 'https://maps.example.test/san',
+  linkBanDo: 'https://maps.app.goo.gl/AbCdEf123',
   gioMoCua: '06:00',
   gioDongCua: '22:00',
   soPhutDatToiThieu: 60,
@@ -57,4 +57,18 @@ test('Buoc ngan hang bat buoc co maNganHang de rut tien duoc', () => {
   assert.equal(kiemTraChuSan.nganHang.body.safeParse(hopLe).success, true);
   const { maNganHang, ...thieuMa } = hopLe;
   assert.equal(kiemTraChuSan.nganHang.body.safeParse(thieuMa).success, false);
+});
+
+test('linkBanDo phai la link Google Maps; khong con nhan zalo / viDo / kinhDo tu chu san', () => {
+  const thu = (linkBanDo) => kiemTraChuSan.coSo.body.safeParse({ ...duLieuCoSo, linkBanDo }).success;
+  assert.equal(thu('https://maps.app.goo.gl/AbCdEf123'), true);
+  assert.equal(thu('https://www.google.com/maps/place/San/@10.8,106.6,17z'), true);
+  assert.equal(thu('https://facebook.com/sancaulong'), false);
+  assert.equal(thu('https://example.com/maps'), false);
+  const ketQua = kiemTraChuSan.coSo.body.safeParse({ ...duLieuCoSo, zalo: '0901', viDo: 10.8, kinhDo: 106.6 });
+  if (ketQua.success) {
+    assert.equal('zalo' in ketQua.data, false);
+    assert.equal('viDo' in ketQua.data, false);
+    assert.equal('kinhDo' in ketQua.data, false);
+  }
 });

@@ -8,6 +8,8 @@ const { tinhLaiDiemCoSo } = require('./reviewService');
 const { ganTrangThaiHienThi, tinhTrangThaiHienThi } = require('../utils/trangThaiDon');
 const { tinhSoTienHoan, MAC_DINH: HOAN_MAC_DINH } = require('../utils/chinhSachHoanTien');
 
+const { ANH_MAC_DINH } = require('../middlewares/upload');
+
 const GIOI_HAN_DAT_CO_DINH_NGAY = 90;
 const SO_NGAY_SUA_DANH_GIA = 7;
 
@@ -310,8 +312,8 @@ async function timCoSo(boLoc) {
        cs.SoPhutDatToiThieu AS soPhutDatToiThieu,
        cs.DiemTrungBinh AS diemTrungBinh, cs.SoDanhGia AS soDanhGia,
        s.MaSan AS maSan, s.TenSan AS tenSan,
-       (SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo
-        ORDER BY a.LaAnhBia DESC, a.ThuTu, a.MaAnh LIMIT 1) AS duongDanAnh
+       COALESCE((SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo
+        ORDER BY a.LaAnhBia DESC, a.ThuTu, a.MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh
      FROM CoSo cs JOIN San s ON s.MaCoSo=cs.MaCoSo
      WHERE cs.TrangThai='active' AND s.TrangThai='active' ${dieuKienKhuVuc}
        AND NOT EXISTS (
@@ -337,30 +339,24 @@ async function layDanhSachCoSo() {
     `SELECT cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi,
        cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen, cs.GiaThapNhat AS giaThapNhat,
        cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
-       cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.TienIch AS tienIch,
+       cs.SoPhutDatToiThieu AS soPhutDatToiThieu,
        cs.ViDo AS viDo, cs.KinhDo AS kinhDo,
        cs.SoDienThoai AS soDienThoai, cs.LinkBanDo AS linkBanDo,
        cs.DiemTrungBinh AS diemTrungBinh, cs.SoDanhGia AS soDanhGia,
        (SELECT COUNT(*) FROM San s WHERE s.MaCoSo=cs.MaCoSo AND s.TrangThai='active') AS soSan,
-       (SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo
-        ORDER BY a.LaAnhBia DESC, a.ThuTu, a.MaAnh LIMIT 1) AS duongDanAnh
+       COALESCE((SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo
+        ORDER BY a.LaAnhBia DESC, a.ThuTu, a.MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh
      FROM CoSo cs
      WHERE cs.TrangThai='active'
        AND EXISTS (SELECT 1 FROM San s WHERE s.MaCoSo=cs.MaCoSo AND s.TrangThai='active')
      ORDER BY cs.DiemTrungBinh DESC, cs.MaCoSo`);
-  return cacCoSo.map((coSo) => {
-    let tienIch = coSo.tienIch;
-    if (typeof tienIch === 'string') {
-      try { tienIch = JSON.parse(tienIch); } catch { tienIch = []; }
-    }
-    return { ...coSo, tienIch: Array.isArray(tienIch) ? tienIch : [] };
-  });
+  return cacCoSo;
 }
 
 async function layChiTietCoSo(maCoSo) {
   const [[coSo]] = await pool.query(
     `SELECT MaCoSo AS maCoSo, TenCoSo AS tenCoSo, DiaChi AS diaChi,
-       SoDienThoai AS soDienThoai, Zalo AS zalo, LinkBanDo AS linkBanDo,
+       SoDienThoai AS soDienThoai, LinkBanDo AS linkBanDo,
        TinhThanh AS tinhThanh, QuanHuyen AS quanHuyen, MoTa AS moTa,
        GioMoCua AS gioMoCua, GioDongCua AS gioDongCua,
        SoPhutDatToiThieu AS soPhutDatToiThieu, GiaThapNhat AS giaThapNhat,
@@ -376,7 +372,8 @@ async function layChiTietCoSo(maCoSo) {
     `SELECT DuongDan AS duongDan, LaAnhBia AS laAnhBia FROM AnhCoSo
      WHERE MaCoSo=? ORDER BY LaAnhBia DESC, ThuTu, MaAnh`,
     [maCoSo]);
-  return { ...coSo, cacSan, anh };
+  // Chưa có ảnh nào → gallery gồm 1 ảnh cơ sở mặc định.
+  return { ...coSo, cacSan, anh: anh.length ? anh : [{ duongDan: ANH_MAC_DINH.coso, laAnhBia: 1 }] };
 }
 
 async function layChiTietSan(maSan) {
@@ -468,8 +465,8 @@ async function lietKeDatSan(maNguoiDung) {
     `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaLichCoDinh AS maLichCoDinh,
        d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
        d.TongTien AS tongTien, d.TrangThai AS trangThai, d.Nguon AS nguon,
-       t.TrangThai AS trangThaiThanhToan, t.PhuongThuc AS phuongThucThanhToan,
-       t.MaGiaoDichNganHang AS maGiaoDichNganHang, t.NgayThanhToan AS ngayThanhToan,
+       t.TrangThai AS trangThaiThanhToan,
+       t.NgayThanhToan AS ngayThanhToan,
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
        t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan, t.LyDoLoi AS lyDoLoi,
        d.TenKhach AS tenKhach, d.SoDienThoaiLienHe AS soDienThoaiLienHe,
@@ -503,10 +500,10 @@ async function lietKeDatSan(maNguoiDung) {
     return ganTrangThaiHienThi({
       ...don,
       lyDoTuChoi,
-      // Nút "Khiếu nại chủ sân": đơn app đã thanh toán thành công hoặc đã huỷ, chưa khiếu nại lần nào.
+      // Nút "Khiếu nại chủ sân": đơn app đã huỷ và đã hoàn tiền xong (refunded), chưa khiếu nại lần nào.
       daKhieuNai,
       coTheKhieuNai: !daKhieuNai && don.nguon === 'app'
-        && ['confirmed', 'completed', 'cancelled'].includes(don.trangThai),
+        && don.trangThai === 'cancelled' && don.trangThaiHoanTien === 'refunded',
       daDanhGia,
       soSaoDanhGia: daDanhGia ? Number(don.soSaoDanhGia) : null,
       // Buổi đang giữ đánh giá (chính đơn này, hoặc buổi khác cùng lịch cố định): FE sửa/xoá theo mã này.
@@ -571,6 +568,71 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
   });
 }
 
+// Cấu hình chính sách hoàn tiền (bảng cấu hình; thiếu thì dùng mặc định 24h/12h/50%).
+async function layCauHinhHoan(ketNoi) {
+  return {
+    gioMienPhi: await layCauHinh(ketNoi, 'cancel_free_hours') || HOAN_MAC_DINH.gioMienPhi,
+    gioNuaTien: await layCauHinh(ketNoi, 'cancel_half_hours') || HOAN_MAC_DINH.gioNuaTien,
+    tiLeNuaTien: await layCauHinh(ketNoi, 'late_cancel_refund_percent') || HOAN_MAC_DINH.tiLeNuaTien,
+  };
+}
+
+// Hàm thuần: tổng đã trả + số tiền hoàn nếu huỷ ngay bây giờ (mỗi buổi tính theo số giờ còn lại tới giờ chơi).
+function tinhHoanTheoBuoi(danhSachBuoi, cauHinhHoan, bayGio = Date.now()) {
+  let soTienHoan = 0;
+  let tongDaTra = 0;
+  let conGioNhoNhat = Infinity;
+  for (const muc of danhSachBuoi) {
+    const batDau = new Date(`${muc.ngay}T${String(muc.gioBatDau).slice(0, 8)}+07:00`);
+    const conGio = (batDau.getTime() - bayGio) / 3_600_000;
+    conGioNhoNhat = Math.min(conGioNhoNhat, conGio);
+    tongDaTra += Number(muc.tongTien);
+    soTienHoan += tinhSoTienHoan(muc.tongTien, conGio, cauHinhHoan);
+  }
+  return { soTienHoan, tongDaTra, conGioNhoNhat };
+}
+
+// Xem trước kết quả huỷ (KHÔNG ghi DB): FE hiện cảnh báo đúng trường hợp 100% / 50% / không hoàn trước khi khách xác nhận.
+async function xemTruocHuy(maNguoiDung, maDatSan) {
+  const [[donDatSan]] = await pool.query(
+    `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.NgayChoi AS ngay,
+       d.GioBatDau AS gioBatDau, d.TongTien AS tongTien, d.TrangThai AS trangThai,
+       t.TrangThai AS trangThaiThanhToan
+     FROM DatSan d LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
+       WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+       ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
+     END
+     WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
+    [maDatSan, maNguoiDung]);
+  if (!donDatSan) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
+  if (!['pending_payment', 'confirmed'].includes(donDatSan.trangThai)) {
+    throw AppError.biTrung('Đơn đặt sân không thể hủy ở trạng thái hiện tại');
+  }
+  const danhSachBuoi = donDatSan.maLichCoDinh
+    ? (await pool.query(
+      `SELECT NgayChoi AS ngay, GioBatDau AS gioBatDau, TongTien AS tongTien FROM DatSan
+       WHERE MaLichCoDinh=? AND NgayChoi>=CURDATE() AND TrangThai IN ('pending_payment','confirmed')`,
+      [donDatSan.maLichCoDinh]))[0]
+    : [{ ngay: donDatSan.ngay, gioBatDau: donDatSan.gioBatDau, tongTien: donDatSan.tongTien }];
+  if (!danhSachBuoi.length) throw AppError.biTrung('Không còn buổi nào có thể hủy');
+
+  const daThanhToan = donDatSan.trangThaiThanhToan === 'success';
+  const cauHinhHoan = await layCauHinhHoan(pool);
+  const { soTienHoan, tongDaTra, conGioNhoNhat } = tinhHoanTheoBuoi(danhSachBuoi, cauHinhHoan);
+  const tiLeHoan = daThanhToan && tongDaTra > 0 ? Math.round(soTienHoan * 100 / tongDaTra) : 0;
+  return {
+    daThanhToan,
+    soBuoiHuy: danhSachBuoi.length,
+    tongDaTra: daThanhToan ? tongDaTra : 0,
+    soTienHoan: daThanhToan ? soTienHoan : 0,
+    tiLeHoan,
+    gioMienPhi: cauHinhHoan.gioMienPhi,
+    gioNuaTien: cauHinhHoan.gioNuaTien,
+    // Số giờ còn lại tới buổi gần nhất (làm tròn 1 số lẻ) — chỉ để FE hiển thị.
+    soGioConLai: Math.round(conGioNhoNhat * 10) / 10,
+  };
+}
+
 async function huyDatSan(maNguoiDung, maDatSan) {
   return thucHienGiaoDich(async (ketNoi) => {
     await hetHanDatSan(maNguoiDung, ketNoi);
@@ -603,17 +665,8 @@ async function huyDatSan(maNguoiDung, maDatSan) {
     let tongDaTra = 0;
     const daThanhToan = donDatSan.trangThaiThanhToan === 'success';
     if (daThanhToan) {
-      const cauHinhHoan = {
-        gioMienPhi: await layCauHinh(ketNoi, 'cancel_free_hours') || HOAN_MAC_DINH.gioMienPhi,
-        gioNuaTien: await layCauHinh(ketNoi, 'cancel_half_hours') || HOAN_MAC_DINH.gioNuaTien,
-        tiLeNuaTien: await layCauHinh(ketNoi, 'late_cancel_refund_percent') || HOAN_MAC_DINH.tiLeNuaTien,
-      };
-      for (const muc of danhSachMaDon) {
-        const batDau = new Date(`${muc.ngay}T${String(muc.gioBatDau).slice(0, 8)}+07:00`);
-        const conGio = (batDau.getTime() - Date.now()) / 3_600_000;
-        tongDaTra += Number(muc.tongTien);
-        soTienHoan += tinhSoTienHoan(muc.tongTien, conGio, cauHinhHoan);
-      }
+      const cauHinhHoan = await layCauHinhHoan(ketNoi);
+      ({ soTienHoan, tongDaTra } = tinhHoanTheoBuoi(danhSachMaDon, cauHinhHoan));
     }
     await ketNoi.query(
       `UPDATE DatSan SET TrangThai='cancelled', NguoiHuy='customer',
@@ -707,8 +760,8 @@ async function huyDatSan(maNguoiDung, maDatSan) {
       tiLeHoan,
       // Chủ sân hoàn tiền; khách có thể (không bắt buộc) bổ sung TK nhận hoàn để chủ sân chuyển nhanh.
       canCapNhatTaiKhoanHoan: soTienHoan > 0,
-      // FE hiện nút "Khiếu nại chủ sân" ngay sau khi huỷ.
-      coTheKhieuNai: true,
+      // Chỉ khiếu nại được khi đơn đã huỷ và hoàn tiền xong (refunded) — xem lietKeDatSan.
+      coTheKhieuNai: false,
       thongBao: thongBaoHuy,
     };
   });
@@ -929,6 +982,7 @@ module.exports = {
   lietKeDatSan,
   layHoaDonNhap,
   huyDatSan,
+  xemTruocHuy,
   capNhatTaiKhoanHoan,
   layDanhSachDanhGia,
   guiDanhGia,

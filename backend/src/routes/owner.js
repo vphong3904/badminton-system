@@ -3,7 +3,7 @@ const dieuKhien = require('../controllers/ownerController');
 const kiemTraDuLieu = require('../validators/owner');
 const kiemTraHopLe = require('../middlewares/validate');
 const { xacThucNguoiDung, kiemTraVaiTro, kiemTraChuSanDaDuyet } = require('../middlewares/auth');
-const { taiTep } = require('../middlewares/upload');
+const { taiAnhCoSo } = require('../middlewares/upload');
 const baoCao = require('../controllers/ownerReportController');
 const kiemTraBaoCao = require('../validators/ownerReport');
 const donDatSan = require('../controllers/ownerBookingController');
@@ -29,12 +29,12 @@ dinhTuyen.post('/co-so', kiemTraHopLe(kiemTraDuLieu.coSo), dieuKhien.taoCoSo);
 // API cũ (không có maCoSo → áp dụng cho cơ sở đầu tiên). Phải khai báo TRƯỚC '/co-so/:maCoSo'.
 dinhTuyen.put('/co-so', kiemTraHopLe(kiemTraDuLieu.coSo), dieuKhien.capNhatCoSo);
 dinhTuyen.put('/co-so/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGia), dieuKhien.capNhatBangGia);
-dinhTuyen.post('/co-so/anh', taiTep.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
+dinhTuyen.post('/co-so/anh', taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
 // API theo từng cơ sở.
 dinhTuyen.get('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layCoSo);
 dinhTuyen.put('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.capNhatCoSoTheoMa), dieuKhien.capNhatCoSo);
 dinhTuyen.put('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGiaTheoMa), dieuKhien.capNhatBangGia);
-dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiTep.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
+dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
 // Đóng tạm / mở lại / xoá cơ sở: đóng & xoá chỉ khi không còn khách đặt (đơn hiện tại, lịch cố định); xoá phải đóng trước.
 dinhTuyen.patch('/co-so/:maCoSo/dong', kiemTraHopLe(kiemTraDuLieu.dongXoaCoSo), dieuKhien.dongCoSo);
 dinhTuyen.patch('/co-so/:maCoSo/mo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.moCoSo);

@@ -4,6 +4,7 @@ const gioPhut = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải dạ
 const maSo = z.coerce.number().int().positive();
 
 const quyTac = require('./quyTac');
+const { laLinkGoogleMaps } = require('../utils/toaDoBanDo');
 
 const coSo = z.object({
   tenCoSo: z.string().trim().min(2).max(150),
@@ -11,11 +12,10 @@ const coSo = z.object({
   tinhThanh: z.string().trim().min(2).max(80),
   quanHuyen: z.string().trim().min(2).max(80),
   soDienThoai: quyTac.soDienThoaiLienHe,
-  zalo: z.string().trim().max(30).optional(),
-  linkBanDo: z.string().url().max(500),
-  // Toạ độ để app khách tìm "sân gần tôi". Bỏ trống = giữ nguyên giá trị đang lưu.
-  viDo: z.number().min(-90).max(90).optional(),
-  kinhDo: z.number().min(-180).max(180).optional(),
+  // Link Google Maps (kể cả link rút gọn maps.app.goo.gl). Backend tự đọc toạ độ từ link này
+  // để app khách tính khoảng cách "sân gần tôi" — chủ sân không nhập vĩ độ/kinh độ.
+  linkBanDo: z.string().trim().url().max(500)
+    .refine(laLinkGoogleMaps, 'Vui lòng dán link Google Maps (vd https://maps.app.goo.gl/...)'),
   moTa: z.string().max(2000).optional(),
   gioMoCua: gioPhut,
   gioDongCua: gioPhut,

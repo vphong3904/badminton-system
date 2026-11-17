@@ -73,7 +73,7 @@ test('Huỷ trước giờ chơi 30h: hoàn 100%, báo khách và chủ sân yê
   const ketQua = await dichVu.huyDatSan(7, 5);
   assert.equal(ketQua.soTienHoanDuKien, 200000);
   assert.equal(ketQua.tiLeHoan, 100);
-  assert.equal(ketQua.coTheKhieuNai, true);
+  assert.equal(ketQua.coTheKhieuNai, false); // chỉ khiếu nại được sau khi chủ sân hoàn tiền (refunded)
   assert.deepEqual(thongBaoDaGhi(), [
     { nguoiDung: 7, loai: 'refund_requested' },
     { nguoiDung: 4, loai: 'refund_requested' },

@@ -2,6 +2,7 @@ const dichVu = require('../services/authService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thanhCong, daTao } = require('../utils/response');
 const { DANH_SACH_NGAN_HANG } = require('../utils/nganHang');
+const AppError = require('../utils/AppError');
 
 exports.dangKyKhachHang = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   daTao(phanHoi, await dichVu.dangKy('customer', yeuCau.body));
@@ -23,6 +24,10 @@ exports.layThongTinCaNhan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
 });
 exports.capNhatThongTinCaNhan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.capNhatThongTin(yeuCau.nguoiDung.maNguoiDung, yeuCau.body));
+});
+exports.capNhatAnhDaiDien = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
+  thanhCong(phanHoi, await dichVu.capNhatAnhDaiDien(yeuCau.nguoiDung.maNguoiDung, yeuCau.file));
 });
 exports.doiMatKhau = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   await dichVu.doiMatKhau(

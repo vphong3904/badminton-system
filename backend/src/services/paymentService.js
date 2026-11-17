@@ -3,7 +3,7 @@ const path = require('path');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { taoAnhQrUrl, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
-const { thuMucTepTaiLen, layDuongDanTep } = require('../middlewares/upload');
+const { thuMucTepTaiLen, layDuongDanTep, laAnhThat } = require('../middlewares/upload');
 const { guiThongBao, dinhDangTien } = require('./notificationService');
 
 // Luồng thanh toán (không dùng cổng thanh toán tự động):
@@ -108,21 +108,6 @@ async function layQr(maNguoiDung, maDatSan) {
     anhQrUrl: taoAnhQrUrl(thanhToan.noiDungChuyenKhoan, Number(thanhToan.soTien), taiKhoan),
     chuaCauHinhThanhToan: !taiKhoan,
   };
-}
-
-// Chữ ký đầu file: chặn file không phải ảnh dù đổi đuôi/mime.
-async function laAnhThat(duongDanTep) {
-  const tep = await fs.open(duongDanTep, 'r');
-  try {
-    const dem = Buffer.alloc(12);
-    await tep.read(dem, 0, 12, 0);
-    const laJpeg = dem[0] === 0xff && dem[1] === 0xd8 && dem[2] === 0xff;
-    const laPng = dem.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-    const laWebp = dem.subarray(0, 4).toString('ascii') === 'RIFF' && dem.subarray(8, 12).toString('ascii') === 'WEBP';
-    return laJpeg || laPng || laWebp;
-  } finally {
-    await tep.close();
-  }
 }
 
 async function xoaTepNeuCo(duongDanTuongDoi) {

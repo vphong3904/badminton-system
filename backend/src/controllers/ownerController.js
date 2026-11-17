@@ -4,7 +4,6 @@ const sanCoSo = require('../services/sanCoSoService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { thanhCong, daTao } = require('../utils/response');
-const { layDuongDanTep } = require('../middlewares/upload');
 
 const xuLy = (hamXuLy, dinhDang = thanhCong) =>
   xuLyBatDongBo(async (yeuCau, phanHoi) => dinhDang(phanHoi, await hamXuLy(yeuCau)));
@@ -29,7 +28,7 @@ exports.capNhatBangGia = xuLy((yeuCau) =>
   dichVu.thayBangGia(layMaChuSan(yeuCau), yeuCau.body.khungGias, layMaCoSo(yeuCau)));
 exports.capNhatAnhCoSo = xuLy((yeuCau) => {
   if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
-  return dichVu.capNhatAnhCoSo(layMaChuSan(yeuCau), layDuongDanTep(yeuCau.file), layMaCoSo(yeuCau));
+  return dichVu.capNhatAnhCoSo(layMaChuSan(yeuCau), yeuCau.file, layMaCoSo(yeuCau));
 });
 exports.lietKeSan = xuLy((yeuCau) => dichVu.lietKeSan(layMaChuSan(yeuCau), yeuCau.query.maCoSo));
 exports.taoSan = xuLy((yeuCau) => dichVu.taoSan(layMaChuSan(yeuCau), yeuCau.body), daTao);

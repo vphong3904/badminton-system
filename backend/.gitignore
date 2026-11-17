@@ -2,3 +2,9 @@ node_modules/
 .env
 uploads/*
 !uploads/.gitkeep
+!uploads/avatar/
+uploads/avatar/*
+!uploads/avatar/default-user.jpg
+!uploads/coso/
+uploads/coso/*
+!uploads/coso/coso.jpg
