@@ -471,31 +471,6 @@ function monthOf(dateStr) {
   }))
 }
 
-// Màu cột thời gian theo mức giá: giá thấp = xanh dương sáng, giá cao = xanh dương đậm
-function priceTierColors(prices) {
-  const distinct = [...new Set(prices)].sort((a, b) => a - b)
-  const n = distinct.length
-  const map = {}
-  distinct.forEach((p, i) => {
-    const t = n === 1 ? 0.3 : i / (n - 1)
-    const light = Math.round(86 - t * 44)
-    map[p] = { bg: `hsl(208, 85%, ${light}%)`, fg: light < 58 ? '#ffffff' : '#10243a' }
-  })
-  return map
-}
-
-// Gom các ô liên tiếp cùng giá thành khoảng giờ để làm chú thích
-function groupPriceRanges(slotPrices) {
-  const ranges = []
-  slotPrices.forEach((price, i) => {
-    if (price == null) return
-    const last = ranges[ranges.length - 1]
-    if (last && last.price === price && last.to === i) last.to = i + 1
-    else ranges.push({ from: i, to: i + 1, price })
-  })
-  return ranges
-}
-
 // Đổi "HH:mm" thành vị trí cột (mỗi cột = 30 phút, cột 0 = 06:00)
 function slotIndex(time) {
   const [h, m] = time.split(':').map(Number)
@@ -535,7 +510,6 @@ function CourtMatrix({ user }) {
   const [courts, setCourts] = useState([]) // tất cả sân của cơ sở đó
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
-  const [khungGias, setKhungGias] = useState([]) // bảng giá của cơ sở (tô màu cột thời gian)
   const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
 
   // Đơn đã thanh toán của ngày đang xem (API có sẵn GET /api/chu-san/dat-san): confirmed (đã đặt) và completed (hoàn tất)
@@ -578,32 +552,6 @@ function CourtMatrix({ user }) {
       !d.huy ||
       !tatCaDon.some((o) => !o.huy && o.maSan === d.maSan && toMinutes(o.gioBatDau) < toMinutes(d.gioKetThuc) && toMinutes(d.gioBatDau) < toMinutes(o.gioKetThuc)),
   )
-
-  // Bảng giá (API có sẵn GET /api/chu-san/dang-ky) → màu cột thời gian theo giá và chú thích giá
-  useEffect(() => {
-    if (!isOwner) return
-    let cancelled = false
-    callApi('/api/chu-san/dang-ky', { token })
-      .then((data) => {
-        if (!cancelled) setKhungGias(data.khungGias ?? [])
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [isOwner, token, tick])
-  const thuTrongTuan = new Date(`${date}T00:00:00`).getDay()
-  const laCuoiTuan = thuTrongTuan === 0 || thuTrongTuan === 6
-  const slotPrices = DAY_HOURS.map((_, i) => {
-    const phut = DAY_START_HOUR * 60 + i * 30
-    const k = khungGias.find((x) => toMinutes(cut5(x.gioBatDau)) <= phut && phut < toMinutes(cut5(x.gioKetThuc)))
-    const gia = k ? (laCuoiTuan ? k.giaCuoiTuanKhachVangLai : k.giaNgayThuongKhachVangLai) : null
-    return gia == null ? null : Number(gia)
-  })
-  const tierColors = priceTierColors(slotPrices.filter((p) => p != null))
-  const priceRanges = groupPriceRanges(slotPrices)
-  const lastPrice = [...slotPrices].reverse().find((p) => p != null)
-  const lastPriceColor = lastPrice != null ? tierColors[lastPrice].bg : null
 
   // Sang ngày mới thì ô ngày tự đổi theo (chỉ khi đang xem đúng ngày hôm qua)
   useEffect(() => {
@@ -662,15 +610,6 @@ function CourtMatrix({ user }) {
           <span>Cơ sở hiện tại: </span>
           <strong>{branch?.tenCoSo ?? '—'}</strong>
         </div>
-        {/* Màu cột thời gian theo bảng giá (Quản lý bảng giá) */}
-        <div className="price-legend" aria-label="Giá theo khung giờ">
-          {priceRanges.map((r) => (
-            <span key={`${r.from}-${r.price}`} className="price-chip">
-              <i className="legend-box" style={{ background: tierColors[r.price].bg }} />
-              {DAY_HOURS[r.from]}–{r.to < DAY_HOURS.length ? DAY_HOURS[r.to] : DAY_END_LABEL}: {formatVnd(r.price)}
-            </span>
-          ))}
-        </div>
         {/* Chú thích màu trạng thái */}
         <div className="legend" aria-label="Chú thích màu">
           <span className="legend-item">
@@ -693,17 +632,12 @@ function CourtMatrix({ user }) {
               <tr>
                 <th>Sân</th>
                 {DAY_HOURS.map((h, i) => (
-                  <th
-                    key={h}
-                    className="time-head"
-                    style={slotPrices[i] != null ? { '--slot-bg': tierColors[slotPrices[i]].bg } : undefined}
-                    title={slotPrices[i] != null ? `${formatVnd(slotPrices[i])}/giờ` : undefined}
-                  >
+                  <th key={h} className="time-head">
                     <span className="time-label">{h}</span>
                   </th>
                 ))}
                 {/* Cột cuối cho mốc 22:00: dải màu nền chạy liên tục đến hết ô này */}
-                <th className="time-head time-head-end" style={lastPriceColor ? { '--slot-bg': lastPriceColor } : undefined}>
+                <th className="time-head time-head-end">
                   <span className="time-label">{DAY_END_LABEL}</span>
                 </th>
               </tr>
@@ -724,7 +658,7 @@ function CourtMatrix({ user }) {
                 </tr>
               )}
               {courts.map((c) => (
-                <tr key={c.maSan}>
+                <tr key={c.maSan} className={c.trangThai === 'maintenance' ? 'court-closed' : undefined}>
                   <th scope="row">{c.tenSan}</th>
                   {buildCourtCells(datSanTheoNgay.filter((d) => d.maSan === c.maSan)).map((cell) =>
                     cell.dat ? (
@@ -1332,35 +1266,77 @@ function PageBanner({ title }) {
   )
 }
 
+// TẠM THỜI: API bảng giá hiện chỉ trả giá của cơ sở đầu tiên, nên trang Quản lý sân chỉ hiện cơ sở đầu tiên.
+// Khi API hỗ trợ bảng giá theo từng cơ sở, đổi thành true để hiện lại ô lọc "Tất cả cơ sở" và ô chọn cơ sở khi thêm sân.
+const SHOW_ALL_BRANCHES = false
+
 function CourtsPage({ user }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
-  const [branch, setBranch] = useState(null) // cơ sở duy nhất mà tài khoản đang quản lý
+  const [branches, setBranches] = useState([]) // các cơ sở của chủ sân (có thể nhiều cơ sở)
+  const [filterId, setFilterId] = useState('all') // bộ lọc bảng sân: 'all' = tất cả cơ sở
+  const [addBranchId, setAddBranchId] = useState('') // cơ sở được chọn trong form Thêm sân
   const [courts, setCourts] = useState([])
+  const [busyCourts, setBusyCourts] = useState(new Set()) // sân còn khách đặt (đơn hiện tại/sắp tới)
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [newName, setNewName] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [imageFile, setImageFile] = useState(null) // ảnh chọn từ máy (chưa có API ảnh sân nên chưa gửi lên được)
-  const [fileKey, setFileKey] = useState(0)
   const [khungGias, setKhungGias] = useState([]) // bảng giá của cơ sở (để hiển thị giá theo thời điểm hiện tại)
   const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
 
-  // Lấy cơ sở và các sân thuộc tài khoản đang đăng nhập (MaChuSan = MaNguoiDung, MaCoSo nối CoSo với San)
+  // Danh sách cơ sở của tài khoản (API có sẵn GET /api/chu-san/co-so)
   useEffect(() => {
     if (!isOwner) return
     let cancelled = false
+    callApi('/api/chu-san/co-so', { token })
+      .then((data) => {
+        if (cancelled) return
+        const all = Array.isArray(data) ? data : data ? [data] : []
+        const list = SHOW_ALL_BRANCHES ? all : all.slice(0, 1)
+        setBranches(list)
+        setAddBranchId((cur) => (cur && list.some((b) => String(b.maCoSo) === cur) ? cur : list[0] ? String(list[0].maCoSo) : ''))
+        if (list.length === 0) setLoading(false)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message)
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token, tick])
+
+  // Sân theo bộ lọc cơ sở (mặc định tất cả cơ sở) + các đơn còn hiệu lực để biết sân nào còn khách (được phép xoá hay chưa)
+  useEffect(() => {
+    if (!isOwner || branches.length === 0) return
+    let cancelled = false
+    const locCoSo = SHOW_ALL_BRANCHES && filterId === 'all' ? '' : `maCoSo=${filterId === 'all' ? branches[0].maCoSo : filterId}`
     async function load() {
       try {
-        const coSo = await fetchCoSo(token)
-        const cacSan = coSo ? await callApi('/api/chu-san/san', { token }) : []
-        const dangKy = coSo ? await callApi('/api/chu-san/dang-ky', { token }) : null
+        const [cacSan, dangKy, don] = await Promise.all([
+          callApi(`/api/chu-san/san${locCoSo ? `?${locCoSo}` : ''}`, { token }),
+          callApi('/api/chu-san/dang-ky', { token }),
+          callApi(`/api/chu-san/dat-san?${locCoSo ? `${locCoSo}&` : ''}tuNgay=${todayISO()}&soDong=200`, { token }),
+        ])
         if (cancelled) return
-        setBranch(coSo)
+        const bayGio = new Date()
+        const conKhach = new Set(
+          (don.cacDon ?? [])
+            .filter((d) => {
+              if (d.trangThai === 'pending_payment') return true
+              if (d.trangThai !== 'confirmed') return false
+              return new Date(`${String(d.ngay).slice(0, 10)}T${cut5(d.gioKetThuc)}:00`) > bayGio
+            })
+            .map((d) => d.maSan),
+        )
         setCourts(cacSan)
+        setBusyCourts(conKhach)
         setKhungGias(dangKy?.khungGias ?? [])
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -1372,7 +1348,7 @@ function CourtsPage({ user }) {
     return () => {
       cancelled = true
     }
-  }, [isOwner, token, tick])
+  }, [isOwner, token, filterId, branches, tick])
 
   if (!isOwner) {
     return (
@@ -1382,21 +1358,37 @@ function CourtsPage({ user }) {
     )
   }
 
-  // Giá hiện tại theo Quản lý bảng giá (thời gian + thứ ngày thường/cuối tuần); backend chưa có giá riêng từng sân
-  const giaHienTai = priceAt(khungGias, new Date())
-  const price = giaHienTai != null ? `${formatVnd(giaHienTai)}/giờ` : '—'
+  const branch = branches.find((b) => String(b.maCoSo) === addBranchId) ?? null
 
-  // Bấm nút Bảo trì / Hoạt động: đổi TrangThai của sân (maintenance / active)
+  // Giá hiện tại theo Quản lý bảng giá (thời gian + thứ ngày thường/cuối tuần); backend chưa có giá riêng từng sân
+  // Bảng giá API hiện chỉ trả về của cơ sở đầu tiên (cùng cơ sở trang Quản lý bảng giá đang sửa) nên chỉ hiện giá cho sân thuộc cơ sở đó
+  const giaHienTai = priceAt(khungGias, new Date())
+  const coSoCoGia = branches[0]?.maCoSo
+  const priceOf = (court) => {
+    if (court.maCoSo !== coSoCoGia) return '—'
+    if (giaHienTai != null) return `${formatVnd(giaHienTai)}/giờ`
+    return khungGias.length > 0 ? 'Ngoài giờ' : '—'
+  }
+
+  const changeFilter = (e) => {
+    setFilterId(e.target.value)
+    setCourts([])
+    setLoading(true)
+    setError('')
+    setSuccess('')
+  }
+
+  // Đóng sân / Mở sân: sân đóng thì khách (app) không đặt được nữa, đơn đã đặt vẫn giữ nguyên
   const toggleStatus = async (court) => {
-    const next = court.trangThai === 'active' ? 'maintenance' : 'active'
+    const closing = court.trangThai === 'active'
     setBusyId(court.maSan)
     setError('')
     setSuccess('')
     try {
-      const updated = await callApi(`/api/chu-san/san/${court.maSan}`, {
+      const updated = await callApi(`/api/chu-san/san/${court.maSan}/${closing ? 'dong' : 'mo'}`, {
         method: 'PATCH',
         token,
-        body: { trangThai: next },
+        body: {},
       })
       setCourts((prev) => prev.map((c) => (c.maSan === court.maSan ? { ...c, ...updated } : c)))
     } catch (err) {
@@ -1406,7 +1398,24 @@ function CourtsPage({ user }) {
     }
   }
 
-  // Thêm sân mới: luôn ở trạng thái maintenance cho tới khi chủ sân bấm Active
+  // Xoá sân khỏi database: chỉ khi sân đã đóng và không còn khách đặt
+  const deleteCourt = async (court) => {
+    if (!window.confirm(`Xoá sân "${court.tenSan}"? Thao tác này không hoàn tác được.`)) return
+    setBusyId(court.maSan)
+    setError('')
+    setSuccess('')
+    try {
+      await callApi(`/api/chu-san/san/${court.maSan}`, { method: 'DELETE', token, body: {} })
+      setCourts((prev) => prev.filter((c) => c.maSan !== court.maSan))
+      setSuccess(`Đã xoá ${court.tenSan}.`)
+    } catch (err) {
+      setError(describeApiError(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // Thêm sân mới vào cơ sở đã chọn: sân ở trạng thái Hoạt động ngay
   const addCourt = async (e) => {
     e.preventDefault()
     const tenSan = newName.trim()
@@ -1416,22 +1425,22 @@ function CourtsPage({ user }) {
       setError('Vui lòng nhập tên sân.')
       return
     }
+    if (!branch) {
+      setError('Vui lòng chọn cơ sở.')
+      return
+    }
     setAdding(true)
     try {
       const created = await callApi('/api/chu-san/san', {
         method: 'POST',
         token,
-        body: { tenSan, trangThai: 'maintenance' },
+        body: { maCoSo: branch.maCoSo, tenSan, trangThai: 'active' },
       })
       setCourts((prev) => [...prev, created])
       setNewName('')
-      const daChonAnh = Boolean(imageFile)
-      setImageFile(null)
-      setFileKey((k) => k + 1)
-      setSuccess(
-        `Đã thêm ${created.tenSan}. Sân đang ở trạng thái Bảo trì, bấm Hoạt động để mở sân.` +
-          (daChonAnh ? ' Ảnh chưa được lưu vì backend chưa có API ảnh sân.' : ''),
-      )
+      setSuccess(`Đã thêm ${created.tenSan} vào ${branch.tenCoSo}. Sân đã ở trạng thái Hoạt động.`)
+      // Sân mới thuộc cơ sở khác với bộ lọc đang xem thì chuyển bộ lọc sang cơ sở đó để thấy ngay
+      if (filterId !== 'all' && filterId !== addBranchId) setFilterId(addBranchId)
     } catch (err) {
       setError(describeApiError(err))
     } finally {
@@ -1439,17 +1448,34 @@ function CourtsPage({ user }) {
     }
   }
 
+
   return (
     <Page>
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
+
+      {/* Lọc sân theo cơ sở: mặc định hiển thị tất cả sân của mọi cơ sở */}
+      {SHOW_ALL_BRANCHES && (
+      <div className="filters filters-inline">
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={filterId} onChange={changeFilter}>
+            <option value="all">Tất cả cơ sở</option>
+            {branches.map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      )}
 
       <section className="card table-card">
         <div className="table-scroll">
           <table className="table table-courts">
             <thead>
               <tr>
-                <th>Ảnh</th>
                 <th>Sân</th>
                 <th>Cơ sở</th>
                 <th>Giá</th>
@@ -1460,54 +1486,53 @@ function CourtsPage({ user }) {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={6} className="table-empty">
+                  <td colSpan={5} className="table-empty">
                     Đang tải danh sách sân...
                   </td>
                 </tr>
               )}
               {!loading && courts.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="table-empty">
-                    Chưa có sân nào trong cơ sở của bạn.
+                  <td colSpan={5} className="table-empty">
+                    Chưa có sân nào.
                   </td>
                 </tr>
               )}
               {courts.map((c) => {
                 const active = c.trangThai === 'active'
+                const conKhach = busyCourts.has(c.maSan)
+                const coTheXoa = !active && !conKhach
+                let tieuDeXoa = 'Xoá sân khỏi hệ thống'
+                if (active) tieuDeXoa = 'Cần đóng sân trước khi xoá'
+                else if (conKhach) tieuDeXoa = 'Sân còn khách đã đặt, chưa xoá được'
                 return (
                   <tr key={c.maSan}>
-                    <td>
-                      {c.duongDanAnh ? (
-                        <img className="court-thumb" src={c.duongDanAnh.startsWith('http') ? c.duongDanAnh : `${API_URL}${c.duongDanAnh}`} alt={c.tenSan} />
-                      ) : (
-                        <span className="court-thumb court-thumb-empty">Chưa có ảnh</span>
-                      )}
-                    </td>
                     <td>{c.tenSan}</td>
-                    <td>{branch?.tenCoSo}</td>
-                    <td>{price}</td>
+                    <td>{c.tenCoSo ?? branch?.tenCoSo}</td>
+                    <td>{priceOf(c)}</td>
                     <td>
-                      <span className={`status-badge ${active ? 'status-ok' : 'status-maint'}`}>{active ? 'Hoạt động' : 'Bảo trì'}</span>
+                      <span className={`status-badge ${active ? 'status-ok' : 'status-maint'}`}>{active ? 'Hoạt động' : 'Đã đóng'}</span>
                     </td>
                     <td className="td-center">
                       <div className="row-actions row-actions-center">
-                        {/* Cờ lê xanh: bấm để chuyển sân sang Bảo trì / mở lại Hoạt động */}
+                        {/* Cờ lê: Đóng sân (khách không đặt được, đơn đã đặt giữ nguyên) / Mở sân lại */}
                         <button
                           type="button"
                           className={`icon-btn icon-btn-wrench${active ? '' : ' is-on'}`}
                           onClick={() => toggleStatus(c)}
                           disabled={busyId === c.maSan}
-                          title={active ? 'Chuyển sân sang Bảo trì' : 'Đang bảo trì — bấm để mở lại Hoạt động'}
-                          aria-label={active ? 'Bảo trì' : 'Hoạt động'}
+                          title={active ? 'Đóng sân' : 'Sân đang đóng — bấm để mở lại'}
+                          aria-label={active ? 'Đóng sân' : 'Mở sân'}
                         >
                           <WrenchIcon />
                         </button>
-                        {/* Thùng rác đỏ: backend chưa có API xoá sân nên tạm vô hiệu (cần DELETE /api/chu-san/san/:maSan) */}
+                        {/* Thùng rác đỏ: chỉ dùng được khi sân đã đóng và không còn khách đặt */}
                         <button
                           type="button"
                           className="icon-btn icon-btn-trash"
-                          disabled
-                          title="Chưa xoá được: backend chưa có API xoá sân (cần DELETE /api/chu-san/san/:maSan)"
+                          onClick={() => deleteCourt(c)}
+                          disabled={!coTheXoa || busyId === c.maSan}
+                          title={tieuDeXoa}
                           aria-label="Xoá sân"
                         >
                           <TrashIcon />
@@ -1524,25 +1549,28 @@ function CourtsPage({ user }) {
 
       <form className="card form-card form-card-spaced" onSubmit={addCourt}>
         <h2 className="card-title">Thêm sân</h2>
-        <div className="form-grid form-grid-1">
+        <div className="add-court-row">
+          {SHOW_ALL_BRANCHES && (
+          <label className="field-block">
+            <span className="label">Cơ sở</span>
+            <select className="input" value={addBranchId} onChange={(e) => setAddBranchId(e.target.value)} disabled={branches.length === 0}>
+              {branches.length === 0 && <option value="">Chưa có cơ sở</option>}
+              {branches.map((b) => (
+                <option key={b.maCoSo} value={String(b.maCoSo)}>
+                  {b.tenCoSo}
+                </option>
+              ))}
+            </select>
+          </label>
+          )}
           <label className="field-block">
             <span className="label">Tên sân</span>
             <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
           </label>
+          <button type="submit" className="btn btn-primary btn-lg" disabled={adding || !branch}>
+            {adding ? 'Đang thêm...' : 'Thêm sân'}
+          </button>
         </div>
-        <label className="field-block field-file">
-          <span className="label">Ảnh sân</span>
-          <input
-            key={fileKey}
-            className="input input-file"
-            type="file"
-            accept="image/*"
-            onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
-        <button type="submit" className="btn btn-primary btn-lg" disabled={adding || !branch}>
-          {adding ? 'Đang thêm...' : 'Thêm sân'}
-        </button>
       </form>
     </Page>
   )

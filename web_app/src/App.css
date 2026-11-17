@@ -2362,3 +2362,31 @@ a.btn {
 .matrix-wide tbody td.slot-end {
   background: #e3e6e8 !important;
 }
+
+/* Lịch: sân đã đóng tối hơn các sân khác (cả tên sân lẫn dải giờ); ô đã có khách đặt vẫn giữ màu */
+.matrix-wide tbody tr.court-closed th {
+  color: #fff;
+  background: #6b7378;
+}
+
+.matrix-wide tbody tr.court-closed td.slot-cell:not(.slot-booked),
+.matrix-wide tbody tr.court-closed td.slot-end {
+  background: #8e969b !important;
+}
+
+/* Thêm sân: Cơ sở, Tên sân và nút Thêm sân cùng một hàng (hẹp thì tự xuống dòng) */
+.add-court-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.add-court-row .field-block {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.add-court-row .btn {
+  flex: 0 0 auto;
+}
