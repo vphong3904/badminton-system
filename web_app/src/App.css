@@ -1,0 +1,2364 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --green: #19654d;
+  --green-dark: #14523f;
+  --bg: #f3f6f4;
+  --surface: #ffffff;
+  --border: #dfe5e1;
+  --text: #17231e;
+  --muted: #5f6f67;
+  --font: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 242px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 28px 12px;
+}
+
+.sidebar-heading {
+  padding: 0 8px;
+  margin-bottom: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: left;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-item {
+  width: 100%;
+  text-align: left;
+  padding: 11px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nav-item:hover {
+  background: var(--bg);
+  font-size: 15px;
+}
+
+.nav-item.is-active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  font-size: 13px;
+}
+
+.nav-item:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+/* Content */
+.content {
+  padding: 32px 42px 48px;
+  max-width: none;
+}
+
+.title {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #000;
+  text-align: left;
+}
+
+.subtitle {
+  margin: 8px 0 28px;
+  color: var(--muted);
+  font-size: 16px;
+  text-align: left;
+}
+
+/* Filters */
+.filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field input,
+.field select {
+  height: 45px;
+  padding: 0 12px;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Stats */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  max-width: none;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.stat {
+  padding: 20px;
+  min-height: 105px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.stat-value {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+/* Chart card */
+.chart-card {
+  max-width: none;
+  margin-top: 24px;
+  padding: 20px 20px 16px;
+}
+
+.chart-card h2 {
+  margin: 8px 0 20px;
+  font-size: 23px;
+  font-weight: 700;
+  color: #000;
+  text-align: left;
+}
+
+.chart {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  height: 240px;
+}
+
+.chart-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 202px;
+  padding-right: 10px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 0;
+}
+
+.chart-plot {
+  position: relative;
+  height: 100%;
+}
+
+.chart-grid {
+  position: absolute;
+  inset: 0 0 38px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-left: 1px solid var(--border);
+}
+
+.chart-line {
+  height: 0;
+  border-top: 1px solid #eceff0;
+}
+
+.chart-bars {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.chart-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  border-left: 1px solid #eceff0;
+}
+
+.chart-col:first-child {
+  border-left: none;
+}
+
+.chart-bar {
+  width: 72%;
+  height: calc(202px * var(--v));
+  background: var(--green);
+  border-radius: 6px 6px 0 0;
+}
+
+.chart-x {
+  height: 38px;
+  line-height: 38px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Actions */
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn {
+  height: 46px;
+  padding: 0 17px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-primary {
+  color: #fff;
+  background: var(--green);
+  border: 1px solid var(--green);
+}
+
+.btn-primary:hover {
+  background: var(--green-dark);
+}
+
+.btn-ghost {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+  background: var(--bg);
+}
+
+.note {
+  margin-top: 24px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* Court matrix */
+.table-card {
+  max-width: none;
+  padding: 20px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.matrix {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.matrix thead th {
+  height: 44px;
+  padding: 0 12px;
+  text-align: left;
+  font-weight: 700;
+  background: #f3f6f4;
+}
+
+.matrix thead th:first-child {
+  width: 32%;
+}
+
+.matrix tbody th {
+  padding: 0 12px;
+  text-align: left;
+  font-weight: 600;
+  background: #f3f6f4;
+}
+
+.matrix tbody td {
+  padding: 0 12px;
+}
+
+.matrix tbody tr {
+  height: 53px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-empty {
+  height: 80px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.pill {
+  display: inline-block;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pill-free {
+  color: var(--green);
+  background: #e6f1ec;
+}
+
+.pill-booked {
+  color: #0f4a38;
+  background: #cfe5da;
+}
+
+.pill-hold {
+  color: #7a5200;
+  background: #f8ecce;
+}
+
+.pill-maint {
+  color: #555f5a;
+  background: #e8eaea;
+}
+
+.hint {
+  margin: 24px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Forms */
+.alert {
+  max-width: none;
+  margin-top: 16px;
+  padding: 12px 14px;
+  font-size: 13px;
+  border-left: 4px solid #d7e84a;
+  border-radius: 8px;
+  background: #f2f5e6;
+}
+
+.alert-success {
+  border-left-color: var(--green);
+  background: #e6f1ec;
+  color: #0f4a38;
+}
+
+.alert-warning {
+  border-left-color: #e0a526;
+  background: #fbf2dc;
+  color: #6b4a00;
+}
+
+.alert-error {
+  border-left-color: #c8483b;
+  background: #fbe9e6;
+  color: #7a2218;
+}
+
+/* Forms & inputs */
+.title-solo {
+  margin-bottom: 16px;
+}
+
+.form-card {
+  max-width: none;
+  padding: 20px;
+}
+
+.form-card-spaced {
+  margin-top: 20px;
+}
+
+.card-title {
+  margin: 0 0 16px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field-block {
+  display: block;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid #b9c4cc;
+  border-radius: 8px;
+}
+
+.input::placeholder {
+  color: #99a3ab;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
+.input-sm {
+  height: 43px;
+  font-size: 14px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.field-hint {
+  margin: 12px 0 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  max-width: none;
+  margin-bottom: 20px;
+}
+
+.btn-lg {
+  margin-top: 0;
+  height: 46px;
+  font-size: 16px;
+}
+
+.label + .input + .btn-lg {
+  margin-top: 16px;
+}
+
+.btn-flush {
+  margin-top: 0 !important;
+}
+
+.btn-sm {
+  height: 43px;
+  padding: 0 15px;
+  font-size: 13px;
+}
+
+/* Data table */
+.table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table thead th {
+  height: 44px;
+  padding: 0 12px;
+  text-align: left;
+  font-weight: 700;
+  background: #f3f6f4;
+}
+
+.table tbody tr {
+  height: 67px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table tbody td {
+  padding: 0 12px;
+}
+
+
+.chart-card-flat {
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+.stats-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.stat-label-lg {
+  font-size: 16px;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .nav-item {
+    width: auto;
+    white-space: nowrap;
+  }
+  .content {
+    padding: 24px 16px 40px;
+  }
+  .stats,
+  .stats-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .form-grid,
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Khung giao diện phủ kín chiều ngang màn hình */
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Đăng nhập / Đăng ký (chỉ áp dụng trong .auth-wrap, không ảnh hưởng trang khác) */
+.auth-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(25, 101, 77, 0.14), transparent 45%),
+    radial-gradient(circle at 90% 90%, rgba(25, 101, 77, 0.10), transparent 45%),
+    var(--bg);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  border: none;
+  border-radius: 24px;
+  box-shadow: 0 18px 50px rgba(20, 82, 63, 0.18);
+}
+
+.auth-banner {
+  height: 150px;
+  background: linear-gradient(135deg, #1f7a5d 0%, #14523f 100%);
+}
+
+.auth-banner svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.auth-body {
+  padding: 28px 32px 32px;
+}
+
+.auth-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.auth-subtitle {
+  margin: 8px 0 26px;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--muted);
+}
+
+.auth-field {
+  margin-bottom: 16px;
+}
+
+.auth-wrap .label {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.auth-wrap .input {
+  height: 50px;
+  padding: 0 18px;
+  font-size: 15px;
+  background: #f7faf8;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.auth-wrap .input:hover {
+  border-color: #b9cbc2;
+}
+
+.auth-wrap .input:focus-visible {
+  outline: none;
+  background: #fff;
+  border-color: var(--green);
+  box-shadow: 0 0 0 4px rgba(25, 101, 77, 0.14);
+}
+
+.auth-wrap .field-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-submit {
+  width: 100%;
+  height: 50px;
+  margin-top: 8px;
+  font-size: 16px;
+  border-radius: 14px;
+  box-shadow: 0 8px 18px rgba(25, 101, 77, 0.28);
+}
+
+.auth-submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.auth-card .alert {
+  max-width: none;
+  margin-top: 16px;
+  border-radius: 12px;
+}
+
+.auth-switch {
+  margin: 22px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.link-btn {
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--green);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .auth-body {
+    padding: 24px 20px 28px;
+  }
+}
+
+/* Nút Đăng xuất: xanh mặc định, đậm hơn khi rê chuột */
+.nav-item.nav-logout {
+  margin-top: 16px;
+  color: #fff;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.nav-item.nav-logout:hover {
+  background: var(--green-dark);
+  border-color: var(--green-dark);
+  font-size: 13px;
+}
+
+/* Tiêu đề "Thêm sân mẫu" màu đen */
+.card-title {
+  color: #000;
+}
+
+/* Bảng sân: các cột đều nhau, căn thẳng hàng */
+.table-courts {
+  table-layout: fixed;
+}
+
+.table-courts th,
+.table-courts td {
+  width: 20%;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.btn-status {
+  width: 130px;
+}
+
+/* Trang đăng nhập / đăng ký: phủ kín màn hình, bỏ viền khung của app */
+#root:has(.auth-wrap) {
+  width: 100%;
+  max-width: none;
+  border-inline: none;
+}
+
+
+
+/* Form thêm sân: ô Tên sân kéo dài hết khung, tiêu đề nằm bên trái */
+.form-grid-1 {
+  grid-template-columns: 1fr;
+}
+
+.form-card .card-title {
+  text-align: left;
+}
+
+/* Banner tiêu đề: ảnh là nền của chữ (dùng cho mọi trang) */
+.page-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 150px;
+  margin-bottom: 24px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1f7a5d 0%, #14523f 100%);
+}
+
+.page-banner svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.page-banner-title {
+  position: relative;
+  margin: 0;
+  padding: 0 32px;
+  max-width: 60%;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: left;
+  color: #fff;
+}
+
+/* Lời chào người đăng nhập: nền xanh lá */
+.sidebar-heading {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--green);
+  color: #fff;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+/* Ma trận lịch sân: ngày + ô chọn ngày cùng một hàng */
+.filters-inline {
+  align-items: center;
+  gap: 28px;
+}
+
+.field-inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field-inline input {
+  height: 45px;
+  padding: 0 12px;
+  font-size: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.field-inline strong {
+  font-size: 15px;
+  color: var(--green);
+}
+
+/* Ma trận 06:00–22:00: thanh trượt ngang, cột tên sân đứng yên */
+.matrix-wide {
+  width: max-content;
+  min-width: 100%;
+}
+
+.matrix-wide thead th,
+.matrix-wide tbody td {
+  min-width: 96px;
+  white-space: nowrap;
+}
+
+.matrix-wide thead th:first-child,
+.matrix-wide tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 170px;
+  min-width: 170px;
+  white-space: nowrap;
+  box-shadow: 1px 0 0 var(--border);
+}
+
+/* Ma trận lịch: các cột giờ rộng bằng nhau, giờ và trạng thái căn giữa thẳng hàng */
+.matrix-wide {
+  table-layout: fixed;
+  width: 1670px; /* 170px cột tên sân + 15 cột giờ × 100px */
+  min-width: 100%;
+}
+
+.matrix-wide thead th,
+.matrix-wide tbody td {
+  width: 100px;
+  min-width: 100px;
+  text-align: center;
+}
+
+.matrix-wide thead th:first-child,
+.matrix-wide tbody th {
+  text-align: left;
+}
+
+.matrix-wide .pill {
+  min-width: 64px;
+  text-align: center;
+}
+
+/* Nút Đăng xuất nằm sát đáy màn hình (màn hình rộng) */
+@media (min-width: 901px) {
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .nav-item.nav-logout {
+    margin-top: auto;
+  }
+}
+
+/* Trang ít thông tin: thẻ cuối cùng giãn ra lấp phần trống phía dưới */
+.content {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.content > .card:nth-last-child(1 of .card) {
+  flex: 1;
+}
+
+/* Trang Quản lý sân: vừa một màn hình; bảng sân có thanh cuộn dọc, form thêm sân luôn thấy */
+.content-fit {
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.content-fit > .card {
+  flex: 0 0 auto;
+}
+
+.content-fit > .table-card {
+  flex: 1 1 0;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-fit .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.content-fit .table-courts thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f3f6f4;
+}
+
+@media (max-width: 900px) {
+  .content-fit {
+    height: auto;
+  }
+}
+
+/* Cho phép nội dung co lại theo màn hình: chỉ bảng tự có thanh cuộn ngang, cả trang không cuộn ngang */
+.content {
+  min-width: 0;
+}
+
+/* Trang Quản lý sân: form "Thêm sân mẫu" gọn một hàng để bảng sân lớn hơn */
+.content-fit .form-card {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  width: 100%;
+  max-width: none;
+  padding: 14px 20px;
+}
+
+.content-fit .form-card-spaced {
+  margin-top: 14px;
+}
+
+.content-fit .form-card .card-title {
+  margin: 0 0 12px;
+  white-space: nowrap;
+}
+
+.content-fit .form-card .form-grid {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.content-fit .form-card .btn {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .content-fit .form-card {
+    flex-wrap: wrap;
+    max-width: none;
+  }
+}
+
+/* Trang Quản lý sân: form "Thêm sân mẫu" nằm sát đáy màn hình */
+.content-fit {
+  padding-bottom: 16px;
+}
+
+.content-fit .form-card {
+  margin-top: auto;
+}
+
+.content-fit > .table-card {
+  margin-bottom: 14px;
+}
+
+/* Các trang khác: thẻ chính kín tới đáy màn hình, nội dung bên trong giãn đều, không để trống */
+.content:not(.content-fit) > .table-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.content:not(.content-fit) > .table-card .table-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content:not(.content-fit) > .table-card .table-scroll > table {
+  flex: 1 0 auto;
+}
+
+/* Thẻ biểu đồ: biểu đồ giãn theo chiều cao thẻ */
+.content > .chart-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.content > .chart-card .chart {
+  flex: 1;
+  height: auto;
+  min-height: 240px;
+}
+
+.content > .chart-card .chart-y {
+  height: calc(100% - 38px);
+}
+
+.content > .chart-card .chart-bar {
+  height: calc((100% - 38px) * var(--v));
+}
+
+/* Thẻ biểu mẫu: giãn kín thẻ, nút lưu nằm sát đáy thẻ */
+.content > .form-card:not(.form-card-spaced) {
+  display: flex;
+  flex-direction: column;
+}
+
+.content > .form-card:not(.form-card-spaced) > .btn:last-child {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+/* Nội dung kéo dài ngang full: bỏ khoảng trắng hai bên (chỉnh số này về 0 nếu muốn sát hẳn mép) */
+.content {
+  padding: 24px 12px 16px;
+}
+
+/* Trang Quản lý sân: ô "Thêm sân mẫu" thấp xuống (mỏng một hàng) */
+.content-fit .form-card {
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+}
+
+.content-fit .form-card .card-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.content-fit .form-card .field-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.content-fit .form-card .input {
+  height: 36px;
+  font-size: 14px;
+}
+
+.content-fit .form-card .btn {
+  height: 36px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+/* Bỏ khoảng trắng bên phải: nội dung sát mép phải màn hình */
+.content {
+  padding: 24px 0 16px 12px;
+}
+
+/* Ô "Thêm sân": không có khoảng trắng phía trên và dưới ô nhập */
+.content-fit .form-card {
+  padding: 0 16px;
+  align-items: stretch;
+}
+
+.content-fit .form-card .card-title {
+  align-self: center;
+}
+
+.content-fit .form-card .form-grid,
+.content-fit .form-card .field-block {
+  align-self: stretch;
+}
+
+.content-fit .form-card .field-block {
+  align-items: stretch;
+}
+
+.content-fit .form-card .field-block .label {
+  align-self: center;
+}
+
+.content-fit .form-card .input {
+  height: 40px;
+  border-top: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+
+.content-fit .form-card .btn {
+  align-self: center;
+}
+
+/* Trang Quản lý sân: ô "Thêm sân" không bị kéo cao (ghi đè quy tắc "thẻ cuối giãn ra") */
+.content.content-fit > .card:nth-last-child(1 of .card) {
+  flex: 0 0 auto;
+}
+
+.content-fit .form-card .label {
+  white-space: nowrap;
+}
+
+/* Ô "Thêm sân": hàng trên là tiêu đề, hàng dưới là ô nhập tên sân cùng hàng với nút Thêm sân */
+.content-fit .form-card {
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0 12px;
+}
+
+.content-fit .form-card .card-title {
+  flex: 0 0 100%;
+  align-self: auto;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.content-fit .form-card .form-grid {
+  flex: 1;
+}
+
+.content-fit .form-card .btn {
+  align-self: center;
+}
+
+/* Ô nhập tên sân: viền đen, góc hơi tròn */
+.content-fit .form-card .input {
+  border: 1px solid #000;
+  border-radius: 6px;
+}
+
+/* Ma trận lịch: các cột giờ co theo màn hình để thấy đủ 07:00 → 21:00 mà không cần vuốt ngang */
+.matrix-wide {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 1200px; /* màn hình hẹp hơn thì mới có thanh trượt ngang */
+}
+
+.matrix-wide thead th:first-child,
+.matrix-wide tbody th {
+  width: 140px;
+  min-width: 140px;
+}
+
+.matrix-wide thead th:not(:first-child),
+.matrix-wide tbody td {
+  width: auto;
+  min-width: 64px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.matrix-wide .pill {
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+/* Bảng đặt sân: 6 cột rộng đều nhau, tiêu đề và nội dung căn thẳng hàng */
+.table-bookings {
+  table-layout: fixed;
+}
+
+.table-bookings th,
+.table-bookings td {
+  width: calc(100% / 6);
+  text-align: left;
+  vertical-align: middle;
+}
+
+/* Bảng giá: 7 cột rộng đều nhau, ô nhập vừa khít ô bảng */
+.table-pricing {
+  table-layout: fixed;
+  min-width: 960px;
+}
+
+.table-pricing th,
+.table-pricing td {
+  width: calc(100% / 7);
+  padding: 0 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.table-pricing thead th {
+  height: 52px;
+  line-height: 1.3;
+}
+
+.pricing-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Bảng khách hàng: 4 cột rộng đều nhau, căn thẳng hàng */
+.table-customers {
+  table-layout: fixed;
+}
+
+.table-customers thead th,
+.table-customers tbody td {
+  width: 25%;
+  padding: 0 12px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Ma trận lịch có mốc :30 (29 cột giờ): ô trắng, chỉ giữ vạch kẻ */
+.matrix-wide {
+  min-width: 1500px; /* 140px cột tên sân + 29 cột × ~47px; màn hình hẹp hơn thì có thanh trượt ngang */
+}
+
+.matrix-wide thead th:not(:first-child) {
+  padding-left: 2px;
+  padding-right: 2px;
+  font-size: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.matrix-wide tbody td.slot-cell {
+  min-width: 40px;
+  padding: 0;
+  background: #fff;
+  border-left: 1px solid var(--border);
+}
+
+/* ============================================================
+   Cập nhật theo các file Promt (header, badge, đặt sân, lịch, bảng giá)
+   ============================================================ */
+
+/* Header sạch: khối màu xanh thể thao, tiêu đề căn trái gọn gàng */
+.page-banner {
+  display: flex;
+  align-items: center;
+  height: auto;
+  min-height: 84px;
+  padding: 20px 28px;
+  margin-bottom: 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #1f7a5d 0%, #14523f 100%);
+}
+
+.page-banner-title {
+  max-width: 100%;
+  padding: 0;
+  font-size: 28px;
+  letter-spacing: 0.2px;
+}
+
+/* Badge trạng thái */
+.status-badge {
+  display: inline-block;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.status-ok {
+  color: #fff;
+  background: #19654d;
+}
+
+.status-maint {
+  color: #000;
+  background: #f1a0a0;
+}
+
+.status-wait {
+  color: #000;
+  background: #f6c453;
+}
+
+.status-no {
+  color: #000;
+  background: #f1a0a0;
+}
+
+/* Nút Đồng ý (xanh, chữ trắng) và Từ chối (đỏ, chữ đen) */
+.btn-approve {
+  color: #fff;
+  background: #19654d;
+  border: 1px solid #19654d;
+}
+
+.btn-approve:hover {
+  background: #14523f;
+}
+
+.btn-reject {
+  color: #000;
+  background: #e5484d;
+  border: 1px solid #e5484d;
+}
+
+.btn-reject:hover {
+  background: #cf3a3f;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.row-actions .btn {
+  height: 36px;
+  padding: 0 14px;
+}
+
+/* Trang Quản lý sân: ô nhập tên sân gọn (~420px), nút Thêm sân đứng ngay cạnh */
+.content-fit .form-card .form-grid {
+  flex: 0 1 420px;
+}
+
+/* Bảng đặt sân: 6 cột, cột thao tác rộng hơn để vừa 2 nút */
+.table-bookings th,
+.table-bookings td {
+  width: 14%;
+}
+
+.table-bookings th:first-child,
+.table-bookings td:first-child {
+  width: 18%;
+}
+
+.table-bookings th:last-child,
+.table-bookings td:last-child {
+  width: 26%;
+}
+
+/* Bảng giá: 5 cột (Từ giờ, Đến giờ, Ngày thường, Cuối tuần, Thao tác) */
+.table-pricing {
+  min-width: 640px;
+}
+
+.table-pricing th,
+.table-pricing td {
+  width: calc(100% / 5);
+}
+
+/* Chú thích màu của lịch sân */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-left: auto;
+  font-size: 14px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-box {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+.legend-free {
+  background: #e3e6e8;
+}
+
+.legend-booked {
+  background: #f6c453;
+}
+
+/* Ô trống màu xám, ô đã đặt màu vàng kèm tên khách */
+.matrix-wide tbody td.slot-cell {
+  background: #e3e6e8;
+}
+
+.matrix-wide tbody td.slot-booked {
+  padding: 2px 6px;
+  overflow: hidden;
+  background: #f6c453;
+  color: #3d2c00;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.slot-name,
+.slot-time {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slot-name {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.slot-time {
+  font-size: 11px;
+}
+
+/* Header giờ như app khách: nền xanh nhạt, nhãn giờ nằm đúng trên vạch kẻ bắt đầu của ô, có vạch cam */
+.matrix-wide {
+  min-width: 1560px; /* 140px cột tên sân + 30 ô × ~47px */
+}
+
+.matrix-wide thead th.time-head {
+  position: relative;
+  height: 48px;
+  padding: 0;
+  overflow: visible;
+  background: #bfe9f7;
+  border-left: 1px solid #9fcfe0;
+}
+
+.matrix-wide thead th.time-head::after {
+  content: '';
+  position: absolute;
+  left: -1px;
+  bottom: 0;
+  width: 2px;
+  height: 8px;
+  background: #f0a500;
+}
+
+.time-label {
+  position: absolute;
+  left: 0;
+  bottom: 14px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 500;
+  color: #17231e;
+  white-space: nowrap;
+}
+
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  transform: translateX(6px);
+}
+
+.matrix-wide thead th:first-child {
+  background: #bfe9f7;
+}
+
+/* Hai khách đặt liền nhau: có vạch trắng dày ngăn giữa hai thanh vàng */
+.matrix-wide tbody td.slot-booked {
+  border-left: 3px solid #fff;
+  border-right: 1px solid #fff;
+}
+
+/* Nhãn giờ nhỏ lại; mốc 07:00 dời sang trái để không đè lên 07:30 */
+.time-label {
+  font-size: 11px;
+}
+
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  transform: none;
+  left: 3px;
+}
+
+/* Nhãn giờ bắt đầu ngay sau vạch kẻ của ô (không căn giữa vạch) → 07:00 và 07:30 tách hẳn nhau */
+.time-label,
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  left: 4px;
+  transform: none;
+}
+
+/* Nhãn giờ luôn đứng ngay sau vạch kẻ của ô (07:00 không đè lên 07:30) */
+.matrix-wide thead th.time-head .time-label,
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  left: 4px !important;
+  transform: none !important;
+}
+
+/* 07:00 đứng ngay trên vạch đầu tiên (nằm vắt qua đường kẻ cột Sân như ảnh mẫu), không đè lên 07:30 */
+.matrix-wide thead th.time-head:nth-child(2) {
+  z-index: 3;
+}
+
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  left: 0 !important;
+  transform: translateX(-62%) !important;
+}
+
+/* Trang đánh giá khách hàng */
+.stars {
+  color: #f0a500;
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+
+.table-reviews th,
+.table-reviews td {
+  width: auto;
+  white-space: normal;
+}
+
+.table-reviews th:nth-child(3),
+.table-reviews td:nth-child(3),
+.table-reviews th:nth-child(5),
+.table-reviews td:nth-child(5) {
+  width: 30%;
+}
+
+/* Lịch: mọi nhãn giờ đứng giữa vạch kẻ, giống 07:00 */
+.matrix-wide thead th.time-head .time-label,
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  left: 0 !important;
+  transform: translateX(-50%) !important;
+}
+
+/* Trang đánh giá: tên cột và thông tin căn giữa */
+.table-reviews th,
+.table-reviews td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Lịch: nền xanh của hàng giờ đặt ở cả hàng (không đặt ở từng ô) để nhãn 07:30 không bị ô 07:00 che mất chữ "07" */
+.matrix-wide thead tr {
+  background: #bfe9f7;
+}
+
+.matrix-wide thead th.time-head {
+  background: transparent !important;
+}
+
+.matrix-wide thead th.time-head:nth-child(2) {
+  z-index: auto;
+}
+
+/* Đánh giá: tên cột và thông tin cùng căn giữa (ghi đè luật `.table thead th` đang căn trái) */
+.table-reviews thead th,
+.table-reviews tbody td {
+  text-align: center !important;
+  vertical-align: middle;
+}
+
+.table-reviews thead th,
+.table-reviews tbody td {
+  width: 20%;
+}
+
+/* Nhãn bộ lọc không xuống dòng */
+.field-inline > span {
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Lịch: vừa khít mọi màn hình (không thanh trượt ngang), mọi nhãn giờ nằm GIỮA ô của nó
+   ============================================================ */
+.matrix-wide {
+  table-layout: fixed !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.matrix-wide thead th:not(:first-child),
+.matrix-wide tbody td {
+  width: auto !important;
+  min-width: 0 !important;
+}
+
+.matrix-wide thead th:first-child,
+.matrix-wide tbody th {
+  width: clamp(84px, 9vw, 140px) !important;
+  min-width: 0 !important;
+  padding-left: 10px !important;
+  padding-right: 6px !important;
+}
+
+.matrix-wide thead th.time-head {
+  padding: 0 !important;
+}
+
+.matrix-wide thead th.time-head .time-label,
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  left: 0 !important;
+  right: 0 !important;
+  transform: none !important;
+  text-align: center;
+  font-size: clamp(8px, 0.62vw, 11px);
+  letter-spacing: -0.2px;
+}
+
+.matrix-wide tbody td.slot-booked {
+  padding: 2px 3px;
+}
+
+.slot-name {
+  font-size: clamp(8px, 0.7vw, 12px);
+}
+
+.slot-time {
+  font-size: clamp(7px, 0.6vw, 11px);
+}
+
+/* Lịch: mỗi nhãn giờ nằm GIỮA VẠCH KẺ bắt đầu của nó (07:00 trên vạch đầu tiên, 07:30 trên vạch kế tiếp, ...) */
+.matrix-wide thead th.time-head .time-label,
+.matrix-wide thead th.time-head:nth-child(2) .time-label {
+  left: 0 !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Ô 07:00 nằm trên cột "Sân" để nhãn 07:00 không bị cột Sân che mất */
+.matrix-wide thead th.time-head:nth-child(2) {
+  position: relative;
+  z-index: 20 !important;
+}
+
+/* Lịch 06:00 → 22:00: chừa chỗ bên phải cho nhãn 22:00 ở vạch kết thúc */
+.matrix-scroll {
+  padding-right: 24px;
+}
+
+.matrix-wide thead th.time-head .time-label.time-label-end {
+  left: auto !important;
+  right: 0 !important;
+  transform: translateX(50%) !important;
+}
+
+.matrix-wide thead th.time-head:last-child::before {
+  content: '';
+  position: absolute;
+  right: -1px;
+  bottom: 0;
+  width: 2px;
+  height: 8px;
+  background: #f0a500;
+}
+
+/* Nút "Xin chào, ..." mở trang người quản lý */
+.sidebar-heading.sidebar-profile {
+  width: 100%;
+  border: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-heading.sidebar-profile:hover {
+  background: #14523f;
+}
+
+.sidebar-heading.sidebar-profile.is-active {
+  outline: 2px solid #f0a500;
+  outline-offset: 2px;
+}
+
+/* Trang người quản lý */
+.profile-card {
+  max-width: 560px;
+  margin-bottom: 20px;
+  padding: 20px 24px;
+}
+
+.profile-info {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.profile-info > div {
+  display: flex;
+  gap: 12px;
+}
+
+.profile-info dt {
+  width: 130px;
+  color: var(--muted);
+}
+
+.profile-info dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.profile-field {
+  margin-bottom: 14px;
+}
+
+/* Quản lý sân: cột ảnh và ô chọn ảnh giữa ô tên sân và nút Thêm sân */
+.court-thumb {
+  display: block;
+  width: 72px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.court-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--muted);
+  background: #eef0f1;
+}
+
+.table-courts th,
+.table-courts td {
+  width: auto !important;
+}
+
+.table-courts th:first-child,
+.table-courts td:first-child {
+  width: 110px !important;
+}
+
+.content-fit .form-card .field-file {
+  flex: 0 1 280px;
+}
+
+.input-file {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+/* Trang người quản lý: chia đôi màn hình — trái "Thông tin tài khoản", phải "Đổi mật khẩu" */
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.profile-grid .profile-card {
+  max-width: none;
+  margin-bottom: 0;
+  min-height: calc(100vh - 150px);
+}
+
+@media (max-width: 900px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-grid .profile-card {
+    min-height: 0;
+  }
+}
+
+/* Quản lý đặt sân / Hoàn tiền / Dashboard */
+.table-bookings th:last-child,
+.table-bookings td:last-child {
+  width: 32% !important;
+}
+
+.cell-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.table-refunds th,
+.table-refunds td {
+  width: 20%;
+}
+
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* Quản lý đặt sân: dòng ghi chú dưới đơn, ô nhập lý do từ chối, xem ảnh chuyển khoản */
+.row-note td {
+  padding-top: 0 !important;
+  padding-bottom: 12px !important;
+  background: #fafbfa;
+}
+
+.reject-reason {
+  color: #b3262b;
+  font-size: 13px;
+}
+
+.reject-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reject-box .input {
+  flex: 1;
+  max-width: 460px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 90vw;
+  max-height: 90vh;
+  padding: 16px;
+  background: #fff;
+  border-radius: 12px;
+}
+
+.modal-box img {
+  max-width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+}
+
+/* Quản lý sân: nút thao tác dạng biểu tượng, căn giữa */
+.th-center,
+.td-center {
+  text-align: center !important;
+}
+
+.row-actions-center {
+  justify-content: center;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid;
+  border-radius: 8px;
+}
+
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.icon-btn-wrench {
+  color: #1e88e5;
+  border-color: #b9d9f6;
+}
+
+.icon-btn-wrench:hover:not(:disabled) {
+  background: #e8f3fd;
+}
+
+.icon-btn-wrench.is-on {
+  color: #fff;
+  background: #1e88e5;
+  border-color: #1e88e5;
+}
+
+.icon-btn-trash {
+  color: #d93025;
+  border-color: #f3c1bd;
+}
+
+.icon-btn-trash:hover:not(:disabled) {
+  background: #fdecea;
+}
+
+/* Cửa sổ (dialog) chung */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.dialog-backdrop.dialog-level-2 {
+  z-index: 120;
+}
+
+.dialog {
+  width: 100%;
+  max-height: 92vh;
+  padding: 18px 22px 22px;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 14px;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dialog-head h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 17px;
+  text-align: center;
+}
+
+.dialog-close {
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialog-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.dialog-primary,
+.dialog-danger,
+.dialog-ghost,
+.dialog-outline {
+  height: 44px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.dialog-primary {
+  width: 100%;
+  color: #fff;
+  background: #1d9d78;
+}
+
+.dialog-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dialog-danger {
+  color: #fff;
+  background: #f0785a;
+}
+
+.dialog-ghost {
+  color: #1c2b26;
+  background: #fff;
+  border-color: #cdd5d1;
+}
+
+.dialog-outline {
+  color: #1d9d78;
+  background: #fff;
+  border-color: #1d9d78;
+}
+
+.dialog-error {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #b3262b;
+}
+
+.picker-hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.picker-step {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.step-btn {
+  padding: 2px 10px;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #cdd5d1;
+  border-radius: 6px;
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.slot-pick {
+  height: 32px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #1c2b26;
+  background: #fff;
+  border: 1px solid #7fc8b0;
+  border-radius: 5px;
+}
+
+.slot-pick.in-range {
+  background: #d8f1e7;
+}
+
+.slot-pick.is-edge {
+  color: #fff;
+  background: #1d9d78;
+  border-color: #1d9d78;
+}
+
+.day-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.day-circle {
+  width: 40px;
+  height: 40px;
+  font-size: 12px;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #b7c2bd;
+  border-radius: 50%;
+}
+
+.day-circle.in-range {
+  background: #d8f1e7;
+}
+
+.day-circle.is-edge {
+  color: #fff;
+  background: #1d9d78;
+  border-color: #1d9d78;
+}
+
+.pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #3fa65a;
+  border-radius: 5px;
+}
+
+.pill-sm {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.table-pricing th,
+.table-pricing td {
+  width: 20%;
+  vertical-align: middle;
+}
+
+/* Trạng thái đặt sân: chưa thanh toán (xám, chữ trắng) / đã thanh toán (xanh, chữ đen) */
+.status-unpaid {
+  color: #fff;
+  background: #8a949c;
+}
+
+.status-paid {
+  color: #000;
+  background: #7ed6a4;
+}
+
+.dialog-danger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Lịch: cột thời gian tô màu theo bảng giá, chú thích giá cạnh cơ sở hiện tại, ô huỷ màu đỏ */
+.matrix-wide thead th.time-head {
+  background: var(--slot-bg, transparent) !important;
+}
+
+.matrix-wide thead th.time-head .time-label {
+  padding: 0 3px;
+  color: #10243a;
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 4px;
+}
+
+.filters-inline {
+  flex-wrap: wrap;
+}
+
+.price-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.price-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-cancelled {
+  background: #f26d6d;
+}
+
+.matrix-wide tbody td.slot-booked.slot-cancelled {
+  background: #f26d6d;
+  color: #000;
+}
+
+/* Trang chủ sân: ảnh cơ sở + nhãn thông tin canh lề trái */
+.branch-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.branch-photo img,
+.branch-photo-empty {
+  width: 100%;
+  max-width: 320px;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.branch-photo-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: #eef0f1;
+}
+
+.file-btn {
+  cursor: pointer;
+}
+
+.file-btn.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.profile-info dt {
+  text-align: left;
+}
+
+.matrix-wide tbody td.slot-booked {
+  color: #000;
+}
+
+/* ===== Lịch: bảng vừa khít ô trắng, dải màu liên tục đến hết ô 22:00, sửa nhãn 06:30 bị che ===== */
+.matrix-scroll {
+  padding-right: 0 !important;
+}
+
+/* Ô 06:00 không tạo lớp chồng nữa (trước đây che mất nửa trái nhãn 06:30); nhãn nổi trên mọi ô */
+.matrix-wide thead th.time-head:nth-child(2) {
+  z-index: auto !important;
+}
+
+.matrix-wide thead th.time-head .time-label {
+  z-index: 5;
+}
+
+/* Cột cuối (mốc 22:00) */
+.matrix-wide thead th.time-head.time-head-end,
+.matrix-wide tbody td.slot-end {
+  width: 34px !important;
+  min-width: 0 !important;
+}
+
+.matrix-wide thead th.time-head.time-head-end::before {
+  display: none;
+}
+
+.matrix-wide tbody td.slot-end {
+  background: #e9edef;
+}
+
+/* Cửa sổ thêm / sửa khung giờ: tiêu đề giữa, nhãn và nội dung canh trái */
+.dialog-field {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.dialog-field .input,
+.dialog-field .dialog-outline {
+  width: 100%;
+}
+
+.pill-group {
+  align-self: flex-start;
+}
+
+.dialog-note {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.date-pair {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  font-weight: 400;
+}
+
+.date-pair label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Bảng giá: sự kiện gom nhiều khung giờ, nút + xanh lá và nút sửa */
+.event-cell {
+  vertical-align: middle;
+  border-right: 1px solid #e6ebe8;
+}
+
+.event-name {
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.icon-btn-plus {
+  color: #2e9e5b;
+  border-color: #b8e3c8;
+}
+
+.icon-btn-plus:hover:not(:disabled) {
+  background: #e9f7ef;
+}
+
+.group-first td {
+  border-top: 2px solid #dfe6e2;
+}
+
+/* Đăng ký: số điện thoại có tiền tố +84 */
+.phone-field {
+  display: flex;
+  align-items: stretch;
+}
+
+.phone-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-weight: 600;
+  color: #1c2b26;
+  background: #e8efec;
+  border: 1px solid #d7dfdb;
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+}
+
+.phone-field .input {
+  flex: 1;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* Lịch: cột 22:00 cùng màu xám với các ô trống */
+.matrix-wide tbody td.slot-end {
+  background: #e3e6e8 !important;
+}
