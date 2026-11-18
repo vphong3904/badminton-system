@@ -2,7 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
-const { taoAnhQrUrl, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
+const { taoAnhQrUrl, taoNoiDungQr, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
 const { thuMucTepTaiLen, layDuongDanTep, laAnhThat } = require('../middlewares/upload');
 const { guiThongBao, dinhDangTien } = require('./notificationService');
 
@@ -106,6 +106,7 @@ async function layQr(maNguoiDung, maDatSan) {
     noiDungChuyenKhoan: thanhToan.noiDungChuyenKhoan,
     trangThai: thanhToan.trangThai,
     anhQrUrl: taoAnhQrUrl(thanhToan.noiDungChuyenKhoan, Number(thanhToan.soTien), taiKhoan),
+    maQr: taoNoiDungQr(thanhToan.noiDungChuyenKhoan, Number(thanhToan.soTien), taiKhoan),
     chuaCauHinhThanhToan: !taiKhoan,
   };
 }

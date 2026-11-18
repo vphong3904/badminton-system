@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { doiGioRaPhut } = require('../utils/time');
-const { taoAnhQrUrl, layTaiKhoanChuSan, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
+const { taoAnhQrUrl, taoNoiDungQr, layTaiKhoanChuSan, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
 const { guiThongBao, dinhDangTien, baoDanhGiaMoi } = require('./notificationService');
 const { tinhLaiDiemCoSo } = require('./reviewService');
 const { ganTrangThaiHienThi, tinhTrangThaiHienThi } = require('../utils/trangThaiDon');
@@ -243,8 +243,9 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
       cacDon.push({ maDatSan: don.insertId, maDon, ngay: cacNgay[viTri], tongTien });
     }
     const tongTien = cacMucGia.reduce((tong, gia) => tong + gia, 0);
-    const anhQrUrl = taoAnhQrUrl(
-      cacDon[0].maDon, tongTien, await layTaiKhoanChuSan(ketNoi, san.maChuSan));
+    const taiKhoanNhan = await layTaiKhoanChuSan(ketNoi, san.maChuSan);
+    const anhQrUrl = taoAnhQrUrl(cacDon[0].maDon, tongTien, taiKhoanNhan);
+    const maQr = taoNoiDungQr(cacDon[0].maDon, tongTien, taiKhoanNhan);
     const [thanhToan] = await ketNoi.query(
       `INSERT INTO ThanhToan (MaDatSan, SoTien, NoiDungChuyenKhoan)
        VALUES (?,?,?)`,
@@ -281,6 +282,7 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
       maThanhToan: thanhToan.insertId,
       maDonThanhToan: cacDon[0].maDon,
       anhQrUrl,
+      maQr,
       soNgay: cacNgay.length,
     };
   });
@@ -300,6 +302,8 @@ function khoangCachMet(viDo1, kinhDo1, viDo2, kinhDo2) {
 // Giá/giờ (vãng lai) của một cơ sở:
 //  - có ngày + giờ: giá/giờ trung bình của đúng khung đã chọn (cùng cách tính với tinhTongTien);
 //  - không chọn khung: mọi mức giá trong bảng giá, cơ sở đạt khi CÓ mức nằm trong khoảng.
+// `giaXep` là giá dùng để xếp cơ sở từ rẻ → đắt (không trả ra ngoài): có khung giờ thì bằng
+// giá/giờ trung bình của khung; không có thì là mức giá thấp nhất nằm trong khoảng.
 function giaPhuHopKhoang(cacGia, boLoc, batDau, ketThuc, giaToiThieu, giaToiDa) {
   const trongKhoang = (gia) => gia >= giaToiThieu && gia <= giaToiDa;
   if (boLoc.ngay) {
@@ -309,21 +313,27 @@ function giaPhuHopKhoang(cacGia, boLoc, batDau, ketThuc, giaToiThieu, giaToiDa) 
     for (let phut = batDau; phut < ketThuc; phut += 30) {
       const khung = bang.find((g) => doiGioRaPhut(String(g.gioBatDau).slice(0, 5)) <= phut
         && doiGioRaPhut(String(g.gioKetThuc).slice(0, 5)) >= phut + 30);
-      if (!khung) return { dat: false, giaMoiGio: null };
+      if (!khung) return { dat: false, giaMoiGio: null, giaXep: null };
       tong += Number(khung.giaMoiGio);
     }
     const giaMoiGio = Math.round(tong / ((ketThuc - batDau) / 30));
-    return { dat: trongKhoang(giaMoiGio), giaMoiGio };
+    return { dat: trongKhoang(giaMoiGio), giaMoiGio, giaXep: giaMoiGio };
   }
-  return { dat: cacGia.some((g) => trongKhoang(Number(g.giaMoiGio))), giaMoiGio: null };
+  const giaTrongKhoang = cacGia.map((g) => Number(g.giaMoiGio)).filter(trongKhoang);
+  return {
+    dat: giaTrongKhoang.length > 0,
+    giaMoiGio: null,
+    giaXep: giaTrongKhoang.length ? Math.min(...giaTrongKhoang) : null,
+  };
 }
 
 // Tìm cơ sở có sân phù hợp. Mọi tiêu chí đều tuỳ chọn và CÙNG áp dụng (AND):
 //  - ngày + giờ bắt đầu + giờ kết thúc: đi chung bộ 3 (validator đã ép), lọc sân còn trống;
 //  - tinhThanh [+ quanHuyen]: lọc khu vực (quận chỉ hợp lệ khi có tỉnh);
 //  - giaToiThieu + giaToiDa: đi chung cặp, lọc theo giá/giờ;
-//  - viDo + kinhDo (GPS của khách): xếp gần → xa, cơ sở chưa có toạ độ xếp cuối;
-//    không có GPS: xếp theo điểm đánh giá cao → thấp.
+//  - Sắp xếp: có lọc giá → giá/giờ rẻ nhất → đắt nhất (ưu tiên số 1);
+//    sau đó (hoặc khi không lọc giá) có GPS → gần → xa, cơ sở chưa có toạ độ xếp cuối;
+//    không có GPS: điểm đánh giá cao → thấp.
 async function timCoSo(boLoc) {
   const coKhungGio = Boolean(boLoc.ngay && boLoc.gioBatDau && boLoc.gioKetThuc);
   if (Boolean(boLoc.ngay) !== Boolean(boLoc.gioBatDau) || Boolean(boLoc.ngay) !== Boolean(boLoc.gioKetThuc)) {
@@ -432,9 +442,15 @@ async function timCoSo(boLoc) {
     };
   });
 
-  // Sắp xếp: có GPS → gần → xa (chưa có toạ độ xếp cuối); hoà/không GPS → sao cao → thấp.
+  // Sắp xếp: có lọc giá → rẻ → đắt (ưu tiên trước); hoà giá/không lọc giá → có GPS thì
+  // gần → xa (chưa có toạ độ xếp cuối); còn hoà/không GPS → sao cao → thấp.
   const diem = (san) => Number(san.diemTrungBinh) || 0;
   ketQua.sort((a, b) => {
+    if (coGia) {
+      const giaA = giaTheoCoSo.get(a.maCoSo)?.giaXep ?? Infinity;
+      const giaB = giaTheoCoSo.get(b.maCoSo)?.giaXep ?? Infinity;
+      if (giaA !== giaB) return giaA - giaB;
+    }
     if (coViTri) {
       if (a.khoangCachMet === null && b.khoangCachMet !== null) return 1;
       if (a.khoangCachMet !== null && b.khoangCachMet === null) return -1;
@@ -663,7 +679,7 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
   };
   if (!['pending', 'confirming'].includes(hoaDon.trangThaiThanhToan)) {
     return kemTrangThai({
-      ...phanConLai, anhQrUrl: null, taiKhoanNhan: null, chuaCauHinhThanhToan: false, lyDoTuChoi: null,
+      ...phanConLai, anhQrUrl: null, maQr: null, taiKhoanNhan: null, chuaCauHinhThanhToan: false, lyDoTuChoi: null,
     });
   }
   // Tài khoản của chủ sân; null nếu chủ sân chưa nhập ngân hàng: vẫn trả hoá đơn, chưa có QR.
@@ -671,6 +687,7 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
   return kemTrangThai({
     ...phanConLai,
     anhQrUrl: taoAnhQrUrl(hoaDon.noiDungChuyenKhoan, Number(hoaDon.soTien), taiKhoan),
+    maQr: taoNoiDungQr(hoaDon.noiDungChuyenKhoan, Number(hoaDon.soTien), taiKhoan),
     chuaCauHinhThanhToan: !taiKhoan,
     // Thông tin hiển thị cạnh QR (chủ sân từ chối ảnh → lyDoTuChoi để khách biết gửi lại).
     taiKhoanNhan: taiKhoan && {

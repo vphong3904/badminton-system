@@ -152,7 +152,7 @@ module.exports = {
       post: endpoint('Đổi mật khẩu', 'Tài khoản', { auth: true, body: 'DoiMatKhau' }),
     },
     '/api/khach/co-so': {
-      get: endpoint('Tìm cơ sở/sân (mọi tiêu chí tuỳ chọn, kết hợp AND; xếp gần→xa nếu có GPS, không thì sao cao→thấp)', 'Khách hàng', {
+      get: endpoint('Tìm cơ sở/sân (mọi tiêu chí tuỳ chọn, kết hợp AND; có lọc giá thì xếp giá rẻ→đắt trước; sau đó gần→xa nếu có GPS, không thì sao cao→thấp)', 'Khách hàng', {
         query: [
           thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD (đi chung với gioBatDau, gioKetThuc)'),
           thamSoTruyVan('gioBatDau', 'Giờ bắt đầu HH:MM (đi chung với ngay, gioKetThuc)'),
@@ -709,30 +709,32 @@ module.exports = {
       DoanhNghiep: {
         type: 'object',
         required: ['tenDoanhNghiep'],
-        properties: { tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150 } },
+        properties: { tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150, example: 'Cong ty TNHH The thao ABC' } },
       },
       DangNhap: {
         type: 'object',
         required: ['email', 'matKhau'],
         properties: {
           email: { type: 'string', format: 'email', example: 'khach@example.com' },
-          matKhau: { type: 'string', format: 'password', example: 'MatKhau123' },
+          matKhau: { type: 'string', format: 'password', example: '12345678' },
         },
       },
       DoiMatKhau: {
         type: 'object',
         required: ['matKhauCu', 'matKhauMoi'],
         properties: {
-          matKhauCu: { type: 'string', format: 'password' },
-          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu' },
+          matKhauCu: { type: 'string', format: 'password', description: 'Mật khẩu hiện tại', example: '12345678' },
+          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu', example: 'MatKhau123' },
         },
       },
       CapNhatCaNhan: {
         type: 'object',
+        minProperties: 1,
+        description: 'Gửi ít nhất 1 trường. Nếu ĐỔI số điện thoại thì bắt buộc là số di động (10 số).',
         properties: {
-          hoTen: { type: 'string' },
-          soDienThoai: { type: 'string' },
-          email: { type: 'string', format: 'email' },
+          hoTen: { type: 'string', minLength: 2, maxLength: 100, example: 'Nguyen Van A' },
+          soDienThoai: { type: 'string', example: '0901234567' },
+          email: { type: 'string', format: 'email', example: 'khach@example.com' },
         },
       },
       DatSan: {
@@ -740,12 +742,12 @@ module.exports = {
         required: ['maSan', 'ngay', 'gioBatDau', 'gioKetThuc', 'tenKhach', 'soDienThoai'],
         properties: {
           maSan: { type: 'integer', example: 1 },
-          ngay: { type: 'string', format: 'date', example: '2026-11-15' },
-          gioBatDau: { type: 'string', example: '18:00' },
-          gioKetThuc: { type: 'string', example: '19:00' },
-          tenKhach: { type: 'string', example: 'Nguyen Van A' },
-          soDienThoai: { type: 'string', example: '0901234567' },
-          ghiChu: { type: 'string' },
+          ngay: { type: 'string', format: 'date', description: 'YYYY-MM-DD, phải là ngày chưa qua giờ bắt đầu', example: '2026-11-25' },
+          gioBatDau: { type: 'string', description: 'HH:MM, theo mốc 30 phút', example: '18:00' },
+          gioKetThuc: { type: 'string', description: 'HH:MM, mốc 30 phút, sau gioBatDau, đủ soPhutDatToiThieu của cơ sở', example: '19:00' },
+          tenKhach: { type: 'string', minLength: 2, maxLength: 100, example: 'Nguyen Van A' },
+          soDienThoai: { type: 'string', description: 'Di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0', example: '0901234567' },
+          ghiChu: { type: 'string', maxLength: 500, example: 'Can them 1 hop cau' },
         },
       },
       ChuSanTaoDon: {
@@ -755,7 +757,7 @@ module.exports = {
             type: 'object',
             properties: {
               ngayKetThuc: {
-                type: 'string', format: 'date', example: '2026-12-15',
+                type: 'string', format: 'date', example: '2026-12-25',
                 description: 'Có → khách cố định, tạo đơn mỗi ngày từ ngay đến ngayKetThuc',
               },
               daThu: { type: 'boolean', example: true, description: 'Khách đã trả tiền chưa (mặc định false)' },
@@ -769,7 +771,7 @@ module.exports = {
           {
             type: 'object',
             required: ['ngayKetThuc'],
-            properties: { ngayKetThuc: { type: 'string', format: 'date', example: '2026-12-15' } },
+            properties: { ngayKetThuc: { type: 'string', format: 'date', description: 'Phải từ ngày bắt đầu trở đi', example: '2026-12-25' } },
           },
         ],
       },
@@ -777,7 +779,7 @@ module.exports = {
         type: 'object',
         required: ['noiDung'],
         properties: {
-          noiDung: { type: 'string', minLength: 10, maxLength: 1000 },
+          noiDung: { type: 'string', minLength: 10, maxLength: 1000, example: 'Toi da chuyen khoan nhung san khong duoc giu cho.' },
           giaiDoan: { type: 'string', enum: ['at_cancel', 'after_cancel'], description: 'at_cancel: bấm ngay sau khi hủy' },
         },
       },
@@ -842,10 +844,10 @@ module.exports = {
         type: 'object',
         required: ['tenNganHang', 'maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
         properties: {
-          tenNganHang: { type: 'string' },
-          maNganHang: { type: 'string' },
-          soTaiKhoan: { type: 'string' },
-          chuTaiKhoan: { type: 'string' },
+          tenNganHang: { type: 'string', minLength: 2, maxLength: 100, example: 'MB Bank' },
+          maNganHang: { type: 'string', minLength: 2, maxLength: 20, example: 'MB' },
+          soTaiKhoan: { type: 'string', description: '6–30 chữ số (bỏ dấu cách/gạch)', example: '0123456789' },
+          chuTaiKhoan: { type: 'string', minLength: 2, maxLength: 100, example: 'NGUYEN VAN A' },
         },
       },
       CoSo: {
@@ -855,11 +857,11 @@ module.exports = {
           'linkBanDo', 'gioMoCua', 'gioDongCua', 'soPhutDatToiThieu',
         ],
         properties: {
-          tenCoSo: { type: 'string' },
-          diaChi: { type: 'string' },
-          tinhThanh: { type: 'string' },
-          quanHuyen: { type: 'string' },
-          soDienThoai: { type: 'string' },
+          tenCoSo: { type: 'string', minLength: 2, maxLength: 150, example: 'Cau Long Thanh Cong' },
+          diaChi: { type: 'string', minLength: 5, maxLength: 255, example: '123 Truong Chinh, Phuong 13' },
+          tinhThanh: { type: 'string', minLength: 2, maxLength: 80, example: 'TP. Ho Chi Minh' },
+          quanHuyen: { type: 'string', minLength: 2, maxLength: 80, example: 'Tan Binh' },
+          soDienThoai: { type: 'string', example: '0912345671' },
           linkBanDo: {
             type: 'string', format: 'uri',
             description: 'Link Google Maps (kể cả maps.app.goo.gl). Backend tự đọc vĩ độ/kinh độ từ link này để tính "sân gần tôi"; không gửi viDo/kinhDo.',
@@ -868,7 +870,7 @@ module.exports = {
           moTa: { type: 'string' },
           gioMoCua: { type: 'string', example: '06:00' },
           gioDongCua: { type: 'string', example: '22:00' },
-          soPhutDatToiThieu: { type: 'integer', example: 60 },
+          soPhutDatToiThieu: { type: 'integer', minimum: 30, description: 'Bội số của 30', example: 60 },
         },
       },
       BangGia: {
@@ -922,16 +924,16 @@ module.exports = {
       },
       LyDoDongXoa: {
         type: 'object',
-        properties: { lyDo: { type: 'string', maxLength: 255, description: 'Tuỳ chọn, ghi vào nhật ký' } },
+        properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, description: 'Tuỳ chọn, ghi vào nhật ký', example: 'Dong de bao tri' } },
       },
       NganHang: {
         type: 'object',
         required: ['tenNganHang', 'maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
         properties: {
-          tenNganHang: { type: 'string' },
-          maNganHang: { type: 'string' },
-          soTaiKhoan: { type: 'string' },
-          chuTaiKhoan: { type: 'string' },
+          tenNganHang: { type: 'string', minLength: 2, maxLength: 100, example: 'MB Bank' },
+          maNganHang: { type: 'string', minLength: 2, maxLength: 20, example: 'MB' },
+          soTaiKhoan: { type: 'string', pattern: '^[0-9]{6,20}$', example: '0123456789' },
+          chuTaiKhoan: { type: 'string', minLength: 2, maxLength: 100, example: 'NGUYEN VAN A' },
         },
       },
       TaoSan: {
@@ -953,9 +955,9 @@ module.exports = {
         type: 'object',
         required: ['maSan', 'thoiGianBatDau', 'thoiGianKetThuc'],
         properties: {
-          maSan: { type: 'integer' },
-          thoiGianBatDau: { type: 'string', example: '2026-11-15 12:00' },
-          thoiGianKetThuc: { type: 'string', example: '2026-11-15 14:00' },
+          maSan: { type: 'integer', example: 1 },
+          thoiGianBatDau: { type: 'string', description: 'YYYY-MM-DD HH:MM', example: '2026-11-25 12:00' },
+          thoiGianKetThuc: { type: 'string', description: 'YYYY-MM-DD HH:MM, sau thoiGianBatDau', example: '2026-11-25 14:00' },
           lyDo: { type: 'string' },
         },
       },
@@ -964,7 +966,7 @@ module.exports = {
         required: ['trangThai'],
         properties: {
           trangThai: { type: 'string', enum: ['approved', 'rejected'] },
-          lyDoTuChoi: { type: 'string' },
+          lyDoTuChoi: { type: 'string', minLength: 3, maxLength: 255, description: 'Bắt buộc khi trangThai=rejected', example: 'Ho so thieu giay phep kinh doanh' },
         },
       },
       TuChoiThanhToan: {
@@ -979,12 +981,12 @@ module.exports = {
       },
       HoanThanhHoanTien: {
         type: 'object',
-        properties: { maGiaoDichHoan: { type: 'string', maxLength: 100, description: 'Mã giao dịch chuyển khoản hoàn (không bắt buộc)' } },
+        properties: { maGiaoDichHoan: { type: 'string', minLength: 1, maxLength: 100, description: 'Mã giao dịch chuyển khoản hoàn (không bắt buộc)', example: 'FT26322100001' } },
       },
       MaGiaoDichHoan: {
         type: 'object',
         required: ['maGiaoDichHoan'],
-        properties: { maGiaoDichHoan: { type: 'string' } },
+        properties: { maGiaoDichHoan: { type: 'string', minLength: 3, maxLength: 100, example: 'FT26322100001' } },
       },
       MaGiaoDich: {
         type: 'object',

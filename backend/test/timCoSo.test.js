@@ -55,13 +55,22 @@ test('Lọc khoảng giá khi không chọn khung giờ', async () => {
   assert.deepEqual(ma(ketQua), [2]);
 });
 
+test('Lọc khoảng giá (không chọn giờ): xếp giá rẻ → đắt, hoà giá thì sao cao → thấp', async () => {
+  bangGia = [bang(1, 100000), bang(2, 60000), bang(3, 100000)];
+  const ketQua = await dichVu.timCoSo({ giaToiThieu: 50000, giaToiDa: 150000 });
+  // Cơ sở 2 rẻ nhất; cơ sở 1 và 3 cùng giá → cơ sở 1 (4.9 sao) trước cơ sở 3 (4.5 sao).
+  assert.deepEqual(ma(ketQua), [2, 1, 3]);
+});
+
 test('Kết hợp khung giờ + khoảng giá + GPS', async () => {
   const ketQua = await dichVu.timCoSo({
     ngay: ngayMai, gioBatDau: '08:00', gioKetThuc: '10:00',
     giaToiThieu: 40000, giaToiDa: 110000, viDo: 10.776, kinhDo: 106.695,
   });
-  assert.deepEqual(ma(ketQua), [2, 1]);
-  assert.equal(ketQua[0].giaMoiGio, 100000);
+  // Có lọc giá → rẻ → đắt (cơ sở 1: 50.000đ, cơ sở 2: 100.000đ), ưu tiên hơn GPS.
+  assert.deepEqual(ma(ketQua), [1, 2]);
+  assert.equal(ketQua[0].giaMoiGio, 50000);
+  assert.equal(ketQua[1].giaMoiGio, 100000);
   // Điều kiện sân trống chỉ được thêm khi có khung giờ.
   assert.match(cacTruyVan[0].cauTruyVan, /NOT EXISTS/);
 });
