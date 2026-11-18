@@ -26,6 +26,9 @@ exports.capNhatCoSo = xuLy((yeuCau) =>
   dichVu.capNhatCoSo(layMaChuSan(yeuCau), yeuCau.body, layMaCoSo(yeuCau)));
 exports.capNhatBangGia = xuLy((yeuCau) =>
   dichVu.thayBangGia(layMaChuSan(yeuCau), yeuCau.body.khungGias, layMaCoSo(yeuCau)));
+exports.layBangGiaCoSo = xuLy((yeuCau) => dichVu.layBangGiaCoSo(layMaChuSan(yeuCau), layMaCoSo(yeuCau)));
+exports.themKhungGia = xuLy((yeuCau) =>
+  dichVu.themKhungGia(layMaChuSan(yeuCau), layMaCoSo(yeuCau), yeuCau.body), daTao);
 exports.capNhatAnhCoSo = xuLy((yeuCau) => {
   if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
   return dichVu.capNhatAnhCoSo(layMaChuSan(yeuCau), yeuCau.file, layMaCoSo(yeuCau));

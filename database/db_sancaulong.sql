@@ -3,13 +3,9 @@ SET NAMES utf8mb4;
 -- HỆ THỐNG ĐẶT SÂN CẦU LÔNG - SCHEMA HOÀN CHỈNH (khách + chủ sân + admin)
 -- Quy ước: tên bảng, tên cột viết tiếng Việt không dấu, viết hoa chữ cái đầu mỗi từ (PascalCase)
 -- Giá trị ENUM và khóa trong CauHinhHeThong giữ nguyên tiếng Anh
--- Yêu cầu: MySQL 8.0.16+ hoặc MariaDB 10.5+ (để CHECK có hiệu lực). Chạy được trên cả hai.
--- LƯU Ý: file này XOÁ và TẠO LẠI database db_sancaulong (schema + dữ liệu mẫu), import 1 lần là xong.
+-- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực)
 -- =====================================================================
-SET FOREIGN_KEY_CHECKS = 0;
-DROP DATABASE IF EXISTS db_sancaulong;
-SET FOREIGN_KEY_CHECKS = 1;
-CREATE DATABASE db_sancaulong
+CREATE DATABASE IF NOT EXISTS db_sancaulong
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE db_sancaulong;
 
@@ -23,33 +19,38 @@ CREATE TABLE NguoiDung (
   Email         VARCHAR(150) NOT NULL,
   SoDienThoai   VARCHAR(20),
   MatKhauMaHoa  VARCHAR(255) NOT NULL,
-  AnhDaiDien    VARCHAR(500),
   VaiTro        ENUM('customer','owner','admin') NOT NULL DEFAULT 'customer',
+  AnhDaiDien    VARCHAR(255) NOT NULL DEFAULT '/tep-tai-len/avatar/default-user.jpg'
+                COMMENT 'đường dẫn tương đối; mặc định = ảnh có sẵn uploads/avatar/default-user.jpg; ảnh riêng: /tep-tai-len/avatar/u<MaNguoiDung>-<ms>-<hex>.<jpg|png|webp>',
   TrangThai     ENUM('active','locked') NOT NULL DEFAULT 'active',
   LyDoKhoa      VARCHAR(255) NULL COMMENT 'admin ghi khi khóa tài khoản',
   NgayTao       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   NgayCapNhat   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT CHK_NguoiDung_AnhDaiDien CHECK (AnhDaiDien LIKE '/tep-tai-len/avatar/%'),
+  CONSTRAINT CHK_NguoiDung_ChuSanCoSdt CHECK (VaiTro <> 'owner' OR SoDienThoai IS NOT NULL),
   UNIQUE KEY UQ_NguoiDung_Email (Email),
   KEY IDX_NguoiDung_VaiTro (VaiTro)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
 -- 2. HoSoChuSan: thông tin riêng của chủ sân (1-1 với NguoiDung có VaiTro = owner)
---    TrangThaiDuyet: draft (đang điền form) -> pending (chờ admin duyệt, tối đa 3 ngày)
+--    TrangThaiDuyet: đăng ký chủ sân vào thẳng pending (chờ admin duyệt, tối đa 3 ngày; đã điền sẵn
+--                    TenDoanhNghiep + tài khoản ngân hàng). Không có draft.
 --                    -> approved / rejected (từ chối thì sửa và gửi lại về pending)
---    Thông tin ngân hàng là tài khoản nhận tiền khi rút
+--    Thông tin ngân hàng: khách chuyển khoản thẳng vào đây (QR VietQR) và dùng để chủ sân hoàn tiền
 CREATE TABLE HoSoChuSan (
   MaNguoiDung     INT UNSIGNED PRIMARY KEY,
-  TenDoanhNghiep  VARCHAR(150) NULL,
-  TenNganHang     VARCHAR(100) NULL COMMENT 'tài khoản NHẬN tiền rút; bắt buộc điền trước khi gửi duyệt',
-  MaNganHang      VARCHAR(20)  NULL COMMENT 'mã ngân hàng (BIN)',
-  SoTaiKhoan      VARCHAR(30)  NULL,
-  ChuTaiKhoan     VARCHAR(100) NULL,
-  TrangThaiDuyet  ENUM('draft','pending','approved','rejected') NOT NULL DEFAULT 'draft',
+  TenDoanhNghiep  VARCHAR(150) NOT NULL,
+  TenNganHang     VARCHAR(100) NOT NULL COMMENT 'tài khoản nhận tiền khách chuyển; điền ngay lúc đăng ký',
+  MaNganHang      VARCHAR(20)  NOT NULL COMMENT 'mã VietQR viết tắt (VCB, MB, TCB, ACB…) khớp backend/src/utils/nganHang.js',
+  SoTaiKhoan      VARCHAR(30)  NOT NULL,
+  ChuTaiKhoan     VARCHAR(100) NOT NULL,
+  TrangThaiDuyet  ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   NgayGuiDuyet    DATETIME NULL,
   NgayDuyet       DATETIME NULL,
   MaQuanTriDuyet  INT UNSIGNED NULL COMMENT 'admin duyệt hoặc từ chối',
   LyDoTuChoi      VARCHAR(255) NULL,
+  SoLanViPham     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'số khiếu nại admin xác nhận đúng: 1 cảnh cáo, 2 cảnh cáo nghiêm trọng, 3 khóa tài khoản',
   CONSTRAINT FK_HoSoChuSan_NguoiDung FOREIGN KEY (MaNguoiDung)    REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
   CONSTRAINT FK_HoSoChuSan_QuanTri   FOREIGN KEY (MaQuanTriDuyet) REFERENCES NguoiDung(MaNguoiDung),
   KEY IDX_HoSoChuSan_Duyet (TrangThaiDuyet, NgayGuiDuyet)
@@ -63,21 +64,19 @@ CREATE TABLE CoSo (
   MaChuSan           INT UNSIGNED NOT NULL,
   TenCoSo            VARCHAR(150) NOT NULL,
   DiaChi             VARCHAR(255) NOT NULL,
-  SoDienThoai        VARCHAR(20)  NULL COMMENT 'SĐT liên hệ riêng của cơ sở',
-  Zalo               VARCHAR(100) NULL COMMENT 'số Zalo hoặc link zalo.me/...',
-  LinkBanDo          VARCHAR(500) NULL COMMENT 'link Google Map; NULL thì app tự tạo từ ViDo/KinhDo',
+  SoDienThoai        VARCHAR(20)  NOT NULL COMMENT 'SĐT liên hệ của cơ sở (khách liên hệ chủ sân qua số này)',
+  LinkBanDo          VARCHAR(500) NOT NULL COMMENT 'link Google Maps chủ sân dán vào; mở bản đồ + backend tự đọc ra ViDo/KinhDo',
   TinhThanh          VARCHAR(80)  NOT NULL,
   QuanHuyen          VARCHAR(80)  NOT NULL,
-  ViDo               DECIMAL(9,6),
-  KinhDo             DECIMAL(9,6),
+  ViDo               DECIMAL(9,6) NULL COMMENT 'TỰ ĐỘNG lấy từ LinkBanDo khi lưu cơ sở (chủ sân không nhập); dùng tính khoảng cách "sân gần tôi"',
+  KinhDo             DECIMAL(9,6) NULL COMMENT 'xem ViDo',
   MoTa               TEXT,
-  TienIch            JSON NULL COMMENT 'vd: ["parking","toilet","locker_room"]',
   GioMoCua           TIME NOT NULL DEFAULT '06:00:00',
   GioDongCua         TIME NOT NULL DEFAULT '22:00:00',
   SoPhutDatToiThieu  SMALLINT UNSIGNED NOT NULL DEFAULT 60 COMMENT 'thời gian đặt tối thiểu do chủ sân chọn',
   GiaThapNhat        DECIMAL(12,0) NULL COMMENT 'giá vãng lai thấp nhất, cập nhật khi lưu bảng giá',
-  TrangThai          ENUM('active','hidden','locked') NOT NULL DEFAULT 'hidden'
-                     COMMENT 'hidden: đang soạn/tạm ẩn/chờ duyệt; locked: admin khóa',
+  TrangThai          ENUM('active','hidden','locked','closed') NOT NULL DEFAULT 'hidden'
+                     COMMENT 'hidden: đang soạn/chờ duyệt; closed: chủ sân/admin đóng tạm (phải đóng trước khi xóa); locked: admin khóa',
   LyDoKhoa           VARCHAR(255) NULL COMMENT 'admin ghi khi khóa cơ sở',
   DiemTrungBinh      DECIMAL(2,1) NOT NULL DEFAULT 0.0 COMMENT 'cập nhật khi có đánh giá mới',
   SoDanhGia          INT UNSIGNED NOT NULL DEFAULT 0,
@@ -96,9 +95,10 @@ CREATE TABLE CoSo (
 CREATE TABLE AnhCoSo (
   MaAnh      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaCoSo     INT UNSIGNED NOT NULL,
-  DuongDan   VARCHAR(500) NOT NULL,
+  DuongDan   VARCHAR(500) NOT NULL COMMENT 'đường dẫn tương đối /tep-tai-len/coso/cs<MaCoSo>-<ms>-<hex>.<jpg|png|webp>; cơ sở chưa có dòng nào → API trả ảnh mặc định /tep-tai-len/coso/coso.jpg (không lưu dòng mặc định ở đây)',
   LaAnhBia   TINYINT(1) NOT NULL DEFAULT 0,
   ThuTu      INT NOT NULL DEFAULT 0,
+  CONSTRAINT CHK_AnhCoSo_DuongDan CHECK (DuongDan LIKE '/tep-tai-len/coso/%'),
   CONSTRAINT FK_AnhCoSo_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   KEY IDX_AnhCoSo_CoSo (MaCoSo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -110,7 +110,7 @@ CREATE TABLE San (
   MaSan      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaCoSo     INT UNSIGNED NOT NULL,
   TenSan     VARCHAR(50) NOT NULL,
-  TrangThai  ENUM('active','maintenance') NOT NULL DEFAULT 'active',
+  TrangThai  ENUM('active','maintenance') NOT NULL DEFAULT 'maintenance' COMMENT 'maintenance = chưa hoạt động/đã đóng; sân mới tạo ở maintenance, chủ sân bật thì mới nhận khách',
   CONSTRAINT FK_San_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   UNIQUE KEY UQ_San_Ten (MaCoSo, TenSan)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -137,7 +137,6 @@ CREATE TABLE KhoaSan (
 CREATE TABLE BangGia (
   MaBangGia    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaCoSo       INT UNSIGNED NOT NULL,
-  TenKhungGia  VARCHAR(50) NOT NULL DEFAULT 'Giá tiêu chuẩn' COMMENT 'Thấp điểm, Cao điểm...',
   LoaiNgay     ENUM('weekday','weekend') NOT NULL COMMENT 'T2-T6 / T7-CN',
   LoaiKhach    ENUM('walk_in','fixed') NOT NULL DEFAULT 'walk_in',
   GioBatDau    TIME NOT NULL,
@@ -147,31 +146,6 @@ CREATE TABLE BangGia (
   CONSTRAINT CHK_BangGia_Gio CHECK (GioKetThuc > GioBatDau),
   CONSTRAINT CHK_BangGia_Gia CHECK (GiaMoiGio >= 0),
   KEY IDX_BangGia_CoSo (MaCoSo)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ---------------------------------------------------------------------
--- 8. YeuCauRutTien: yêu cầu rút tiền của chủ sân (admin chuyển khoản thủ công)
---    Tài khoản nhận được CHỤP LẠI tại thời điểm rút
---    Chỉ đơn DatSan có Nguon = 'app' và TrangThai = 'completed' mới được đưa vào yêu cầu rút
-CREATE TABLE YeuCauRutTien (
-  MaYeuCau          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  MaChuSan          INT UNSIGNED NOT NULL,
-  SoTien            DECIMAL(12,0) NOT NULL,
-  TrangThai         ENUM('pending','paid','rejected') NOT NULL DEFAULT 'pending',
-  TenNganHang       VARCHAR(100) NOT NULL,
-  MaNganHang        VARCHAR(20)  NOT NULL,
-  SoTaiKhoan        VARCHAR(30)  NOT NULL,
-  ChuTaiKhoan       VARCHAR(100) NOT NULL,
-  NgayYeuCau        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  MaQuanTriXuLy     INT UNSIGNED NULL COMMENT 'admin xử lý',
-  NgayXuLy          DATETIME NULL,
-  MaGiaoDich        VARCHAR(100) NULL,
-  LyDoTuChoi        VARCHAR(255) NULL,
-  CONSTRAINT FK_RutTien_ChuSan   FOREIGN KEY (MaChuSan)      REFERENCES NguoiDung(MaNguoiDung),
-  CONSTRAINT FK_RutTien_QuanTri  FOREIGN KEY (MaQuanTriXuLy) REFERENCES NguoiDung(MaNguoiDung),
-  CONSTRAINT CHK_RutTien_SoTien  CHECK (SoTien > 0),
-  KEY IDX_RutTien_ChuSan (MaChuSan, TrangThai),
-  KEY IDX_RutTien_TrangThai (TrangThai)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -234,10 +208,8 @@ CREATE TABLE DatSan (
   NguoiHuy            ENUM('customer','owner','system') NULL,
   LyDoHuy             VARCHAR(255) NULL,
   NgayHuy             DATETIME NULL,
-  MaYeuCauRutTien     INT UNSIGNED NULL COMMENT 'NULL = chưa rút tiền',
   NgayTao             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   NgayCapNhat         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT FK_DatSan_RutTien    FOREIGN KEY (MaYeuCauRutTien) REFERENCES YeuCauRutTien(MaYeuCau),
   CONSTRAINT FK_DatSan_KhachHang  FOREIGN KEY (MaKhachHang)     REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_DatSan_San        FOREIGN KEY (MaSan)           REFERENCES San(MaSan),
   CONSTRAINT FK_DatSan_LichCoDinh FOREIGN KEY (MaLichCoDinh)    REFERENCES LichCoDinh(MaLichCoDinh),
@@ -245,7 +217,6 @@ CREATE TABLE DatSan (
   CONSTRAINT CHK_DatSan_SoPhut    CHECK (SoPhut >= 30),
   UNIQUE KEY UQ_DatSan_MaDon (MaDon),
   KEY IDX_DatSan_KhachHang (MaKhachHang, TrangThai),
-  KEY IDX_DatSan_RutTien (MaYeuCauRutTien),
   KEY IDX_DatSan_LichCoDinh (MaLichCoDinh),
   KEY IDX_DatSan_Khung (MaSan, NgayChoi, GioBatDau, GioKetThuc),  -- kiểm tra trùng lịch
   KEY IDX_DatSan_GiuCho (TrangThai, HetHanGiuCho)                 -- job quét hết hạn giữ chỗ
@@ -262,13 +233,11 @@ CREATE TABLE ThanhToan (
   MaThanhToan           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaDatSan              INT UNSIGNED NOT NULL,
   SoTien                DECIMAL(12,0) NOT NULL,
-  PhuongThuc            ENUM('bank_qr') NOT NULL DEFAULT 'bank_qr',
   TrangThai             ENUM('pending','confirming','success','failed','expired','late_payment')
                         NOT NULL DEFAULT 'pending',
   NoiDungChuyenKhoan    VARCHAR(100) NULL COMMENT 'nội dung chuyển khoản để đối chiếu (dùng MaDon)',
-  MaGiaoDichNganHang    VARCHAR(100) NULL COMMENT 'mã giao dịch từ ngân hàng/cổng thanh toán',
   LyDoLoi               VARCHAR(255) NULL COMMENT 'lý do chủ sân từ chối ảnh / ghi chú khi xét',
-  AnhChuyenKhoan        VARCHAR(255) NULL COMMENT 'đường dẫn ảnh chụp màn hình chuyển khoản khách gửi',
+  AnhChuyenKhoan        VARCHAR(255) NULL COMMENT 'đường dẫn tương đối ảnh chuyển khoản khách gửi: /tep-tai-len/<ms>-<hex>.<đuôi> (nằm ở gốc uploads/)',
   NgayGuiAnh            DATETIME NULL,
   MaNguoiXacNhan        INT UNSIGNED NULL COMMENT 'chủ sân hoặc admin đã xác nhận thanh toán',
   VaiTroXacNhan         ENUM('owner','admin') NULL,
@@ -310,7 +279,8 @@ CREATE TABLE DanhGia (
   CONSTRAINT FK_DanhGia_CoSo      FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   CONSTRAINT CHK_DanhGia_SoSao    CHECK (SoSao BETWEEN 1 AND 5),
   UNIQUE KEY UQ_DanhGia_DatSan (MaDatSan),
-  KEY IDX_DanhGia_CoSo (MaCoSo, NgayTao)
+  KEY IDX_DanhGia_CoSo (MaCoSo, NgayTao),
+  KEY IDX_DanhGia_BiAn (MaCoSo, BiAn, NgayTao)  -- điểm trung bình + danh sách công khai chỉ lấy BiAn=0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -325,19 +295,51 @@ CREATE TABLE YeuThich (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
+-- 13b. KhieuNai: khách khiếu nại chủ sân (nút "Khiếu nại chủ sân" cạnh thanh toán thành công / hủy / sau hủy)
+--      Admin đọc và quyết định: upheld (khiếu nại đúng) -> cộng 1 lần vi phạm cho chủ sân;
+--      rejected (không hợp lệ) -> không tính. Tích lũy upheld: 1 = cảnh cáo, 2 = cảnh cáo nghiêm trọng
+--      (sắp bị khóa), 3 = khóa tài khoản chủ sân. Mỗi đơn chỉ khiếu nại một lần.
+CREATE TABLE KhieuNai (
+  MaKhieuNai     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaDatSan       INT UNSIGNED NOT NULL,
+  MaKhachHang    INT UNSIGNED NOT NULL,
+  MaChuSan       INT UNSIGNED NOT NULL,
+  MaCoSo         INT UNSIGNED NOT NULL,
+  GiaiDoan       ENUM('after_payment','at_cancel','after_cancel') NOT NULL COMMENT 'khách bấm khiếu nại ở màn nào',
+  NoiDung        VARCHAR(1000) NOT NULL,
+  TrangThai      ENUM('pending','upheld','rejected') NOT NULL DEFAULT 'pending',
+  GhiChuQuanTri  VARCHAR(500) NULL,
+  MucXuLy        ENUM('none','warning','severe_warning','banned') NOT NULL DEFAULT 'none',
+  MaQuanTri      INT UNSIGNED NULL,
+  NgayXuLy       DATETIME NULL,
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_KhieuNai_DatSan   FOREIGN KEY (MaDatSan)    REFERENCES DatSan(MaDatSan),
+  CONSTRAINT FK_KhieuNai_Khach    FOREIGN KEY (MaKhachHang) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_KhieuNai_ChuSan   FOREIGN KEY (MaChuSan)    REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_KhieuNai_CoSo     FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
+  CONSTRAINT FK_KhieuNai_QuanTri  FOREIGN KEY (MaQuanTri)   REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_KhieuNai_DatSan (MaDatSan),
+  KEY IDX_KhieuNai_TrangThai (TrangThai, NgayTao),
+  KEY IDX_KhieuNai_ChuSan (MaChuSan, TrangThai),
+  KEY IDX_KhieuNai_Khach (MaKhachHang, NgayTao)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
 -- 14. ThongBao: thông báo cho khách, chủ sân và admin
 --     KhoaChongTrung UNIQUE để chống gửi trùng
 CREATE TABLE ThongBao (
   MaThongBao      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaNguoiDung     INT UNSIGNED NOT NULL,
-  Loai            ENUM('booking_created','payment_success','payment_failed','hold_expiring',
-                       'booking_cancelled','reminder','refund','new_booking_for_owner',
-                       'payout_paid','payout_rejected','venue_locked','system','late_payment',
-                       'owner_submitted','owner_approved','owner_rejected')
+  Loai            ENUM('booking_created','payment_success','payment_failed',
+                       'booking_cancelled','new_booking_for_owner','system',
+                       'refund_requested','refund_completed','complaint_received',
+                       'complaint_resolved','owner_warning','owner_banned',
+                       'review_received','review_replied','review_hidden','review_sent',
+                       'review_reminder')
                   NOT NULL,
   TieuDe          VARCHAR(150) NOT NULL,
   NoiDung         VARCHAR(500) NOT NULL,
-  LoaiThamChieu   ENUM('booking','payment','payout','venue','owner') NULL COMMENT 'để app/web điều hướng khi bấm vào',
+  LoaiThamChieu   ENUM('booking','payment','venue','complaint') NULL COMMENT 'để app/web điều hướng khi bấm vào',
   MaThamChieu     INT UNSIGNED NULL,
   DaDoc           TINYINT(1) NOT NULL DEFAULT 0,
   KhoaChongTrung  VARCHAR(100) NULL,
@@ -345,19 +347,6 @@ CREATE TABLE ThongBao (
   CONSTRAINT FK_ThongBao_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
   UNIQUE KEY UQ_ThongBao_ChongTrung (KhoaChongTrung),
   KEY IDX_ThongBao_NguoiDung (MaNguoiDung, DaDoc, NgayTao)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ---------------------------------------------------------------------
--- 15. ThietBi: token FCM để gửi push (khách dùng mobile)
-CREATE TABLE ThietBi (
-  MaThietBi    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  MaNguoiDung  INT UNSIGNED NOT NULL,
-  TokenFcm     VARCHAR(255) NOT NULL,
-  NenTang      ENUM('android','ios') NOT NULL,
-  NgayCapNhat  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT FK_ThietBi_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
-  UNIQUE KEY UQ_ThietBi_Token (TokenFcm),
-  KEY IDX_ThietBi_NguoiDung (MaNguoiDung)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -373,15 +362,14 @@ INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
   ('commission_rate',          '10',     'Hoa hồng hệ thống (%) trên đơn app'),
   ('hold_minutes',             '10',     'Thời gian giữ chỗ (phút)'),
   ('confirm_minutes',          '60',     'Thời gian giữ chỗ (phút) sau khi khách gửi ảnh chuyển khoản, chờ chủ sân xác nhận'),
-  ('min_payout',               '100000', 'Mức rút tối thiểu (đồng)'),
-  ('cancel_free_hours',        '24',     'Khách hủy trước giờ chơi tối thiểu bao nhiêu giờ thì được hoàn 100%'),
-  ('late_cancel_refund_percent','50',    'Tỷ lệ hoàn (%) khi khách hủy muộn hơn cancel_free_hours (chủ sân hủy luôn hoàn 100%)'),
-  ('owner_approval_days',      '3',      'Số ngày cam kết duyệt hồ sơ chủ sân');
+  ('cancel_free_hours',        '24',     'Khách hủy trước giờ chơi từ bao nhiêu giờ trở lên thì được hoàn 100%'),
+  ('cancel_half_hours',        '12',     'Khách hủy trước giờ chơi từ bấy nhiêu giờ đến dưới cancel_free_hours thì được hoàn một phần; dưới mức này không hoàn'),
+  ('late_cancel_refund_percent','50',    'Tỷ lệ hoàn (%) khi khách hủy trong khoảng cancel_half_hours đến cancel_free_hours (chủ sân hủy luôn hoàn 100%)');
 
 -- ---------------------------------------------------------------------
 -- 17. NhatKyHeThong: nhật ký thao tác của admin / chủ sân với các việc nhạy cảm
 --     vd HanhDong: duyet_chu_san, tu_choi_chu_san, khoa_co_so, khoa_tai_khoan, an_danh_gia,
---                  duyet_hoan_tien, xu_ly_rut_tien, huy_don_uu_tien
+--                  duyet_hoan_tien, huy_don_uu_tien
 CREATE TABLE NhatKyHeThong (
   MaNhatKy          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaNguoiThucHien   INT UNSIGNED NULL,
@@ -410,17 +398,11 @@ VALUES ('Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 
 --   SELECT * FROM ThanhToan
 --   WHERE (TrangThai = 'late_payment' AND TrangThaiHoanTien = 'none')
 --      OR TrangThaiHoanTien IN ('waiting_info','processing');
--- Yêu cầu rút tiền chờ xử lý:
---   SELECT * FROM YeuCauRutTien WHERE TrangThai = 'pending' ORDER BY NgayYeuCau;
--- Tiền chủ sân có thể rút:
---   SELECT SUM(d.TienChuSan) FROM DatSan d
---   JOIN San s ON s.MaSan = d.MaSan JOIN CoSo c ON c.MaCoSo = s.MaCoSo
---   WHERE c.MaChuSan = ? AND d.Nguon = 'app' AND d.TrangThai = 'completed' AND d.MaYeuCauRutTien IS NULL;
 
 -- =====================================================================
 -- SEED DATA - HỆ THỐNG ĐẶT SÂN CẦU LÔNG
--- (Nằm chung file schema: import 1 lần, không cần chạy riêng)
--- ThanhToan được seed cho mọi đơn app (success / pending / confirming / expired + hoàn tiền)
+-- Chạy SAU khi đã import db_sancaulong.sql (schema đã tự tạo admin MaNguoiDung = 1)
+-- Không seed: ThanhToan (theo yêu cầu)
 -- Mật khẩu mọi tài khoản demo: "password"
 --   (bcrypt hash dưới đây là hash phổ biến của chuỗi "password", chỉ dùng để dev/test)
 -- Ngày "hiện tại" của dữ liệu mẫu: 2026-10-31 (thứ Bảy)
@@ -437,18 +419,18 @@ WHERE MaNguoiDung = 1;
 -- 1. NguoiDung: 4 chủ sân (id 2-5) + 6 khách (id 6-11)
 -- ---------------------------------------------------------------------
 INSERT INTO NguoiDung
-  (MaNguoiDung, HoTen, Email, SoDienThoai, MatKhauMaHoa, AnhDaiDien, VaiTro, TrangThai, LyDoKhoa, NgayTao)
+  (MaNguoiDung, HoTen, Email, SoDienThoai, MatKhauMaHoa, VaiTro, TrangThai, LyDoKhoa, NgayTao)
 VALUES
-  (2,  'Nguyễn Minh Khoa', 'khoa.owner@badminton.local', '0912345671', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/owner2.jpg', 'owner', 'active', NULL, '2026-07-30 09:00:00'),
-  (3,  'Trần Thị Lan',     'lan.owner@badminton.local',  '0912345672', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/owner3.jpg', 'owner', 'active', NULL, '2026-08-05 10:30:00'),
-  (4,  'Lê Quốc Bảo',      'bao.owner@badminton.local',  '0912345673', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                          'owner', 'active', NULL, '2026-10-29 08:45:00'),
-  (5,  'Phạm Hữu Đức',     'duc.owner@badminton.local',  '0912345674', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                          'owner', 'active', NULL, '2026-10-18 15:20:00'),
-  (6,  'Nguyễn Thị Mai',  'mai.nguyen@gmail.com',  '0901234561', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/kh6.jpg', 'customer', 'active', NULL, '2026-08-20 19:00:00'),
-  (7,  'Trần Văn Nam',    'nam.tran@gmail.com',    '0901234562', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-08-25 20:10:00'),
-  (8,  'Lê Hoàng Phúc',   'phuc.le@gmail.com',     '0901234563', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-09-02 08:30:00'),
-  (9,  'Phạm Thu Hà',     'ha.pham@gmail.com',     '0901234564', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', '/uploads/avatar/kh9.jpg', 'customer', 'active', NULL, '2026-09-10 21:00:00'),
-  (10, 'Nguyễn Văn Hùng', 'hung.nguyen@gmail.com', '0903456789', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'active', NULL, '2026-09-15 18:00:00'),
-  (11, 'Đỗ Quang Vinh',   'vinh.do@gmail.com',     '0901234566', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', NULL,                      'customer', 'locked', 'Nhiều lần đặt sân nhưng không đến', '2026-09-20 12:00:00');
+  (2,  'Nguyễn Minh Khoa', 'khoa.owner@badminton.local', '0912345671', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-07-30 09:00:00'),
+  (3,  'Trần Thị Lan',     'lan.owner@badminton.local',  '0912345672', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-08-05 10:30:00'),
+  (4,  'Lê Quốc Bảo',      'bao.owner@badminton.local',  '0912345673', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-29 08:45:00'),
+  (5,  'Phạm Hữu Đức',     'duc.owner@badminton.local',  '0912345674', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-18 15:20:00'),
+  (6,  'Nguyễn Thị Mai',  'mai.nguyen@gmail.com',  '0901234561', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-08-20 19:00:00'),
+  (7,  'Trần Văn Nam',    'nam.tran@gmail.com',    '0901234562', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-08-25 20:10:00'),
+  (8,  'Lê Hoàng Phúc',   'phuc.le@gmail.com',     '0901234563', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-09-02 08:30:00'),
+  (9,  'Phạm Thu Hà',     'ha.pham@gmail.com',     '0901234564', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-09-10 21:00:00'),
+  (10, 'Nguyễn Văn Hùng', 'hung.nguyen@gmail.com', '0903456789', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-09-15 18:00:00'),
+  (11, 'Đỗ Quang Vinh',   'vinh.do@gmail.com',     '0901234566', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'locked', 'Nhiều lần đặt sân nhưng không đến', '2026-09-20 12:00:00');
 
 -- ---------------------------------------------------------------------
 -- 2. HoSoChuSan: đủ 4 trạng thái approved / approved / pending / rejected
@@ -457,57 +439,57 @@ INSERT INTO HoSoChuSan
   (MaNguoiDung, TenDoanhNghiep, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan,
    TrangThaiDuyet, NgayGuiDuyet, NgayDuyet, MaQuanTriDuyet, LyDoTuChoi)
 VALUES
-  (2, 'Công ty TNHH Thể thao Thành Công', 'Vietcombank', '970436', '0071001234567', 'NGUYEN MINH KHOA',
+  (2, 'Công ty TNHH Thể thao Thành Công', 'Vietcombank', 'VCB', '0071001234567', 'NGUYEN MINH KHOA',
       'approved', '2026-08-01 09:15:00', '2026-08-02 14:30:00', 1, NULL),
-  (3, 'Hộ kinh doanh Lan Sport',          'MB Bank',     '970422', '8888012345',    'TRAN THI LAN',
+  (3, 'Hộ kinh doanh Lan Sport',          'MB Bank',     'MB', '8888012345',    'TRAN THI LAN',
       'approved', '2026-08-06 11:00:00', '2026-08-08 10:00:00', 1, NULL),
-  (4, 'Cầu lông Bảo Long',                'Techcombank', '970407', '19036789012345', 'LE QUOC BAO',
+  (4, 'Cầu lông Bảo Long',                'Techcombank', 'TCB', '19036789012345', 'LE QUOC BAO',
       'pending',  '2026-10-30 16:20:00', NULL, NULL, NULL),
-  (5, 'Sân bóng Dương Phát',      'ACB',         '970416', '245678901',     'PHAM HUU DUONG',
+  (5, 'Sân bóng Dương Phát',      'ACB',         'ACB', '245678901',     'PHAM HUU DUONG',
       'rejected', '2026-10-20 10:00:00', '2026-10-22 09:30:00', 1, 'Tên chủ tài khoản ngân hàng không khớp với hồ sơ đăng ký');
 
 -- ---------------------------------------------------------------------
 -- 3. CoSo (điểm đánh giá khớp với bảng DanhGia bên dưới)
 -- ---------------------------------------------------------------------
 INSERT INTO CoSo
-  (MaCoSo, MaChuSan, TenCoSo, DiaChi, SoDienThoai, Zalo, LinkBanDo, TinhThanh, QuanHuyen, ViDo, KinhDo,
-   MoTa, TienIch, GioMoCua, GioDongCua, SoPhutDatToiThieu, GiaThapNhat, TrangThai, LyDoKhoa, DiemTrungBinh, SoDanhGia, NgayTao)
+  (MaCoSo, MaChuSan, TenCoSo, DiaChi, SoDienThoai, LinkBanDo, TinhThanh, QuanHuyen, ViDo, KinhDo,
+   MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, GiaThapNhat, TrangThai, LyDoKhoa, DiemTrungBinh, SoDanhGia, NgayTao)
 VALUES
-  (1, 2, 'Cầu Lông Thành Công', '123 Trường Chinh, Phường 13', '0912345671', '0912345671',
+  (1, 2, 'Cầu Lông Thành Công', '123 Trường Chinh, Phường 13', '0912345671',
      'https://maps.google.com/?q=10.8012,106.6399', 'TP. Hồ Chí Minh', 'Tân Bình', 10.801200, 106.639900,
      'Nhà thi đấu 4 sân thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.',
-     JSON_ARRAY('parking','toilet','locker_room','water','wifi'), '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.7, 3, '2026-08-03 15:00:00'),
-  (2, 2, 'Cầu Lông Thành Công - Gò Vấp', '45 Quang Trung, Phường 10', '0912345679', 'https://zalo.me/0912345671',
-     NULL, 'TP. Hồ Chí Minh', 'Gò Vấp', 10.838500, 106.665100,
+     '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.7, 3, '2026-08-03 15:00:00'),
+  (2, 2, 'Cầu Lông Thành Công - Gò Vấp', '45 Quang Trung, Phường 10', '0912345679',
+     'https://maps.google.com/?q=10.8385,106.6651', 'TP. Hồ Chí Minh', 'Gò Vấp', 10.838500, 106.665100,
      'Cơ sở 2 với 3 sân, có căng-tin phục vụ nước uống.',
-     JSON_ARRAY('parking','toilet','canteen'), '05:30:00', '22:30:00', 60, 55000, 'active', NULL, 3.0, 1, '2026-08-10 09:00:00'),
-  (3, 3, 'Lan Sport Arena', '88 Võ Văn Ngân, Phường Linh Chiểu', '0912345672', '0912345672',
+     '05:30:00', '22:30:00', 60, 55000, 'active', NULL, 3.0, 1, '2026-08-10 09:00:00'),
+  (3, 3, 'Lan Sport Arena', '88 Võ Văn Ngân, Phường Linh Chiểu', '0912345672',
      'https://maps.google.com/?q=10.8506,106.7719', 'TP. Hồ Chí Minh', 'Thủ Đức', 10.850600, 106.771900,
      'Khu liên hợp 4 sân cầu lông chất lượng cao gần các trường đại học, có chỗ để xe rộng.',
-     JSON_ARRAY('parking','toilet','locker_room','shop','air_conditioner'), '06:00:00', '22:00:00', 60, 70000, 'active', NULL, 4.0, 1, '2026-08-12 10:00:00'),
-  (4, 4, 'Bảo Long Badminton', '25 Điện Biên Phủ, Phường 25', '0912345673', NULL,
-     NULL, 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.797000, 106.710000,
+     '06:00:00', '22:00:00', 60, 70000, 'active', NULL, 4.0, 1, '2026-08-12 10:00:00'),
+  (4, 4, 'Bảo Long Badminton', '25 Điện Biên Phủ, Phường 25', '0912345673',
+     'https://maps.google.com/?q=10.797,106.71', 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.797000, 106.710000,
      'Cơ sở mới đang chờ duyệt hồ sơ chủ sân.',
-     JSON_ARRAY('parking','toilet'), '06:00:00', '22:00:00', 60, 50000, 'hidden', NULL, 0.0, 0, '2026-10-30 16:00:00'),
-  (5, 3, 'Lan Sport Mini', '12 Kha Vạn Cân, Phường Linh Đông', '0912345675', NULL,
-     NULL, 'TP. Hồ Chí Minh', 'Thủ Đức', 10.846000, 106.751000,
+     '06:00:00', '22:00:00', 60, 50000, 'hidden', NULL, 0.0, 0, '2026-10-30 16:00:00'),
+  (5, 3, 'Lan Sport Mini', '12 Kha Vạn Cân, Phường Linh Đông', '0912345675',
+     'https://maps.google.com/?q=10.846,106.751', 'TP. Hồ Chí Minh', 'Thủ Đức', 10.846000, 106.751000,
      'Cơ sở nhỏ 2 sân.',
-     JSON_ARRAY('parking'), '06:00:00', '21:00:00', 60, 65000, 'locked', 'Nhiều báo cáo về thông tin giá không đúng thực tế', 0.0, 0, '2026-09-01 08:00:00');
+     '06:00:00', '21:00:00', 60, 65000, 'locked', 'Nhiều báo cáo về thông tin giá không đúng thực tế', 0.0, 0, '2026-09-01 08:00:00');
 
 -- ---------------------------------------------------------------------
 -- 4. AnhCoSo
 -- ---------------------------------------------------------------------
 INSERT INTO AnhCoSo (MaAnh, MaCoSo, DuongDan, LaAnhBia, ThuTu) VALUES
-  (1,  1, '/uploads/coso/1/bia.jpg', 1, 0),
-  (2,  1, '/uploads/coso/1/san-1.jpg', 0, 1),
-  (3,  1, '/uploads/coso/1/khu-thay-do.jpg', 0, 2),
-  (4,  2, '/uploads/coso/2/bia.jpg', 1, 0),
-  (5,  2, '/uploads/coso/2/canteen.jpg', 0, 1),
-  (6,  3, '/uploads/coso/3/bia.jpg', 1, 0),
-  (7,  3, '/uploads/coso/3/san-2.jpg', 0, 1),
-  (8,  3, '/uploads/coso/3/bai-xe.jpg', 0, 2),
-  (9,  4, '/uploads/coso/4/bia.jpg', 1, 0),
-  (10, 5, '/uploads/coso/5/bia.jpg', 1, 0);
+  (1,  1, '/tep-tai-len/coso/1/bia.jpg', 1, 0),
+  (2,  1, '/tep-tai-len/coso/1/san-1.jpg', 0, 1),
+  (3,  1, '/tep-tai-len/coso/1/khu-thay-do.jpg', 0, 2),
+  (4,  2, '/tep-tai-len/coso/2/bia.jpg', 1, 0),
+  (5,  2, '/tep-tai-len/coso/2/canteen.jpg', 0, 1),
+  (6,  3, '/tep-tai-len/coso/3/bia.jpg', 1, 0),
+  (7,  3, '/tep-tai-len/coso/3/san-2.jpg', 0, 1),
+  (8,  3, '/tep-tai-len/coso/3/bai-xe.jpg', 0, 2),
+  (9,  4, '/tep-tai-len/coso/4/bia.jpg', 1, 0),
+  (10, 5, '/tep-tai-len/coso/5/bia.jpg', 1, 0);
 
 -- ---------------------------------------------------------------------
 -- 5. San (id 1-4: CS1 | 5-7: CS2 | 8-11: CS3 | 12-13: CS4 | 14-15: CS5)
@@ -541,52 +523,38 @@ INSERT INTO KhoaSan (MaKhoa, MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUE
 -- ---------------------------------------------------------------------
 -- 7. BangGia
 -- ---------------------------------------------------------------------
-INSERT INTO BangGia (MaCoSo, TenKhungGia, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES
+INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES
   -- CS1
-  (1, 'Thấp điểm', 'weekday', 'walk_in', '06:00:00', '16:00:00',  60000),
-  (1, 'Cao điểm',  'weekday', 'walk_in', '16:00:00', '22:00:00', 100000),
-  (1, 'Thấp điểm', 'weekend', 'walk_in', '06:00:00', '16:00:00',  90000),
-  (1, 'Cao điểm',  'weekend', 'walk_in', '16:00:00', '22:00:00', 130000),
-  (1, 'Thấp điểm', 'weekday', 'fixed',   '06:00:00', '16:00:00',  50000),
-  (1, 'Cao điểm',  'weekday', 'fixed',   '16:00:00', '22:00:00',  80000),
-  (1, 'Cả ngày',   'weekend', 'fixed',   '06:00:00', '22:00:00', 100000),
+  (1, 'weekday', 'walk_in', '06:00:00', '16:00:00',  60000),
+  (1, 'weekday', 'walk_in', '16:00:00', '22:00:00', 100000),
+  (1, 'weekend', 'walk_in', '06:00:00', '16:00:00',  90000),
+  (1, 'weekend', 'walk_in', '16:00:00', '22:00:00', 130000),
+  (1, 'weekday', 'fixed',   '06:00:00', '16:00:00',  50000),
+  (1, 'weekday', 'fixed',   '16:00:00', '22:00:00',  80000),
+  (1, 'weekend', 'fixed',   '06:00:00', '22:00:00', 100000),
   -- CS2
-  (2, 'Thấp điểm', 'weekday', 'walk_in', '05:30:00', '16:00:00',  55000),
-  (2, 'Cao điểm',  'weekday', 'walk_in', '16:00:00', '22:30:00',  90000),
-  (2, 'Thấp điểm', 'weekend', 'walk_in', '05:30:00', '16:00:00',  85000),
-  (2, 'Cao điểm',  'weekend', 'walk_in', '16:00:00', '22:30:00', 120000),
-  (2, 'Cả ngày',   'weekday', 'fixed',   '05:30:00', '22:30:00',  70000),
-  (2, 'Cả ngày',   'weekend', 'fixed',   '05:30:00', '22:30:00',  95000),
+  (2, 'weekday', 'walk_in', '05:30:00', '16:00:00',  55000),
+  (2, 'weekday', 'walk_in', '16:00:00', '22:30:00',  90000),
+  (2, 'weekend', 'walk_in', '05:30:00', '16:00:00',  85000),
+  (2, 'weekend', 'walk_in', '16:00:00', '22:30:00', 120000),
+  (2, 'weekday', 'fixed',   '05:30:00', '22:30:00',  70000),
+  (2, 'weekend', 'fixed',   '05:30:00', '22:30:00',  95000),
   -- CS3
-  (3, 'Thấp điểm', 'weekday', 'walk_in', '06:00:00', '16:00:00',  70000),
-  (3, 'Cao điểm',  'weekday', 'walk_in', '16:00:00', '22:00:00', 110000),
-  (3, 'Thấp điểm', 'weekend', 'walk_in', '06:00:00', '16:00:00', 100000),
-  (3, 'Cao điểm',  'weekend', 'walk_in', '16:00:00', '22:00:00', 140000),
-  (3, 'Thấp điểm', 'weekday', 'fixed',   '06:00:00', '16:00:00',  55000),
-  (3, 'Cao điểm',  'weekday', 'fixed',   '16:00:00', '22:00:00',  90000),
-  (3, 'Cả ngày',   'weekend', 'fixed',   '06:00:00', '22:00:00', 110000),
+  (3, 'weekday', 'walk_in', '06:00:00', '16:00:00',  70000),
+  (3, 'weekday', 'walk_in', '16:00:00', '22:00:00', 110000),
+  (3, 'weekend', 'walk_in', '06:00:00', '16:00:00', 100000),
+  (3, 'weekend', 'walk_in', '16:00:00', '22:00:00', 140000),
+  (3, 'weekday', 'fixed',   '06:00:00', '16:00:00',  55000),
+  (3, 'weekday', 'fixed',   '16:00:00', '22:00:00',  90000),
+  (3, 'weekend', 'fixed',   '06:00:00', '22:00:00', 110000),
   -- CS4
-  (4, 'Thấp điểm', 'weekday', 'walk_in', '06:00:00', '16:00:00',  50000),
-  (4, 'Cao điểm',  'weekday', 'walk_in', '16:00:00', '22:00:00',  80000),
-  (4, 'Cả ngày',   'weekend', 'walk_in', '06:00:00', '22:00:00', 100000),
-  (4, 'Cả ngày',   'weekday', 'fixed',   '06:00:00', '22:00:00',  45000),
+  (4, 'weekday', 'walk_in', '06:00:00', '16:00:00',  50000),
+  (4, 'weekday', 'walk_in', '16:00:00', '22:00:00',  80000),
+  (4, 'weekend', 'walk_in', '06:00:00', '22:00:00', 100000),
+  (4, 'weekday', 'fixed',   '06:00:00', '22:00:00',  45000),
   -- CS5
-  (5, 'Cả ngày',   'weekday', 'walk_in', '06:00:00', '21:00:00',  65000),
-  (5, 'Cả ngày',   'weekend', 'walk_in', '06:00:00', '21:00:00',  90000);
-
--- ---------------------------------------------------------------------
--- 8. YeuCauRutTien (tài khoản nhận được chụp lại tại thời điểm rút)
--- ---------------------------------------------------------------------
-INSERT INTO YeuCauRutTien
-  (MaYeuCau, MaChuSan, SoTien, TrangThai, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan,
-   NgayYeuCau, MaQuanTriXuLy, NgayXuLy, MaGiaoDich, LyDoTuChoi)
-VALUES
-  (1, 2, 495000, 'paid',     'Vietcombank', '970436', '0071001234567', 'NGUYEN MINH KHOA',
-     '2026-10-27 09:00:00', 1, '2026-10-27 15:30:00', 'FT26300123456', NULL),
-  (2, 3, 180000, 'pending',  'MB Bank',     '970422', '8888012345',    'TRAN THI LAN',
-     '2026-10-30 10:15:00', NULL, NULL, NULL, NULL),
-  (3, 2,  50000, 'rejected', 'Vietcombank', '970436', '0071001234567', 'NGUYEN MINH KHOA',
-     '2026-10-15 08:00:00', 1, '2026-10-15 11:00:00', NULL, 'Số tiền thấp hơn mức rút tối thiểu 100.000đ');
+  (5, 'weekday', 'walk_in', '06:00:00', '21:00:00',  65000),
+  (5, 'weekend', 'walk_in', '06:00:00', '21:00:00',  90000);
 
 -- ---------------------------------------------------------------------
 -- 9. LichCoDinh
@@ -603,106 +571,78 @@ VALUES
 -- ---------------------------------------------------------------------
 -- 10. DatSan
 --   Công thức: TongTien theo BangGia; PhiNenTang = 10% (đơn app), 0 (đơn owner)
---   Đơn 1,2,3 đã gộp vào yêu cầu rút 1 (paid); đơn 4 vào yêu cầu rút 2 (pending)
 -- ---------------------------------------------------------------------
 INSERT INTO DatSan
   (MaDatSan, MaDon, MaKhachHang, TenKhach, SoDienThoaiLienHe, GhiChu, Nguon, LoaiKhach, MaLichCoDinh,
    MaSan, NgayChoi, GioBatDau, GioKetThuc, SoPhut, TongTien, PhiNenTang, TienChuSan,
-   TrangThaiThu, NgayThu, TrangThai, HetHanGiuCho, NguoiHuy, LyDoHuy, NgayHuy, MaYeuCauRutTien, NgayTao)
+   TrangThaiThu, NgayThu, TrangThai, HetHanGiuCho, NguoiHuy, LyDoHuy, NgayHuy, NgayTao)
 VALUES
   -- Đơn app đã hoàn thành
   (1,  'BK20261020001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
        1, '2026-10-20', '18:00:00', '20:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, 1, '2026-10-18 20:00:00'),
+       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-18 20:00:00'),
   (2,  'BK20261022001', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
        2, '2026-10-22', '07:00:00', '08:30:00', 90, 90000, 9000, 81000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, 1, '2026-10-21 21:00:00'),
+       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-21 21:00:00'),
   (3,  'BK20261024001', 8, 'Lê Hoàng Phúc',   '0901234563', 'Cần thêm 1 hộp cầu', 'app', 'walk_in', NULL,
        3, '2026-10-24', '17:00:00', '19:00:00', 120, 260000, 26000, 234000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, 1, '2026-10-22 09:30:00'),
+       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-22 09:30:00'),
   (4,  'BK20261025001', 9, 'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
        8, '2026-10-25', '09:00:00', '11:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, 2, '2026-10-23 18:00:00'),
+       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-23 18:00:00'),
   (5,  'BK20261026001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
        5, '2026-10-26', '19:00:00', '20:00:00', 60, 90000, 9000, 81000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, NULL, '2026-10-25 22:00:00'),
+       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-25 22:00:00'),
   -- Đơn owner: lịch cố định đã chơi
   (6,  'BK20261029001', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'owner', 'fixed', 1,
        1, '2026-10-29', '19:00:00', '21:00:00', 120, 160000, 0, 160000,
-       'paid', '2026-10-29 21:05:00', 'completed', NULL, NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
+       'paid', '2026-10-29 21:05:00', 'completed', NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
   (7,  'BK20261031001', NULL, 'CLB Cầu Lông Sáng Sớm', '0988777666', NULL, 'owner', 'fixed', 2,
        8, '2026-10-31', '06:00:00', '08:00:00', 120, 220000, 0, 220000,
-       'unpaid', NULL, 'completed', NULL, NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
+       'unpaid', NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
   -- Đơn owner: khách vãng lai tại chỗ
   (8,  'BK20261030001', NULL, 'Anh Tuấn', '0977123456', 'Khách đặt trực tiếp', 'owner', 'walk_in', NULL,
        2, '2026-10-30', '18:00:00', '19:30:00', 90, 150000, 0, 150000,
-       'paid', '2026-10-30 19:35:00', 'completed', NULL, NULL, NULL, NULL, NULL, '2026-10-30 17:50:00'),
+       'paid', '2026-10-30 19:35:00', 'completed', NULL, NULL, NULL, NULL, '2026-10-30 17:50:00'),
   -- Đơn owner: lịch cố định sắp tới
   (9,  'BK20261101001', NULL, 'CLB Cầu Lông Sáng Sớm', '0988777666', NULL, 'owner', 'fixed', 2,
        8, '2026-11-01', '06:00:00', '08:00:00', 120, 220000, 0, 220000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
+       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
   (10, 'BK20261103001', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'owner', 'fixed', 1,
        1, '2026-11-03', '19:00:00', '21:00:00', 120, 160000, 0, 160000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
+       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
   (11, 'BK20261105001', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'owner', 'fixed', 1,
        1, '2026-11-05', '19:00:00', '21:00:00', 120, 160000, 0, 160000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
+       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
   (12, 'BK20261107001', NULL, 'CLB Cầu Lông Sáng Sớm', '0988777666', NULL, 'owner', 'fixed', 2,
        8, '2026-11-07', '06:00:00', '08:00:00', 120, 220000, 0, 220000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
+       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
   -- Đơn app sắp tới đã thanh toán
   (13, 'BK20261102001', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
        3, '2026-11-02', '18:00:00', '20:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-30 21:00:00'),
+       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-30 21:00:00'),
   (14, 'BK20261107002', 8, 'Lê Hoàng Phúc',   '0901234563', NULL, 'app', 'walk_in', NULL,
        4, '2026-11-07', '15:00:00', '17:00:00', 120, 220000, 22000, 198000,
-       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-31 08:00:00'),
+       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-31 08:00:00'),
   (15, 'BK20261101002', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'app', 'walk_in', NULL,
        6, '2026-11-01', '08:00:00', '10:00:00', 120, 170000, 17000, 153000,
-       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, NULL, '2026-10-31 09:30:00'),
+       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-31 09:30:00'),
   -- Đơn đang giữ chỗ (chưa thanh toán)
   (16, 'BK20261031002', 9, 'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
-       9, '2026-11-21', '20:00:00', '21:00:00', 60, 110000, 11000, 99000,
-       NULL, NULL, 'pending_payment', DATE_ADD(NOW(), INTERVAL 1 DAY), NULL, NULL, NULL, NULL, '2026-10-31 13:35:00'),
+       9, '2026-11-02', '20:00:00', '21:00:00', 60, 110000, 11000, 99000,
+       NULL, NULL, 'pending_payment', '2026-10-31 13:45:00', NULL, NULL, NULL, '2026-10-31 13:35:00'),
   -- Đơn bị hủy bởi khách (hủy sớm, hoàn 100%)
   (17, 'BK20261028001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
        1, '2026-11-04', '18:00:00', '19:00:00', 60, 100000, 10000, 90000,
-       NULL, NULL, 'cancelled', NULL, 'customer', 'Khách bận đột xuất', '2026-10-28 20:00:00', NULL, '2026-10-28 09:00:00'),
+       NULL, NULL, 'cancelled', NULL, 'customer', 'Khách bận đột xuất', '2026-10-28 20:00:00', '2026-10-28 09:00:00'),
   -- Đơn hết hạn giữ chỗ
   (18, 'BK20261029002', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
        2, '2026-11-01', '10:00:00', '11:00:00', 60, 90000, 9000, 81000,
-       NULL, NULL, 'expired', '2026-10-29 10:10:00', 'system', 'Hết hạn giữ chỗ', '2026-10-29 10:10:00', NULL, '2026-10-29 10:00:00'),
+       NULL, NULL, 'expired', '2026-10-29 10:10:00', 'system', 'Hết hạn giữ chỗ', '2026-10-29 10:10:00', '2026-10-29 10:00:00'),
   -- Đơn app bị chủ sân hủy (hoàn 100%)
   (19, 'BK20261027001', 8, 'Lê Hoàng Phúc',   '0901234563', NULL, 'app', 'walk_in', NULL,
        4, '2026-11-06', '19:00:00', '21:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'cancelled', NULL, 'owner', 'Sân bảo trì đột xuất', '2026-10-30 08:00:00', NULL, '2026-10-27 19:00:00'),
-  -- Đơn app khách đã gửi ảnh chuyển khoản, ĐANG CHỜ CHỦ SÂN XÁC NHẬN (dùng để test nút xác nhận)
-  (20, 'BK20261120001', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
-       3, '2026-11-20', '18:00:00', '19:00:00', 60, 100000, 10000, 90000,
-       NULL, NULL, 'pending_payment', DATE_ADD(NOW(), INTERVAL 1 DAY), NULL, NULL, NULL, NULL, NOW());
-
--- ---------------------------------------------------------------------
--- 10b. ThanhToan cho mọi đơn app (đơn owner không có thanh toán)
---   success: chủ sân đã xác nhận | pending: chờ khách chuyển khoản | confirming: chờ chủ sân xác nhận
---   Đơn hủy đã thanh toán: TrangThaiHoanTien = processing (chủ sân chuyển khoản hoàn rồi bấm hoàn thành)
--- ---------------------------------------------------------------------
-INSERT INTO ThanhToan
-  (MaThanhToan, MaDatSan, SoTien, TrangThai, NoiDungChuyenKhoan, AnhChuyenKhoan, NgayGuiAnh,
-   MaNguoiXacNhan, VaiTroXacNhan, NgayThanhToan, TrangThaiHoanTien, SoTienHoan, NgayTao)
-VALUES
-  (1,  1,  200000, 'success', 'BK20261020001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-18 20:01:00', 2, 'owner', '2026-10-18 20:03:00', 'none', 0, '2026-10-18 20:00:00'),
-  (2,  2,   90000, 'success', 'BK20261022001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-21 21:01:00', 2, 'owner', '2026-10-21 21:05:00', 'none', 0, '2026-10-21 21:00:00'),
-  (3,  3,  260000, 'success', 'BK20261024001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-22 09:31:00', 2, 'owner', '2026-10-22 09:40:00', 'none', 0, '2026-10-22 09:30:00'),
-  (4,  4,  200000, 'success', 'BK20261025001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-23 18:01:00', 3, 'owner', '2026-10-23 18:10:00', 'none', 0, '2026-10-23 18:00:00'),
-  (5,  5,   90000, 'success', 'BK20261026001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-25 22:01:00', 2, 'owner', '2026-10-25 22:10:00', 'none', 0, '2026-10-25 22:00:00'),
-  (6,  13, 200000, 'success', 'BK20261102001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-30 21:01:00', 2, 'owner', '2026-10-30 21:03:00', 'none', 0, '2026-10-30 21:00:00'),
-  (7,  14, 220000, 'success', 'BK20261107002', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-31 08:01:00', 2, 'owner', '2026-10-31 08:05:00', 'none', 0, '2026-10-31 08:00:00'),
-  (8,  15, 170000, 'success', 'BK20261101002', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-31 09:31:00', 2, 'owner', '2026-10-31 09:40:00', 'none', 0, '2026-10-31 09:30:00'),
-  (9,  16, 110000, 'pending', 'BK20261031002', NULL, NULL, NULL, NULL, NULL, 'none', 0, '2026-10-31 13:35:00'),
-  (10, 17, 100000, 'success', 'BK20261028001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-28 09:01:00', 2, 'owner', '2026-10-28 09:10:00', 'processing', 100000, '2026-10-28 09:00:00'),
-  (11, 18,  90000, 'expired', 'BK20261029002', NULL, NULL, NULL, NULL, NULL, 'none', 0, '2026-10-29 10:00:00'),
-  (12, 19, 200000, 'success', 'BK20261027001', '/tep-tai-len/demo-chuyen-khoan.png', '2026-10-27 19:01:00', 2, 'owner', '2026-10-27 19:10:00', 'processing', 200000, '2026-10-27 19:00:00'),
-  (13, 20, 100000, 'confirming', 'BK20261120001', '/tep-tai-len/demo-chuyen-khoan.png', NOW(), NULL, NULL, NULL, 'none', 0, NOW());
+       NULL, NULL, 'cancelled', NULL, 'owner', 'Sân bảo trì đột xuất', '2026-10-30 08:00:00', '2026-10-27 19:00:00');
 
 -- ---------------------------------------------------------------------
 -- 11. DanhGia (đơn app đã completed) - khớp DiemTrungBinh/SoDanhGia của CoSo
@@ -727,16 +667,6 @@ INSERT INTO YeuThich (MaKhachHang, MaCoSo, NgayTao) VALUES
   (11, 2, '2026-09-25 08:00:00');
 
 -- ---------------------------------------------------------------------
--- 13. ThietBi (FCM token mẫu)
--- ---------------------------------------------------------------------
-INSERT INTO ThietBi (MaNguoiDung, TokenFcm, NenTang) VALUES
-  (6,  'fcm_token_demo_user6_android_aaaaaaaaaaaaaaaaaaaaaaaa', 'android'),
-  (7,  'fcm_token_demo_user7_ios_bbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'ios'),
-  (8,  'fcm_token_demo_user8_android_cccccccccccccccccccccccc', 'android'),
-  (9,  'fcm_token_demo_user9_ios_ddddddddddddddddddddddddddddd', 'ios'),
-  (10, 'fcm_token_demo_user10_android_eeeeeeeeeeeeeeeeeeeeeee', 'android');
-
--- ---------------------------------------------------------------------
 -- 14. ThongBao (đủ cho khách, chủ sân và admin)
 -- ---------------------------------------------------------------------
 INSERT INTO ThongBao (MaNguoiDung, Loai, TieuDe, NoiDung, LoaiThamChieu, MaThamChieu, DaDoc, KhoaChongTrung, NgayTao) VALUES
@@ -744,26 +674,13 @@ INSERT INTO ThongBao (MaNguoiDung, Loai, TieuDe, NoiDung, LoaiThamChieu, MaThamC
   (6,  'booking_created',  'Đã giữ chỗ', 'Bạn đã giữ chỗ đơn BK20261020001, vui lòng thanh toán trong 10 phút.', 'booking', 1, 1, 'booking_created_1', '2026-10-18 20:00:00'),
   (6,  'payment_success',  'Thanh toán thành công', 'Đơn BK20261020001 đã được xác nhận.', 'booking', 1, 1, 'payment_success_1', '2026-10-18 20:02:00'),
   (7,  'payment_success',  'Thanh toán thành công', 'Đơn BK20261102001 đã được xác nhận.', 'booking', 13, 0, 'payment_success_13', '2026-10-30 21:03:00'),
-  (7,  'reminder',         'Nhắc lịch chơi', 'Bạn có lịch chơi tại Cầu Lông Thành Công lúc 18:00 ngày 02/11.', 'booking', 13, 0, 'reminder_13', '2026-11-02 08:00:00'),
-  (9,  'hold_expiring',    'Sắp hết hạn giữ chỗ', 'Đơn BK20261031002 sẽ hết hạn giữ chỗ lúc 13:45.', 'booking', 16, 0, 'hold_expiring_16', '2026-10-31 13:40:00'),
   (6,  'booking_cancelled','Hủy đơn thành công', 'Đơn BK20261028001 đã hủy, bạn được hoàn 100% số tiền.', 'booking', 17, 1, 'booking_cancelled_17', '2026-10-28 20:00:00'),
-  (6,  'refund',           'Hoàn tiền', 'Vui lòng cung cấp tài khoản nhận hoàn tiền cho đơn BK20261028001.', 'booking', 17, 0, 'refund_17', '2026-10-28 20:05:00'),
   (8,  'booking_cancelled','Chủ sân hủy đơn', 'Đơn BK20261027001 bị chủ sân hủy do bảo trì sân, bạn được hoàn 100%.', 'booking', 19, 0, 'booking_cancelled_19', '2026-10-30 08:00:00'),
   (7,  'payment_failed',   'Hết hạn giữ chỗ', 'Đơn BK20261029002 đã hết hạn do chưa thanh toán.', 'booking', 18, 1, 'payment_failed_18', '2026-10-29 10:10:00'),
   (6,  'system',           'Chào mừng', 'Chào mừng bạn đến với hệ thống đặt sân cầu lông!', NULL, NULL, 1, 'system_welcome_6', '2026-08-20 19:00:00'),
   -- Chủ sân
-  (2,  'owner_approved',   'Hồ sơ đã được duyệt', 'Hồ sơ chủ sân của bạn đã được duyệt. Bạn có thể bắt đầu đăng cơ sở.', 'owner', 2, 1, 'owner_approved_2', '2026-08-02 14:30:00'),
-  (3,  'owner_approved',   'Hồ sơ đã được duyệt', 'Hồ sơ chủ sân của bạn đã được duyệt.', 'owner', 3, 1, 'owner_approved_3', '2026-08-08 10:00:00'),
-  (5,  'owner_rejected',   'Hồ sơ bị từ chối', 'Lý do: Tên chủ tài khoản ngân hàng không khớp với hồ sơ đăng ký. Vui lòng chỉnh sửa và gửi lại.', 'owner', 5, 0, 'owner_rejected_5', '2026-10-22 09:30:00'),
   (2,  'new_booking_for_owner', 'Có đơn đặt mới', 'Đơn BK20261107002 vừa được đặt tại Sân 4.', 'booking', 14, 0, 'new_booking_14', '2026-10-31 08:00:00'),
-  (3,  'new_booking_for_owner', 'Có đơn đặt mới', 'Đơn BK20261102001 vừa được đặt tại Cầu Lông Thành Công.', 'booking', 13, 1, 'new_booking_13', '2026-10-30 21:03:00'),
-  (2,  'payout_paid',      'Đã chuyển tiền rút', 'Yêu cầu rút 495.000đ đã được chuyển khoản (mã FT26300123456).', 'payout', 1, 1, 'payout_paid_1', '2026-10-27 15:30:00'),
-  (2,  'payout_rejected',  'Yêu cầu rút bị từ chối', 'Yêu cầu rút 50.000đ bị từ chối: dưới mức rút tối thiểu.', 'payout', 3, 1, 'payout_rejected_3', '2026-10-15 11:00:00'),
-  (3,  'venue_locked',     'Cơ sở bị khóa', 'Cơ sở Lan Sport Mini đã bị khóa: Nhiều báo cáo về thông tin giá không đúng thực tế.', 'venue', 5, 0, 'venue_locked_5', '2026-10-10 09:00:00'),
-  -- Admin
-  (1,  'owner_submitted',  'Hồ sơ chủ sân mới', 'Chủ sân Lê Quốc Bảo vừa gửi hồ sơ chờ duyệt.', 'owner', 4, 0, 'owner_submitted_4', '2026-10-30 16:20:00'),
-  (1,  'late_payment',     'Có giao dịch trễ', 'Có giao dịch chuyển khoản đến sau khi mã QR hết hạn, cần xem xét hoàn tiền.', 'payment', NULL, 0, 'late_payment_demo', '2026-10-29 10:30:00'),
-  (1,  'payout_paid',      'Yêu cầu rút chờ xử lý', 'Chủ sân Trần Thị Lan gửi yêu cầu rút 180.000đ.', 'payout', 2, 0, 'payout_pending_2', '2026-10-30 10:15:00');
+  (3,  'new_booking_for_owner', 'Có đơn đặt mới', 'Đơn BK20261102001 vừa được đặt tại Cầu Lông Thành Công.', 'booking', 13, 1, 'new_booking_13', '2026-10-30 21:03:00');
 
 -- ---------------------------------------------------------------------
 -- 15. NhatKyHeThong
@@ -774,8 +691,6 @@ INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiT
   (1, 'tu_choi_chu_san', 'NguoiDung', 5, 'Từ chối: tên chủ tài khoản không khớp hồ sơ', '2026-10-22 09:30:00'),
   (1, 'khoa_co_so',      'CoSo',      5, 'Khóa cơ sở Lan Sport Mini: báo cáo sai thông tin giá', '2026-10-10 09:00:00'),
   (1, 'khoa_tai_khoan',  'NguoiDung', 11, 'Khóa tài khoản: nhiều lần đặt sân không đến', '2026-10-12 14:00:00'),
-  (1, 'xu_ly_rut_tien',  'YeuCauRutTien', 1, 'Đã chuyển khoản 495.000đ, mã FT26300123456', '2026-10-27 15:30:00'),
-  (1, 'xu_ly_rut_tien',  'YeuCauRutTien', 3, 'Từ chối: dưới mức rút tối thiểu', '2026-10-15 11:00:00'),
   (2, 'huy_don_uu_tien', 'DatSan',    19, 'Chủ sân hủy đơn BK20261027001, hoàn 100% cho khách', '2026-10-30 08:00:00');
 
 -- ---------------------------------------------------------------------
@@ -788,3 +703,4 @@ INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiT
 -- SELECT 'DatSan', COUNT(*) FROM DatSan UNION ALL
 -- SELECT 'DanhGia', COUNT(*) FROM DanhGia;
 -- Hoan tat import schema
+SET FOREIGN_KEY_CHECKS = 1;

@@ -92,6 +92,18 @@ async function baoChuSan(ketNoi, nguoi, maChuSan, maCoSo, tieuDe, noiDung) {
   });
 }
 
+// Cơ sở `hidden` tự hiện cho khách (`active`) khi đã có ≥1 sân hoạt động + có bảng giá + chủ sân đã được duyệt.
+// Dùng chung cho: mở sân, mở lại cơ sở, thêm bảng giá, tạo sân (ownerService).
+async function kichHoatCoSoNeuSanSang(ketNoi, maCoSo) {
+  await ketNoi.query(
+    `UPDATE CoSo cs SET cs.TrangThai='active'
+     WHERE cs.MaCoSo=? AND cs.TrangThai='hidden'
+       AND EXISTS (SELECT 1 FROM San WHERE MaCoSo=cs.MaCoSo AND TrangThai='active')
+       AND EXISTS (SELECT 1 FROM BangGia WHERE MaCoSo=cs.MaCoSo)
+       AND EXISTS (SELECT 1 FROM HoSoChuSan WHERE MaNguoiDung=cs.MaChuSan AND TrangThaiDuyet='approved')`,
+    [maCoSo]);
+}
+
 // ----- SÂN -----
 async function kiemTraDuocDongSan(ketNoi, maSan, doiTuong = 'sân', hanhDong = 'đóng') {
   chanNeuConKhach(await demKhachConLai(ketNoi, [maSan]), doiTuong, hanhDong);
@@ -117,6 +129,8 @@ async function moSan(nguoi, maSan) {
       throw AppError.biTrung('Cơ sở đang bị quản trị khoá, không thể mở sân', 'VENUE_LOCKED');
     }
     await ketNoi.query("UPDATE San SET TrangThai='active' WHERE MaSan=?", [san.maSan]);
+    // Sân mới tạo ở trạng thái chưa hoạt động: bật sân đầu tiên (đã có giá) thì cơ sở mới hiện cho khách.
+    await kichHoatCoSoNeuSanSang(ketNoi, san.maCoSo);
     await ghiNhatKy(ketNoi, nguoi, 'mo_san', 'San', san.maSan);
     return { maSan: san.maSan, trangThai: 'active' };
   });
@@ -167,13 +181,7 @@ async function moCoSo(nguoi, maCoSo) {
       throw AppError.biTrung('Chỉ mở lại được cơ sở đang đóng', 'VENUE_NOT_CLOSED');
     }
     await ketNoi.query("UPDATE CoSo SET TrangThai='hidden' WHERE MaCoSo=?", [coSo.maCoSo]);
-    await ketNoi.query(
-      `UPDATE CoSo cs SET cs.TrangThai='active'
-       WHERE cs.MaCoSo=? AND cs.TrangThai='hidden'
-         AND EXISTS (SELECT 1 FROM San WHERE MaCoSo=cs.MaCoSo AND TrangThai='active')
-         AND EXISTS (SELECT 1 FROM BangGia WHERE MaCoSo=cs.MaCoSo)
-         AND EXISTS (SELECT 1 FROM HoSoChuSan WHERE MaNguoiDung=cs.MaChuSan AND TrangThaiDuyet='approved')`,
-      [coSo.maCoSo]);
+    await kichHoatCoSoNeuSanSang(ketNoi, coSo.maCoSo);
     const [[moi]] = await ketNoi.query('SELECT TrangThai AS trangThai FROM CoSo WHERE MaCoSo=?', [coSo.maCoSo]);
     await ghiNhatKy(ketNoi, nguoi, 'mo_co_so', 'CoSo', coSo.maCoSo);
     return { maCoSo: coSo.maCoSo, trangThai: moi.trangThai };
@@ -201,7 +209,7 @@ async function xoaCoSo(nguoi, maCoSo, lyDo) {
 }
 
 module.exports = {
-  dongSan, moSan, xoaSan, dongCoSo, moCoSo, xoaCoSo,
+  dongSan, moSan, xoaSan, dongCoSo, moCoSo, xoaCoSo, kichHoatCoSoNeuSanSang,
   demKhachConLai, chanNeuConKhach, kiemTraDuocDongSan,
   MA_LOI_CON_KHACH, MA_LOI_CHUA_DONG, MA_LOI_CO_LICH_SU,
 };

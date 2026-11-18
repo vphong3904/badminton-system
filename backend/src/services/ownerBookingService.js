@@ -4,7 +4,7 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { doiGioRaPhut } = require('../utils/time');
 const khach = require('./customerService');
-const { baoKhachDaHoanTien } = require('./notificationService');
+const { baoKhachDaHoanTien, guiThongBao, dinhDangTien, rutGonVanBan } = require('./notificationService');
 const { ganTrangThaiHienThi } = require('../utils/trangThaiDon');
 
 const SO_DONG_MAC_DINH = 20;
@@ -214,5 +214,108 @@ async function taoDon(maChuSan, duLieu) {
   });
 }
 
+// Chủ sân huỷ đơn đã đặt (vd đóng sân bảo trì). Chủ sân là bên huỷ nên khách luôn được hoàn 100% số đã trả,
+// không áp chính sách 24h/12h của khách. Tiền hoàn vào hàng đợi hoàn tiền (`processing`) để chủ sân tự chuyển
+// khoản rồi bấm hoàn thành như các khoản hoàn khác.
+// - Chỉ huỷ đơn `pending_payment` / `confirmed` và chưa tới giờ chơi.
+// - Đơn khách đã gửi ảnh chuyển khoản mà chưa duyệt (`confirming`) → 409: phải duyệt hoặc từ chối thanh toán trước,
+//   tránh huỷ khi tiền đã chuyển mà chưa được ghi nhận.
+// - Đơn thuộc lịch cố định: huỷ MỌI buổi còn lại chưa tới giờ (giống khách huỷ), hoàn tổng tiền các buổi đó.
+// - Đơn chủ sân tự tạo (không có thanh toán trong hệ thống): chỉ huỷ; nếu đã thu tiền thì trả cờ để chủ sân tự hoàn ngoài hệ thống.
+const daBatDau = (ngay, gio, bayGio) => new Date(`${ngay}T${String(gio).slice(0, 8)}+07:00`).getTime() <= bayGio;
+
+async function huyDon(maChuSan, maDatSan, lyDo) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[don]] = await ketNoi.query(
+      `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaKhachHang AS maKhachHang, d.TenKhach AS tenKhach,
+         d.Nguon AS nguon, d.MaLichCoDinh AS maLichCoDinh, d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau,
+         d.TongTien AS tongTien, d.TrangThai AS trangThai, d.TrangThaiThu AS trangThaiThu,
+         s.TenSan AS tenSan, cs.TenCoSo AS tenCoSo,
+         t.MaThanhToan AS maThanhToan, t.TrangThai AS trangThaiThanhToan
+       FROM DatSan d JOIN San s ON s.MaSan = d.MaSan
+         JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo ${NOI_THANH_TOAN}
+       WHERE d.MaDatSan = ? AND cs.MaChuSan = ? FOR UPDATE`,
+      [maDatSan, maChuSan]);
+    if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
+    if (!['pending_payment', 'confirmed'].includes(don.trangThai)) {
+      throw AppError.biTrung('Đơn đặt sân không thể huỷ ở trạng thái hiện tại');
+    }
+    if (don.trangThaiThanhToan === 'confirming') {
+      throw AppError.biTrung(
+        'Khách đã gửi ảnh chuyển khoản. Hãy xác nhận hoặc từ chối thanh toán trước khi huỷ đơn.',
+        'PAYMENT_CONFIRMING');
+    }
+
+    const bayGio = Date.now();
+    if (daBatDau(don.ngay, don.gioBatDau, bayGio)) {
+      throw AppError.biTrung('Đơn đã đến giờ chơi hoặc đã qua, không thể huỷ');
+    }
+    const cacBuoi = don.maLichCoDinh
+      ? (await ketNoi.query(
+        `SELECT MaDatSan AS maDatSan, NgayChoi AS ngay, GioBatDau AS gioBatDau, TongTien AS tongTien
+         FROM DatSan WHERE MaLichCoDinh = ? AND TrangThai IN ('pending_payment','confirmed')
+         ORDER BY NgayChoi FOR UPDATE`,
+        [don.maLichCoDinh]))[0].filter((buoi) => !daBatDau(buoi.ngay, buoi.gioBatDau, bayGio))
+      : [{ maDatSan: don.maDatSan, ngay: don.ngay, gioBatDau: don.gioBatDau, tongTien: don.tongTien }];
+    const tongTienCacBuoi = cacBuoi.reduce((tong, buoi) => tong + Number(buoi.tongTien), 0);
+
+    await ketNoi.query(
+      `UPDATE DatSan SET TrangThai='cancelled', NguoiHuy='owner', LyDoHuy=?, NgayHuy=NOW()
+       WHERE MaDatSan IN (${cacBuoi.map(() => '?').join(',')})`,
+      [lyDo, ...cacBuoi.map((buoi) => buoi.maDatSan)]);
+    if (don.maLichCoDinh) {
+      await ketNoi.query("UPDATE LichCoDinh SET TrangThai='cancelled' WHERE MaLichCoDinh = ?", [don.maLichCoDinh]);
+    }
+
+    // Hoàn 100% số tiền của các buổi bị huỷ nếu khách đã trả qua hệ thống.
+    const daThanhToan = don.trangThaiThanhToan === 'success';
+    const soTienHoan = daThanhToan ? tongTienCacBuoi : 0;
+    if (don.maThanhToan) {
+      if (daThanhToan) {
+        await ketNoi.query(
+          `UPDATE ThanhToan SET SoTienHoan = ?, TrangThaiHoanTien = 'processing'
+           WHERE MaThanhToan = ? AND TrangThai = 'success'`,
+          [soTienHoan, don.maThanhToan]);
+      } else if (don.trangThaiThanhToan === 'pending') {
+        await ketNoi.query("UPDATE ThanhToan SET TrangThai='expired' WHERE MaThanhToan = ? AND TrangThai='pending'",
+          [don.maThanhToan]);
+      }
+    }
+    // Đơn chủ sân tự tạo và đã thu tiền ngoài hệ thống: chủ sân tự hoàn cho khách, hệ thống không giữ khoản này.
+    const daThuNgoaiHeThong = don.nguon === 'owner' && don.trangThaiThu === 'paid';
+
+    if (don.maKhachHang) {
+      const nhanDon = `${don.tenSan} - ${don.tenCoSo} (mã ${don.maDon})`;
+      const cauHoan = soTienHoan > 0
+        ? ` Bạn được hoàn 100% (${dinhDangTien(soTienHoan)}); chủ sân sẽ chuyển khoản hoàn cho bạn.`
+        : '';
+      await guiThongBao(ketNoi, {
+        maNguoiDung: don.maKhachHang,
+        loai: 'booking_cancelled',
+        tieuDe: 'Chủ sân đã huỷ đơn đặt sân',
+        noiDung: `Chủ sân đã huỷ ${nhanDon}. Lý do: ${rutGonVanBan(lyDo, 120)}.${cauHoan}`,
+        loaiThamChieu: 'booking',
+        maThamChieu: Number(don.maDatSan),
+        khoa: `booking_cancelled_by_owner:${don.maDatSan}`,
+      });
+    }
+
+    return {
+      daHuy: true,
+      maDatSan: Number(don.maDatSan),
+      maDon: don.maDon,
+      nguoiHuy: 'owner',
+      soBuoiHuy: cacBuoi.length,
+      daThanhToan,
+      tiLeHoan: daThanhToan ? 100 : 0,
+      soTienHoan,
+      // Có khoản phải hoàn trong hàng đợi /hoan-tien → chủ sân chuyển khoản rồi bấm hoàn thành.
+      canHoanTien: soTienHoan > 0,
+      daThuNgoaiHeThong,
+      soTienCanHoanNgoaiHeThong: daThuNgoaiHeThong ? tongTienCacBuoi : 0,
+    };
+  });
+}
+
 module.exports = {
-  taoDon, lietKeDon, layChiTietDon, lietKeHoanTien, hoanThanhHoanTien };
+  taoDon, huyDon, lietKeDon, layChiTietDon, lietKeHoanTien, hoanThanhHoanTien };

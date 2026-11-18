@@ -152,13 +152,17 @@ module.exports = {
       post: endpoint('Đổi mật khẩu', 'Tài khoản', { auth: true, body: 'DoiMatKhau' }),
     },
     '/api/khach/co-so': {
-      get: endpoint('Tìm cơ sở và sân còn trống', 'Khách hàng', {
+      get: endpoint('Tìm cơ sở/sân (mọi tiêu chí tuỳ chọn, kết hợp AND; xếp gần→xa nếu có GPS, không thì sao cao→thấp)', 'Khách hàng', {
         query: [
-          thamSoTruyVan('ngay', 'Ngày chơi, định dạng YYYY-MM-DD', true),
-          thamSoTruyVan('gioBatDau', 'Giờ bắt đầu HH:MM', true),
-          thamSoTruyVan('gioKetThuc', 'Giờ kết thúc HH:MM', true),
+          thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD (đi chung với gioBatDau, gioKetThuc)'),
+          thamSoTruyVan('gioBatDau', 'Giờ bắt đầu HH:MM (đi chung với ngay, gioKetThuc)'),
+          thamSoTruyVan('gioKetThuc', 'Giờ kết thúc HH:MM (đi chung với ngay, gioBatDau)'),
           thamSoTruyVan('tinhThanh', 'Tỉnh hoặc thành phố'),
-          thamSoTruyVan('quanHuyen', 'Quận hoặc huyện'),
+          thamSoTruyVan('quanHuyen', 'Quận hoặc huyện (cần kèm tinhThanh)'),
+          thamSoTruyVan('giaToiThieu', 'Giá/giờ tối thiểu, VNĐ (đi chung với giaToiDa)'),
+          thamSoTruyVan('giaToiDa', 'Giá/giờ tối đa, VNĐ (đi chung với giaToiThieu)'),
+          thamSoTruyVan('viDo', 'Vĩ độ GPS của khách (đi chung với kinhDo)'),
+          thamSoTruyVan('kinhDo', 'Kinh độ GPS của khách (đi chung với viDo)'),
         ],
       }),
     },
@@ -319,7 +323,7 @@ module.exports = {
       patch: endpoint('Đóng tạm sân (409 HAS_ACTIVE_BOOKINGS nếu còn khách/lịch cố định)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
     },
     '/api/chu-san/san/{maSan}/mo': {
-      patch: endpoint('Mở lại sân đã đóng', 'Chủ sân', { auth: true, params: maSan }),
+      patch: endpoint('Bật sân (chưa hoạt động/đã đóng → active); sân đầu tiên được bật thì cơ sở tự hiện cho khách nếu đã có bảng giá', 'Chủ sân', { auth: true, params: maSan }),
     },
     '/api/chu-san/san/{maSan}': {
       delete: endpoint('Xoá sân (phải đóng trước; 409 MUST_CLOSE_FIRST / HAS_ACTIVE_BOOKINGS / HAS_BOOKING_HISTORY)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
@@ -358,6 +362,8 @@ module.exports = {
       put: endpoint('Cập nhật 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, body: 'CoSo' }),
     },
     '/api/chu-san/co-so/{maCoSo}/bang-gia': {
+      get: endpoint('Xem bảng giá của 1 cơ sở (trang quản lý bảng giá: chọn cơ sở ở dropdown)', 'Chủ sân', { auth: true, params: maCoSo }),
+      post: endpoint('Thêm MỘT khung giá tuỳ chỉnh vào cơ sở (400 nếu ngoài giờ mở cửa hoặc chồng khung cũ)', 'Chủ sân', { auth: true, params: maCoSo, body: 'KhungGia' }),
       put: endpoint('Cập nhật bảng giá của 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, body: 'BangGia' }),
     },
     '/api/chu-san/co-so/{maCoSo}/anh': {
@@ -368,7 +374,7 @@ module.exports = {
         auth: true,
         query: [thamSoTruyVan('maCoSo', 'Chỉ sân của cơ sở này')],
       }),
-      post: endpoint('Tạo sân', 'Chủ sân', { auth: true, body: 'TaoSan' }),
+      post: endpoint('Tạo sân (luôn ở trạng thái chưa hoạt động `maintenance`; chủ sân phải bật bằng PATCH /san/{maSan}/mo)', 'Chủ sân', { auth: true, body: 'TaoSan' }),
     },
     '/api/chu-san/san/{maSan}': {
       patch: endpoint('Cập nhật sân', 'Chủ sân', {
@@ -454,6 +460,14 @@ module.exports = {
         auth: true,
         params: maDatSan,
         body: 'TuChoiThanhToan',
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
+    '/api/chu-san/dat-san/{maDatSan}/huy': {
+      post: endpoint('Chủ sân huỷ đơn đã đặt (kèm lý do) → khách được hoàn 100%, vào hàng đợi hoàn tiền', 'Chủ sân', {
+        auth: true,
+        params: maDatSan,
+        body: 'HuyDonChuSan',
         responses: { 404: response.Loi, 409: response.Loi },
       }),
     },
@@ -882,6 +896,21 @@ module.exports = {
           },
         },
       },
+      KhungGia: {
+        type: 'object',
+        required: [
+          'gioBatDau', 'gioKetThuc', 'giaNgayThuongKhachVangLai',
+          'giaNgayThuongKhachCoDinh', 'giaCuoiTuanKhachVangLai', 'giaCuoiTuanKhachCoDinh',
+        ],
+        properties: {
+          gioBatDau: { type: 'string', example: '18:00' },
+          gioKetThuc: { type: 'string', example: '21:00' },
+          giaNgayThuongKhachVangLai: { type: 'integer', example: 120000 },
+          giaNgayThuongKhachCoDinh: { type: 'integer', example: 100000 },
+          giaCuoiTuanKhachVangLai: { type: 'integer', example: 140000 },
+          giaCuoiTuanKhachCoDinh: { type: 'integer', example: 120000 },
+        },
+      },
       DoiNganHang: {
         type: 'object',
         required: ['maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
@@ -910,7 +939,7 @@ module.exports = {
         required: ['tenSan'],
         properties: {
           tenSan: { type: 'string', example: 'San 1' },
-          trangThai: { type: 'string', enum: ['active', 'maintenance'] },
+          maCoSo: { type: 'integer', description: 'Cơ sở thêm sân vào; bỏ trống = cơ sở đầu tiên' },
         },
       },
       CapNhatSan: {
@@ -942,6 +971,11 @@ module.exports = {
         type: 'object',
         required: ['lyDo'],
         properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Chưa thấy tiền về tài khoản' } },
+      },
+      HuyDonChuSan: {
+        type: 'object',
+        required: ['lyDo'],
+        properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Sân đóng để bảo trì sàn' } },
       },
       HoanThanhHoanTien: {
         type: 'object',

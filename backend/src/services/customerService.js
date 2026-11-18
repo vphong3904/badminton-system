@@ -287,22 +287,89 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
   return ketQua;
 }
 
-async function timCoSo(boLoc) {
-  kiemTraNgay(boLoc.ngay);
-  kiemTraBatDauTuongLai(boLoc.ngay, boLoc.gioBatDau);
-  const batDau = doiGioRaPhut(boLoc.gioBatDau);
-  const ketThuc = doiGioRaPhut(boLoc.gioKetThuc);
-  if (ketThuc <= batDau || batDau % 30 !== 0 || ketThuc % 30 !== 0) {
-    throw AppError.duLieuKhongHopLe('Khung giờ phải tăng dần và theo mốc 30 phút');
+// Khoảng cách đường chim bay (mét) giữa 2 toạ độ.
+function khoangCachMet(viDo1, kinhDo1, viDo2, kinhDo2) {
+  const rad = (do_) => (do_ * Math.PI) / 180;
+  const dLat = rad(viDo2 - viDo1);
+  const dLng = rad(kinhDo2 - kinhDo1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(rad(viDo1)) * Math.cos(rad(viDo2)) * Math.sin(dLng / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Giá/giờ (vãng lai) của một cơ sở:
+//  - có ngày + giờ: giá/giờ trung bình của đúng khung đã chọn (cùng cách tính với tinhTongTien);
+//  - không chọn khung: mọi mức giá trong bảng giá, cơ sở đạt khi CÓ mức nằm trong khoảng.
+function giaPhuHopKhoang(cacGia, boLoc, batDau, ketThuc, giaToiThieu, giaToiDa) {
+  const trongKhoang = (gia) => gia >= giaToiThieu && gia <= giaToiDa;
+  if (boLoc.ngay) {
+    const loaiNgay = [0, 6].includes(new Date(`${boLoc.ngay}T00:00:00Z`).getUTCDay()) ? 'weekend' : 'weekday';
+    const bang = cacGia.filter((g) => g.loaiNgay === loaiNgay);
+    let tong = 0;
+    for (let phut = batDau; phut < ketThuc; phut += 30) {
+      const khung = bang.find((g) => doiGioRaPhut(String(g.gioBatDau).slice(0, 5)) <= phut
+        && doiGioRaPhut(String(g.gioKetThuc).slice(0, 5)) >= phut + 30);
+      if (!khung) return { dat: false, giaMoiGio: null };
+      tong += Number(khung.giaMoiGio);
+    }
+    const giaMoiGio = Math.round(tong / ((ketThuc - batDau) / 30));
+    return { dat: trongKhoang(giaMoiGio), giaMoiGio };
   }
-  const thamSo = [boLoc.ngay, boLoc.gioKetThuc, boLoc.gioBatDau];
-  let dieuKienKhuVuc = '';
+  return { dat: cacGia.some((g) => trongKhoang(Number(g.giaMoiGio))), giaMoiGio: null };
+}
+
+// Tìm cơ sở có sân phù hợp. Mọi tiêu chí đều tuỳ chọn và CÙNG áp dụng (AND):
+//  - ngày + giờ bắt đầu + giờ kết thúc: đi chung bộ 3 (validator đã ép), lọc sân còn trống;
+//  - tinhThanh [+ quanHuyen]: lọc khu vực (quận chỉ hợp lệ khi có tỉnh);
+//  - giaToiThieu + giaToiDa: đi chung cặp, lọc theo giá/giờ;
+//  - viDo + kinhDo (GPS của khách): xếp gần → xa, cơ sở chưa có toạ độ xếp cuối;
+//    không có GPS: xếp theo điểm đánh giá cao → thấp.
+async function timCoSo(boLoc) {
+  const coKhungGio = Boolean(boLoc.ngay && boLoc.gioBatDau && boLoc.gioKetThuc);
+  if (Boolean(boLoc.ngay) !== Boolean(boLoc.gioBatDau) || Boolean(boLoc.ngay) !== Boolean(boLoc.gioKetThuc)) {
+    throw AppError.duLieuKhongHopLe('Cần chọn đủ ngày, giờ bắt đầu và giờ kết thúc.');
+  }
+  const coGia = boLoc.giaToiThieu !== undefined || boLoc.giaToiDa !== undefined;
+  if (coGia && (boLoc.giaToiThieu === undefined || boLoc.giaToiDa === undefined)) {
+    throw AppError.duLieuKhongHopLe('Cần nhập đủ giá tối thiểu và giá tối đa.');
+  }
+  if (coGia && boLoc.giaToiThieu > boLoc.giaToiDa) {
+    throw AppError.duLieuKhongHopLe('Giá tối đa phải lớn hơn hoặc bằng giá tối thiểu.');
+  }
+  if (boLoc.quanHuyen && !boLoc.tinhThanh) {
+    throw AppError.duLieuKhongHopLe('Cần chọn Tỉnh/Thành phố trước khi chọn Quận/Huyện.');
+  }
+  const coViTri = boLoc.viDo !== undefined && boLoc.kinhDo !== undefined;
+
+  let batDau = 0;
+  let ketThuc = 0;
+  const dieuKien = [];
+  const thamSo = [];
+  if (coKhungGio) {
+    kiemTraNgay(boLoc.ngay);
+    kiemTraBatDauTuongLai(boLoc.ngay, boLoc.gioBatDau);
+    batDau = doiGioRaPhut(boLoc.gioBatDau);
+    ketThuc = doiGioRaPhut(boLoc.gioKetThuc);
+    if (ketThuc <= batDau || batDau % 30 !== 0 || ketThuc % 30 !== 0) {
+      throw AppError.duLieuKhongHopLe('Khung giờ phải tăng dần và theo mốc 30 phút');
+    }
+    dieuKien.push(`NOT EXISTS (
+         SELECT 1 FROM DatSan d WHERE d.MaSan=s.MaSan AND d.NgayChoi=?
+           AND (d.TrangThai='confirmed' OR (d.TrangThai='pending_payment' AND d.HetHanGiuCho>NOW()))
+           AND d.GioBatDau<? AND d.GioKetThuc>?
+       )`, `NOT EXISTS (
+         SELECT 1 FROM KhoaSan k WHERE k.MaSan=s.MaSan AND k.NgayKhoa=?
+           AND k.GioBatDau<? AND k.GioKetThuc>?
+       )`);
+    thamSo.push(boLoc.ngay, boLoc.gioKetThuc, boLoc.gioBatDau,
+      boLoc.ngay, boLoc.gioKetThuc, boLoc.gioBatDau);
+  }
   if (boLoc.tinhThanh) {
-    dieuKienKhuVuc += ' AND cs.TinhThanh=?';
+    dieuKien.push('cs.TinhThanh=?');
     thamSo.push(boLoc.tinhThanh);
   }
   if (boLoc.quanHuyen) {
-    dieuKienKhuVuc += ' AND cs.QuanHuyen=?';
+    dieuKien.push('cs.QuanHuyen=?');
     thamSo.push(boLoc.quanHuyen);
   }
   const [cacSan] = await pool.query(
@@ -310,28 +377,77 @@ async function timCoSo(boLoc) {
        cs.TinhThanh AS tinhThanh, cs.QuanHuyen AS quanHuyen, cs.GiaThapNhat AS giaThapNhat,
        cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
        cs.SoPhutDatToiThieu AS soPhutDatToiThieu,
+       cs.ViDo AS viDo, cs.KinhDo AS kinhDo,
+       cs.SoDienThoai AS soDienThoai, cs.LinkBanDo AS linkBanDo,
        cs.DiemTrungBinh AS diemTrungBinh, cs.SoDanhGia AS soDanhGia,
        s.MaSan AS maSan, s.TenSan AS tenSan,
        COALESCE((SELECT a.DuongDan FROM AnhCoSo a WHERE a.MaCoSo=cs.MaCoSo
         ORDER BY a.LaAnhBia DESC, a.ThuTu, a.MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh
      FROM CoSo cs JOIN San s ON s.MaCoSo=cs.MaCoSo
-     WHERE cs.TrangThai='active' AND s.TrangThai='active' ${dieuKienKhuVuc}
-       AND NOT EXISTS (
-         SELECT 1 FROM DatSan d WHERE d.MaSan=s.MaSan AND d.NgayChoi=?
-           AND (d.TrangThai='confirmed' OR (d.TrangThai='pending_payment' AND d.HetHanGiuCho>NOW()))
-           AND d.GioBatDau<? AND d.GioKetThuc>?
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM KhoaSan k WHERE k.MaSan=s.MaSan AND k.NgayKhoa=?
-           AND k.GioBatDau<? AND k.GioKetThuc>?
-       )
-     ORDER BY cs.DiemTrungBinh DESC, cs.MaCoSo, s.MaSan`,
-    [...thamSo.slice(3), boLoc.ngay, boLoc.gioKetThuc, boLoc.gioBatDau,
-      boLoc.ngay, boLoc.gioKetThuc, boLoc.gioBatDau]);
-  return cacSan.filter((san) =>
-    batDau >= doiGioRaPhut(san.gioMoCua)
-    && ketThuc <= doiGioRaPhut(san.gioDongCua)
-    && ketThuc - batDau >= san.soPhutDatToiThieu);
+     WHERE cs.TrangThai='active' AND s.TrangThai='active'
+       ${dieuKien.map((dk) => `AND ${dk}`).join('\n       ')}`,
+    thamSo);
+
+  let ketQua = cacSan;
+  if (coKhungGio) {
+    // Lọc theo giờ mở/đóng cửa + thời lượng tối thiểu (khung giờ nằm trong ngày nên lọc ở đây).
+    ketQua = ketQua.filter((san) =>
+      batDau >= doiGioRaPhut(san.gioMoCua)
+      && ketThuc <= doiGioRaPhut(san.gioDongCua)
+      && ketThuc - batDau >= san.soPhutDatToiThieu);
+  }
+
+  const giaTheoCoSo = new Map();
+  if (coGia && ketQua.length) {
+    const cacMaCoSo = [...new Set(ketQua.map((san) => san.maCoSo))];
+    const [bangGia] = await pool.query(
+      `SELECT MaCoSo AS maCoSo, LoaiNgay AS loaiNgay, GioBatDau AS gioBatDau,
+         GioKetThuc AS gioKetThuc, GiaMoiGio AS giaMoiGio
+       FROM BangGia WHERE LoaiKhach='walk_in' AND MaCoSo IN (?)`,
+      [cacMaCoSo]);
+    const theoCoSo = new Map();
+    for (const gia of bangGia) {
+      if (!theoCoSo.has(gia.maCoSo)) theoCoSo.set(gia.maCoSo, []);
+      theoCoSo.get(gia.maCoSo).push(gia);
+    }
+    for (const maCoSo of cacMaCoSo) {
+      giaTheoCoSo.set(maCoSo, giaPhuHopKhoang(
+        theoCoSo.get(maCoSo) || [], boLoc, batDau, ketThuc, boLoc.giaToiThieu, boLoc.giaToiDa));
+    }
+    ketQua = ketQua.filter((san) => giaTheoCoSo.get(san.maCoSo).dat);
+  }
+
+  ketQua = ketQua.map((san) => {
+    const { viDo, kinhDo, ...con } = san;
+    const coToaDo = viDo !== null && viDo !== undefined && kinhDo !== null && kinhDo !== undefined;
+    return {
+      ...con,
+      viDo: coToaDo ? Number(viDo) : null,
+      kinhDo: coToaDo ? Number(kinhDo) : null,
+      khoangCachMet: coViTri && coToaDo
+        ? Math.round(khoangCachMet(boLoc.viDo, boLoc.kinhDo, Number(viDo), Number(kinhDo)))
+        : null,
+      ...(giaTheoCoSo.get(san.maCoSo)?.giaMoiGio != null
+        ? { giaMoiGio: giaTheoCoSo.get(san.maCoSo).giaMoiGio } : {}),
+    };
+  });
+
+  // Sắp xếp: có GPS → gần → xa (chưa có toạ độ xếp cuối); hoà/không GPS → sao cao → thấp.
+  const diem = (san) => Number(san.diemTrungBinh) || 0;
+  ketQua.sort((a, b) => {
+    if (coViTri) {
+      if (a.khoangCachMet === null && b.khoangCachMet !== null) return 1;
+      if (a.khoangCachMet !== null && b.khoangCachMet === null) return -1;
+      if (a.khoangCachMet !== b.khoangCachMet && a.khoangCachMet !== null) {
+        return a.khoangCachMet - b.khoangCachMet;
+      }
+    }
+    return diem(b) - diem(a)
+      || (b.soDanhGia || 0) - (a.soDanhGia || 0)
+      || a.maCoSo - b.maCoSo
+      || a.maSan - b.maSan;
+  });
+  return ketQua;
 }
 
 async function layDanhSachCoSo() {
@@ -500,10 +616,9 @@ async function lietKeDatSan(maNguoiDung) {
     return ganTrangThaiHienThi({
       ...don,
       lyDoTuChoi,
-      // Nút "Khiếu nại chủ sân": đơn app đã huỷ và đã hoàn tiền xong (refunded), chưa khiếu nại lần nào.
+      // Nút "Khiếu nại chủ sân": luôn có với đơn đặt qua app, miễn chưa khiếu nại lần nào.
       daKhieuNai,
-      coTheKhieuNai: !daKhieuNai && don.nguon === 'app'
-        && don.trangThai === 'cancelled' && don.trangThaiHoanTien === 'refunded',
+      coTheKhieuNai: !daKhieuNai && don.nguon === 'app',
       daDanhGia,
       soSaoDanhGia: daDanhGia ? Number(don.soSaoDanhGia) : null,
       // Buổi đang giữ đánh giá (chính đơn này, hoặc buổi khác cùng lịch cố định): FE sửa/xoá theo mã này.
@@ -760,7 +875,7 @@ async function huyDatSan(maNguoiDung, maDatSan) {
       tiLeHoan,
       // Chủ sân hoàn tiền; khách có thể (không bắt buộc) bổ sung TK nhận hoàn để chủ sân chuyển nhanh.
       canCapNhatTaiKhoanHoan: soTienHoan > 0,
-      // Chỉ khiếu nại được khi đơn đã huỷ và hoàn tiền xong (refunded) — xem lietKeDatSan.
+      // Nút khiếu nại do danh sách đơn (lietKeDatSan) quyết định; kết quả huỷ không dùng cờ này.
       coTheKhieuNai: false,
       thongBao: thongBaoHuy,
     };

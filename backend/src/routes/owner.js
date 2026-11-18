@@ -34,6 +34,9 @@ dinhTuyen.post('/co-so/anh', taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCo
 dinhTuyen.get('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layCoSo);
 dinhTuyen.put('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.capNhatCoSoTheoMa), dieuKhien.capNhatCoSo);
 dinhTuyen.put('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGiaTheoMa), dieuKhien.capNhatBangGia);
+// Bảng giá theo cơ sở: GET xem danh sách khung giá; POST thêm một khung tuỳ chỉnh; PUT thay cả bảng giá.
+dinhTuyen.get('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layBangGiaCoSo);
+dinhTuyen.post('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.themKhungGia), dieuKhien.themKhungGia);
 dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
 // Đóng tạm / mở lại / xoá cơ sở: đóng & xoá chỉ khi không còn khách đặt (đơn hiện tại, lịch cố định); xoá phải đóng trước.
 dinhTuyen.patch('/co-so/:maCoSo/dong', kiemTraHopLe(kiemTraDuLieu.dongXoaCoSo), dieuKhien.dongCoSo);
@@ -53,6 +56,7 @@ dinhTuyen.get('/dat-san', kiemTraHopLe(kiemTraBaoCao.danhSachDon), donDatSan.lie
 dinhTuyen.get('/dat-san/:maDatSan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan.layChiTietDon);
 dinhTuyen.post('/dat-san/:maDatSan/xac-nhan-thanh-toan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan.xacNhanThanhToan);
 dinhTuyen.post('/dat-san/:maDatSan/tu-choi-thanh-toan', kiemTraHopLe(kiemTraBaoCao.tuChoiThanhToan), donDatSan.tuChoiThanhToan);
+dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDon), donDatSan.huyDon);
 dinhTuyen.get('/hoan-tien', kiemTraHopLe(kiemTraBaoCao.danhSachHoanTien), donDatSan.lietKeHoanTien);
 dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien), donDatSan.hoanThanhHoanTien);
 dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);

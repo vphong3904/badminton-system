@@ -31,3 +31,9 @@ exports.tuChoiThanhToan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
 exports.taoDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   daTao(phanHoi, await dichVu.taoDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.body));
 });
+
+// Chủ sân huỷ đơn đã đặt: khách được hoàn 100% (vào hàng đợi hoàn tiền của chủ sân).
+exports.huyDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.huyDon(
+    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo));
+});

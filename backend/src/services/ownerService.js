@@ -1,7 +1,7 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { kiemTraKhungGia } = require('../utils/time');
-const { thongBaoTheoTrangThai } = require('../utils/hoSoChuSan');
+const { thongBaoTheoTrangThai, layMucConThieuHoSo } = require('../utils/hoSoChuSan');
 const { timNganHang } = require('../utils/nganHang');
 const { layToaDoTuLink } = require('../utils/toaDoBanDo');
 const sanCoSo = require('./sanCoSoService');
@@ -57,8 +57,8 @@ async function layCoSoTheoMa(maChuSan, maCoSo) {
   return cacCoSo[0];
 }
 
-async function layBangGia(maCoSo) {
-  const [khungGias] = await pool.query(
+async function layBangGia(maCoSo, ketNoi = pool) {
+  const [khungGias] = await ketNoi.query(
     `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc,
        MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'walk_in' THEN GiaMoiGio END) AS giaNgayThuongKhachVangLai,
        MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'fixed' THEN GiaMoiGio END) AS giaNgayThuongKhachCoDinh,
@@ -85,19 +85,10 @@ async function chonCoSo(maChuSan, maCoSo) {
   return maCoSo ? layCoSoTheoMa(maChuSan, maCoSo) : batBuocCoSo(maChuSan);
 }
 
-// (cơ sở `closed` do chủ sân tự đóng thì KHÔNG tự mở lại ở đây — phải gọi PATCH /co-so/:maCoSo/mo)
 // Cơ sở mới tạo ở trạng thái ẩn; tự hiện cho khách khi đã có ≥1 sân hoạt động + có bảng giá
-// và chủ sân đã được admin duyệt. Chỉ chuyển hidden → active (không đụng cơ sở bị admin khoá).
-async function kichHoatNeuSanSang(maCoSo, ketNoi = pool) {
-  await ketNoi.query(
-    `UPDATE CoSo cs SET cs.TrangThai = 'active'
-     WHERE cs.MaCoSo = ? AND cs.TrangThai = 'hidden'
-       AND EXISTS (SELECT 1 FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active')
-       AND EXISTS (SELECT 1 FROM BangGia WHERE MaCoSo = cs.MaCoSo)
-       AND EXISTS (SELECT 1 FROM HoSoChuSan
-                   WHERE MaNguoiDung = cs.MaChuSan AND TrangThaiDuyet = 'approved')`,
-    [maCoSo]);
-}
+// và chủ sân đã được admin duyệt (xem sanCoSo.kichHoatCoSoNeuSanSang). Cơ sở `closed` do chủ sân
+// tự đóng KHÔNG tự mở lại ở đây — phải gọi PATCH /co-so/:maCoSo/mo.
+const kichHoatNeuSanSang = (maCoSo, ketNoi = pool) => sanCoSo.kichHoatCoSoNeuSanSang(ketNoi, maCoSo);
 
 async function xacNhanDuocSua(maChuSan) {
   const hoSo = await layHoSo(maChuSan);
@@ -200,6 +191,43 @@ async function thayBangGia(maChuSan, khungGias, maCoSo) {
   return layBangGia(coSo.maCoSo);
 }
 
+// Bảng giá của MỘT cơ sở (trang quản lý bảng giá: chọn cơ sở ở dropdown → hiện danh sách khung giá).
+async function layBangGiaCoSo(maChuSan, maCoSo) {
+  const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
+  return {
+    maCoSo: coSo.maCoSo,
+    tenCoSo: coSo.tenCoSo,
+    gioMoCua: String(coSo.gioMoCua).slice(0, 5),
+    gioDongCua: String(coSo.gioDongCua).slice(0, 5),
+    khungGias: await layBangGia(coSo.maCoSo),
+  };
+}
+
+// Thêm MỘT khung giá tuỳ chỉnh vào cơ sở (không đụng các khung đã có). Khung mới phải nằm trong giờ mở cửa
+// và không chồng khung cũ. Thêm xong, cơ sở tự hiện cho khách nếu đã đủ điều kiện (có sân hoạt động).
+async function themKhungGia(maChuSan, maCoSo, khungMoi) {
+  const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
+  await thucHienGiaoDich(async (ketNoi) => {
+    await ketNoi.query('SELECT MaCoSo FROM CoSo WHERE MaCoSo=? FOR UPDATE', [coSo.maCoSo]);
+    const hienCo = await layBangGia(coSo.maCoSo, ketNoi);
+    kiemTraKhungGia([...hienCo, khungMoi], coSo.gioMoCua.slice(0, 5), coSo.gioDongCua.slice(0, 5));
+    await ketNoi.query(
+      `INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES ?`,
+      [[
+        [coSo.maCoSo, 'weekday', 'walk_in', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaNgayThuongKhachVangLai],
+        [coSo.maCoSo, 'weekday', 'fixed', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaNgayThuongKhachCoDinh],
+        [coSo.maCoSo, 'weekend', 'walk_in', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaCuoiTuanKhachVangLai],
+        [coSo.maCoSo, 'weekend', 'fixed', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaCuoiTuanKhachCoDinh],
+      ]]);
+    await ketNoi.query(
+      `UPDATE CoSo SET GiaThapNhat=(SELECT MIN(GiaMoiGio) FROM BangGia WHERE MaCoSo=? AND LoaiKhach='walk_in')
+       WHERE MaCoSo=?`,
+      [coSo.maCoSo, coSo.maCoSo]);
+    await kichHoatNeuSanSang(coSo.maCoSo, ketNoi);
+  });
+  return layBangGiaCoSo(maChuSan, coSo.maCoSo);
+}
+
 async function luuBuocBangGia(maChuSan, khungGias) {
   await xacNhanDuocSua(maChuSan);
   await thayBangGia(maChuSan, khungGias);
@@ -240,11 +268,7 @@ async function doiNganHang(maChuSan, { maNganHang, soTaiKhoan, chuTaiKhoan }) {
 // tài khoản nhận tiền, nên chỉ cần 2 mục này; cơ sở/bảng giá làm sau khi được duyệt.
 async function guiHoSoDuyet(maChuSan) {
   await xacNhanDuocSua(maChuSan);
-  const trangThai = await trangThaiDangKy(maChuSan);
-  const mucConThieu = Object.entries({
-    'tên doanh nghiệp': trangThai.cacBuoc.doanhNghiep,
-    'tài khoản ngân hàng': trangThai.cacBuoc.nganHang,
-  }).filter(([, hoanTat]) => !hoanTat).map(([tenMuc]) => tenMuc);
+  const mucConThieu = await layMucConThieuHoSo(pool, maChuSan);
   if (mucConThieu.length) throw AppError.duLieuKhongHopLe(`Chưa hoàn thành: ${mucConThieu.join(', ')}`);
   await pool.query(
     `UPDATE HoSoChuSan SET TrangThaiDuyet='pending', NgayGuiDuyet=NOW(), LyDoTuChoi=NULL,
@@ -331,14 +355,14 @@ async function lietKeSan(maChuSan, maCoSo) {
   return cacSan;
 }
 
-// Body có maCoSo → thêm vào cơ sở đó; không có → cơ sở đầu tiên (tương thích API cũ).
+// Sân mới LUÔN ở trạng thái chưa hoạt động (`maintenance`): chủ sân phải bật (PATCH /san/:maSan/mo)
+// thì sân mới nhận khách. Body có maCoSo → thêm vào cơ sở đó; không có → cơ sở đầu tiên (API cũ).
 async function taoSan(maChuSan, duLieuSan) {
   const coSo = await chonCoSo(maChuSan, duLieuSan.maCoSo);
   try {
     const [ketQua] = await pool.query(
-      'INSERT INTO San (MaCoSo, TenSan, TrangThai) VALUES (?,?,?)',
-      [coSo.maCoSo, duLieuSan.tenSan, duLieuSan.trangThai || 'active']);
-    await kichHoatNeuSanSang(coSo.maCoSo);
+      "INSERT INTO San (MaCoSo, TenSan, TrangThai) VALUES (?,?,'maintenance')",
+      [coSo.maCoSo, duLieuSan.tenSan]);
     const [[sanMoi]] = await pool.query(
       `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThai
        FROM San WHERE MaSan=?`,
@@ -366,10 +390,14 @@ async function capNhatSan(maChuSan, maSan, duLieuSan) {
   if (duLieuSan.trangThai === 'maintenance' && san.trangThai !== 'maintenance') {
     await sanCoSo.dongSan({ maNguoiDung: maChuSan, vaiTro: 'owner' }, san.maSan);
   }
+  // Bật sân (maintenance → active) đi qua cùng đường với PATCH /san/:maSan/mo.
+  if (duLieuSan.trangThai === 'active' && san.trangThai !== 'active') {
+    await sanCoSo.moSan({ maNguoiDung: maChuSan, vaiTro: 'owner' }, san.maSan);
+  }
   try {
     await pool.query(
-      'UPDATE San SET TenSan=?, TrangThai=? WHERE MaSan=?',
-      [duLieuSan.tenSan ?? san.tenSan, duLieuSan.trangThai ?? san.trangThai, san.maSan]);
+      'UPDATE San SET TenSan=? WHERE MaSan=?',
+      [duLieuSan.tenSan ?? san.tenSan, san.maSan]);
   } catch (loi) {
     if (loi.code === 'ER_DUP_ENTRY') throw AppError.biTrung('Tên sân đã tồn tại');
     throw loi;
@@ -457,6 +485,8 @@ module.exports = {
   guiHoSoDuyet,
   capNhatCoSo,
   thayBangGia,
+  layBangGiaCoSo,
+  themKhungGia,
   capNhatAnhCoSo,
   layCoSo,
   layDanhSachCoSo,

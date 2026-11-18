@@ -27,6 +27,7 @@ CREATE TABLE NguoiDung (
   NgayTao       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   NgayCapNhat   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT CHK_NguoiDung_AnhDaiDien CHECK (AnhDaiDien LIKE '/tep-tai-len/avatar/%'),
+  CONSTRAINT CHK_NguoiDung_ChuSanCoSdt CHECK (VaiTro <> 'owner' OR SoDienThoai IS NOT NULL),
   UNIQUE KEY UQ_NguoiDung_Email (Email),
   KEY IDX_NguoiDung_VaiTro (VaiTro)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -39,11 +40,11 @@ CREATE TABLE NguoiDung (
 --    Thông tin ngân hàng: khách chuyển khoản thẳng vào đây (QR VietQR) và dùng để chủ sân hoàn tiền
 CREATE TABLE HoSoChuSan (
   MaNguoiDung     INT UNSIGNED PRIMARY KEY,
-  TenDoanhNghiep  VARCHAR(150) NULL,
-  TenNganHang     VARCHAR(100) NULL COMMENT 'tài khoản nhận tiền khách chuyển; bắt buộc điền trước khi gửi duyệt',
-  MaNganHang      VARCHAR(20)  NULL COMMENT 'mã VietQR viết tắt (VCB, MB, TCB, ACB…) khớp backend/src/utils/nganHang.js',
-  SoTaiKhoan      VARCHAR(30)  NULL,
-  ChuTaiKhoan     VARCHAR(100) NULL,
+  TenDoanhNghiep  VARCHAR(150) NOT NULL,
+  TenNganHang     VARCHAR(100) NOT NULL COMMENT 'tài khoản nhận tiền khách chuyển; điền ngay lúc đăng ký',
+  MaNganHang      VARCHAR(20)  NOT NULL COMMENT 'mã VietQR viết tắt (VCB, MB, TCB, ACB…) khớp backend/src/utils/nganHang.js',
+  SoTaiKhoan      VARCHAR(30)  NOT NULL,
+  ChuTaiKhoan     VARCHAR(100) NOT NULL,
   TrangThaiDuyet  ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
   NgayGuiDuyet    DATETIME NULL,
   NgayDuyet       DATETIME NULL,
@@ -63,7 +64,7 @@ CREATE TABLE CoSo (
   MaChuSan           INT UNSIGNED NOT NULL,
   TenCoSo            VARCHAR(150) NOT NULL,
   DiaChi             VARCHAR(255) NOT NULL,
-  SoDienThoai        VARCHAR(20)  NULL COMMENT 'SĐT liên hệ riêng của cơ sở',
+  SoDienThoai        VARCHAR(20)  NOT NULL COMMENT 'SĐT liên hệ của cơ sở (khách liên hệ chủ sân qua số này)',
   LinkBanDo          VARCHAR(500) NOT NULL COMMENT 'link Google Maps chủ sân dán vào; mở bản đồ + backend tự đọc ra ViDo/KinhDo',
   TinhThanh          VARCHAR(80)  NOT NULL,
   QuanHuyen          VARCHAR(80)  NOT NULL,
@@ -109,7 +110,7 @@ CREATE TABLE San (
   MaSan      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaCoSo     INT UNSIGNED NOT NULL,
   TenSan     VARCHAR(50) NOT NULL,
-  TrangThai  ENUM('active','maintenance') NOT NULL DEFAULT 'active',
+  TrangThai  ENUM('active','maintenance') NOT NULL DEFAULT 'maintenance' COMMENT 'maintenance = chưa hoạt động/đã đóng; sân mới tạo ở maintenance, chủ sân bật thì mới nhận khách',
   CONSTRAINT FK_San_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   UNIQUE KEY UQ_San_Ten (MaCoSo, TenSan)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

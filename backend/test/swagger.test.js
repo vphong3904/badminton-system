@@ -34,6 +34,7 @@ test('OpenAPI JSON liệt kê API khách, thanh toán, chủ sân và quản tr�
   assert.equal(taiLieu.paths['/api/webhooks/sepay'], undefined);
   assert.ok(taiLieu.paths['/api/quan-tri/dat-san/{maDatSan}/xac-nhan-thanh-toan'].post);
   assert.ok(taiLieu.paths['/api/chu-san/dat-san'].post);
+  assert.ok(taiLieu.paths['/api/chu-san/dat-san/{maDatSan}/huy'].post);
   assert.ok(taiLieu.paths['/api/chu-san/bao-cao/doanh-thu'].get);
   assert.ok(taiLieu.paths['/api/chu-san/bao-cao/khach-hang/tong-quan'].get);
   assert.ok(taiLieu.paths['/api/chu-san/bao-cao/khach-hang'].get);

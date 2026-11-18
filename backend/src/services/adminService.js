@@ -1,6 +1,7 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { baoKhachDaHoanTien } = require('./notificationService');
+const { layMucConThieuHoSo } = require('../utils/hoSoChuSan');
 
 async function ghiNhatKy(ketNoi, maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet) {
   await ketNoi.query(
@@ -30,6 +31,12 @@ async function duyetHoSo(maQuanTri, maNguoiDung, duLieu) {
       [maNguoiDung]);
     if (!hoSo || hoSo.trangThaiDuyet !== 'pending') {
       throw AppError.biTrung('Hồ sơ không còn ở trạng thái chờ duyệt');
+    }
+    if (duLieu.trangThai === 'approved') {
+      const mucConThieu = await layMucConThieuHoSo(ketNoi, maNguoiDung);
+      if (mucConThieu.length) {
+        throw AppError.duLieuKhongHopLe(`Hồ sơ chưa đủ thông tin để duyệt: ${mucConThieu.join(', ')}`);
+      }
     }
     await ketNoi.query(
       `UPDATE HoSoChuSan SET TrangThaiDuyet=?, NgayDuyet=NOW(),

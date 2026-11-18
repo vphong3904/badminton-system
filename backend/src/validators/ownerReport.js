@@ -60,6 +60,13 @@ exports.tuChoiThanhToan = {
     lyDo: z.string().trim().min(2, 'Vui lòng nhập lý do từ chối.').max(255, 'Lý do tối đa 255 ký tự.'),
   }),
 };
+exports.huyDon = {
+  params: z.object({ maDatSan: maSo }),
+  body: z.object({
+    lyDo: z.string({ error: 'Vui lòng nhập lý do huỷ đơn.' }).trim()
+      .min(2, 'Vui lòng nhập lý do huỷ đơn.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
 
 // ----- Hoàn tiền (chủ sân) -----
 exports.danhSachHoanTien = {

@@ -16,14 +16,45 @@ const khungGio = {
   gioKetThuc: gio,
 };
 
+// Tìm cơ sở: mọi tiêu chí tuỳ chọn, nếu chọn nhiều thì kết hợp (AND).
+const soTuyChon = (thongBao) => z.coerce.number({ error: thongBao });
 exports.timCoSo = {
   query: z.object({
-    ...khungGio,
+    // Ngày + giờ bắt đầu + giờ kết thúc đi chung: có 1 thì phải có đủ 3.
+    ngay: ngay.optional(),
+    gioBatDau: gio.optional(),
+    gioKetThuc: gio.optional(),
     tinhThanh: z.string().trim().min(2).max(80).optional(),
     quanHuyen: z.string().trim().min(2).max(80).optional(),
-  }).refine((duLieu) => duLieu.gioKetThuc > duLieu.gioBatDau, {
-    message: 'Giờ kết thúc phải sau giờ bắt đầu',
-    path: ['gioKetThuc'],
+    // Khoảng giá/giờ (VNĐ): nhập cả tối thiểu lẫn tối đa.
+    giaToiThieu: soTuyChon('Giá tối thiểu phải là số.')
+      .int('Giá tối thiểu phải là số nguyên.').min(0, 'Giá tối thiểu không được âm.').optional(),
+    giaToiDa: soTuyChon('Giá tối đa phải là số.')
+      .int('Giá tối đa phải là số nguyên.').min(0, 'Giá tối đa không được âm.').optional(),
+    // GPS của khách (tuỳ chọn): có thì xếp gần → xa, không có thì xếp theo sao.
+    viDo: soTuyChon('Vĩ độ không hợp lệ.').min(-90).max(90).optional(),
+    kinhDo: soTuyChon('Kinh độ không hợp lệ.').min(-180).max(180).optional(),
+  }).superRefine((d, ctx) => {
+    const loi = (path, message) => ctx.addIssue({ code: 'custom', path: [path], message });
+    const coKhung = [d.ngay, d.gioBatDau, d.gioKetThuc];
+    if (coKhung.some(Boolean) && !coKhung.every(Boolean)) {
+      if (!d.ngay) loi('ngay', 'Vui lòng chọn ngày.');
+      if (!d.gioBatDau) loi('gioBatDau', 'Vui lòng chọn giờ bắt đầu.');
+      if (!d.gioKetThuc) loi('gioKetThuc', 'Vui lòng chọn giờ kết thúc.');
+    }
+    if (d.gioBatDau && d.gioKetThuc && d.gioKetThuc <= d.gioBatDau) {
+      loi('gioKetThuc', 'Giờ kết thúc phải sau giờ bắt đầu');
+    }
+    if (d.quanHuyen && !d.tinhThanh) loi('tinhThanh', 'Vui lòng chọn Tỉnh/Thành phố trước.');
+    if ((d.giaToiThieu === undefined) !== (d.giaToiDa === undefined)) {
+      if (d.giaToiThieu === undefined) loi('giaToiThieu', 'Vui lòng nhập giá tối thiểu.');
+      else loi('giaToiDa', 'Vui lòng nhập giá tối đa.');
+    } else if (d.giaToiThieu !== undefined && d.giaToiDa < d.giaToiThieu) {
+      loi('giaToiDa', 'Giá tối đa phải lớn hơn hoặc bằng giá tối thiểu.');
+    }
+    if ((d.viDo === undefined) !== (d.kinhDo === undefined)) {
+      loi(d.viDo === undefined ? 'viDo' : 'kinhDo', 'Cần gửi đủ vĩ độ và kinh độ.');
+    }
   }),
 };
 
@@ -103,7 +134,7 @@ exports.thongTinHoanTien = {
   }),
 };
 
-// Khiếu nại chủ sân (đơn đã thanh toán thành công / đã huỷ).
+// Khiếu nại chủ sân (mọi đơn đặt qua app, mỗi đơn 1 lần).
 exports.guiKhieuNai = {
   params: z.object({ maDatSan: maSo }),
   body: z.object({

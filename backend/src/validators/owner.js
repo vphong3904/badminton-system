@@ -38,6 +38,8 @@ exports.coSo = { body: coSo };
 const maCoSoTrongDuongDan = z.object({ maCoSo: maSo });
 exports.maCoSo = { params: maCoSoTrongDuongDan };
 exports.capNhatCoSoTheoMa = { params: maCoSoTrongDuongDan, body: coSo };
+// Thêm MỘT khung giá tuỳ chỉnh vào cơ sở (trang quản lý bảng giá → nút "Thêm bảng giá").
+exports.themKhungGia = { params: maCoSoTrongDuongDan, body: khungGia };
 exports.bangGiaTheoMa = {
   params: maCoSoTrongDuongDan,
   body: z.object({ khungGias: z.array(khungGia).min(1).max(24) }),
@@ -67,11 +69,11 @@ exports.dongXoaCoSo = { params: maCoSoTrongDuongDan, body: lyDoTuyChon };
 exports.doanhNghiep = {
   body: z.object({ tenDoanhNghiep: z.string().trim().min(2, 'Tên doanh nghiệp tối thiểu 2 ký tự.').max(150, 'Tên doanh nghiệp tối đa 150 ký tự.') }),
 };
+// Sân mới luôn tạo ở trạng thái chưa hoạt động; không nhận trangThai khi tạo (chủ sân bật bằng PATCH /san/:maSan/mo).
 exports.san = {
   body: z.object({
     maCoSo: maSo.optional(),
     tenSan: z.string().trim().min(1).max(50),
-    trangThai: z.enum(['active', 'maintenance']).optional(),
   }),
 };
 exports.maSan = { params: z.object({ maSan: maSo }) };
