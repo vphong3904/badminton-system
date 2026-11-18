@@ -1651,10 +1651,6 @@ function BranchesPage({ user }) {
   )
 }
 
-// TẠM THỜI: API bảng giá hiện chỉ trả giá của cơ sở đầu tiên, nên trang Quản lý sân chỉ hiện cơ sở đầu tiên.
-// Khi API hỗ trợ bảng giá theo từng cơ sở, đổi thành true để hiện lại ô lọc "Tất cả cơ sở" và ô chọn cơ sở khi thêm sân.
-const SHOW_ALL_BRANCHES = false
-
 function CourtsPage({ user }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
@@ -1670,7 +1666,7 @@ function CourtsPage({ user }) {
   const [newName, setNewName] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [adding, setAdding] = useState(false)
-  const [khungGias, setKhungGias] = useState([]) // bảng giá của cơ sở (để hiển thị giá theo thời điểm hiện tại)
+  const [giaTheoCoSo, setGiaTheoCoSo] = useState({}) // maCoSo → bảng giá (khungGias) của cơ sở đó, để hiện giá theo từng cơ sở
   const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
 
   // Danh sách cơ sở của tài khoản (API có sẵn GET /api/chu-san/co-so)
@@ -1680,8 +1676,7 @@ function CourtsPage({ user }) {
     callApi('/api/chu-san/co-so', { token })
       .then((data) => {
         if (cancelled) return
-        const all = Array.isArray(data) ? data : data ? [data] : []
-        const list = SHOW_ALL_BRANCHES ? all : all.slice(0, 1)
+        const list = Array.isArray(data) ? data : data ? [data] : []
         setBranches(list)
         setAddBranchId((cur) => (cur && list.some((b) => String(b.maCoSo) === cur) ? cur : list[0] ? String(list[0].maCoSo) : ''))
         if (list.length === 0) setLoading(false)
@@ -1701,12 +1696,13 @@ function CourtsPage({ user }) {
   useEffect(() => {
     if (!isOwner || branches.length === 0) return
     let cancelled = false
-    const locCoSo = SHOW_ALL_BRANCHES && filterId === 'all' ? '' : `maCoSo=${filterId === 'all' ? branches[0].maCoSo : filterId}`
+    const locCoSo = filterId === 'all' ? '' : `maCoSo=${filterId}`
     async function load() {
       try {
-        const [cacSan, dangKy, don] = await Promise.all([
+        const [cacSan, bangGias, don] = await Promise.all([
           callApi(`/api/chu-san/san${locCoSo ? `?${locCoSo}` : ''}`, { token }),
-          callApi('/api/chu-san/dang-ky', { token }),
+          // Bảng giá theo từng cơ sở (API có sẵn GET /api/chu-san/co-so/:maCoSo/bang-gia)
+          Promise.all(branches.map((b) => callApi(`/api/chu-san/co-so/${b.maCoSo}/bang-gia`, { token }).catch(() => null))),
           callApi(`/api/chu-san/dat-san?${locCoSo ? `${locCoSo}&` : ''}tuNgay=${todayISO()}&soDong=200`, { token }),
         ])
         if (cancelled) return
@@ -1722,7 +1718,11 @@ function CourtsPage({ user }) {
         )
         setCourts(cacSan)
         setBusyCourts(conKhach)
-        setKhungGias(dangKy?.khungGias ?? [])
+        const gia = {}
+        bangGias.forEach((g) => {
+          if (g) gia[g.maCoSo] = g.khungGias ?? []
+        })
+        setGiaTheoCoSo(gia)
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -1745,13 +1745,11 @@ function CourtsPage({ user }) {
 
   const branch = branches.find((b) => String(b.maCoSo) === addBranchId) ?? null
 
-  // Giá hiện tại theo Quản lý bảng giá (thời gian + thứ ngày thường/cuối tuần); backend chưa có giá riêng từng sân
-  // Bảng giá API hiện chỉ trả về của cơ sở đầu tiên (cùng cơ sở trang Quản lý bảng giá đang sửa) nên chỉ hiện giá cho sân thuộc cơ sở đó
-  const giaHienTai = priceAt(khungGias, new Date())
-  const coSoCoGia = branches[0]?.maCoSo
+  // Giá hiện tại của sân = giá của CƠ SỞ chứa sân theo Quản lý bảng giá (thời điểm hiện tại, ngày thường / cuối tuần)
   const priceOf = (court) => {
-    if (court.maCoSo !== coSoCoGia) return '—'
-    if (giaHienTai != null) return `${formatVnd(giaHienTai)}/giờ`
+    const khungGias = giaTheoCoSo[court.maCoSo] ?? []
+    const gia = priceAt(khungGias, new Date())
+    if (gia != null) return `${formatVnd(gia)}/giờ`
     return khungGias.length > 0 ? 'Ngoài giờ' : '—'
   }
 
@@ -1848,12 +1846,11 @@ function CourtsPage({ user }) {
       {success && <Alert type="success">{success}</Alert>}
 
       {/* Lọc sân theo cơ sở: mặc định hiển thị tất cả sân của mọi cơ sở */}
-      {SHOW_ALL_BRANCHES && (
       <div className="filters filters-inline">
         <label className="field-inline">
           <span>Cơ sở: </span>
           <select className="input" value={filterId} onChange={changeFilter}>
-            <option value="all">Tất cả cơ sở</option>
+            <option value="all">Hiển thị tất cả cơ sở</option>
             {branches.map((b) => (
               <option key={b.maCoSo} value={String(b.maCoSo)}>
                 {b.tenCoSo}
@@ -1862,7 +1859,6 @@ function CourtsPage({ user }) {
           </select>
         </label>
       </div>
-      )}
 
       <section className="card table-card">
         <div className="table-scroll">
@@ -1943,7 +1939,10 @@ function CourtsPage({ user }) {
       <form className="card form-card form-card-spaced" onSubmit={addCourt}>
         <h2 className="card-title">Thêm sân</h2>
         <div className="add-court-row">
-          {SHOW_ALL_BRANCHES && (
+          <label className="field-block">
+            <span className="label">Tên sân</span>
+            <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          </label>
           <label className="field-block">
             <span className="label">Cơ sở</span>
             <select className="input" value={addBranchId} onChange={(e) => setAddBranchId(e.target.value)} disabled={branches.length === 0}>
@@ -1954,11 +1953,6 @@ function CourtsPage({ user }) {
                 </option>
               ))}
             </select>
-          </label>
-          )}
-          <label className="field-block">
-            <span className="label">Tên sân</span>
-            <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
           </label>
           <button type="submit" className="btn btn-primary btn-lg" disabled={adding || !branch}>
             {adding ? 'Đang thêm...' : 'Thêm sân'}
@@ -2185,37 +2179,58 @@ const kindToDays = (k) => (k === 'weekday' ? [1, 5] : k === 'weekend' ? [6, 7] :
 const kindText = (k) => `${dayLong(kindToDays(k)[0])} - ${dayLong(kindToDays(k)[1])}`
 const kindsOverlap = (a, b) => a === 'both' || b === 'both' || a === b
 
-// Cửa sổ thêm / sửa khung giờ: tên sự kiện, khung giờ, thứ, ngày (tuỳ chọn), giá
-function AddPriceDialog({ open, close, mode = 'add', initial, lockName = false, onSubmit, onClose }) {
+// Cửa sổ thêm / sửa khung giờ: cơ sở, tên sự kiện, khung giờ, thứ, giá. Nút Thêm / Lưu ghi thẳng vào database.
+function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lockName = false, onSubmit, onClose }) {
+  const [maCoSo, setMaCoSo] = useState(String(defaultBranchId ?? branches[0]?.maCoSo ?? ''))
   const [ten, setTen] = useState(initial?.ten ?? '')
   const [time, setTime] = useState(initial?.time ?? null)
   const [days, setDays] = useState(initial?.days ?? null)
   const [gia, setGia] = useState(initial?.gia ?? '')
-  const [from, setFrom] = useState(initial?.ngay?.from ?? '')
-  const [to, setTo] = useState(initial?.ngay?.to ?? '')
   const [showTime, setShowTime] = useState(false)
   const [showDays, setShowDays] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  const chosen = branches.find((b) => String(b.maCoSo) === maCoSo) ?? null
+  const open = cut5(chosen?.gioMoCua)
+  const close = cut5(chosen?.gioDongCua)
   const kind = days ? dayRangeKind(days[0], days[1]) : null
 
-  const submit = () => {
+  const changeBranch = (e) => {
+    setMaCoSo(e.target.value)
+    setTime(null) // mỗi cơ sở có giờ mở cửa riêng nên chọn lại khung giờ
+    setError('')
+  }
+
+  const submit = async () => {
+    if (!chosen) return setError('Vui lòng chọn cơ sở.')
     if (!time) return setError('Vui lòng chọn khung giờ.')
     if (!days) return setError('Vui lòng chọn thứ.')
-    if ((from || to) && !(from && to)) return setError('Vui lòng chọn đủ ngày bắt đầu và ngày kết thúc.')
-    if (from && to && from > to) return setError('Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.')
     const v = Number(gia)
     if (gia === '' || !Number.isInteger(v) || v < 0 || v > MAX_PRICE) {
       return setError(`Giá phải là số nguyên từ 0 đến ${MAX_PRICE.toLocaleString('vi-VN')}.`)
     }
-    const message = onSubmit({ id: initial?.id, ten: ten.trim(), time, days, gia: String(v), ngay: from && to ? { from, to } : null })
+    setBusy(true)
+    const message = await onSubmit({ id: initial?.id, maCoSo: chosen.maCoSo, ten: ten.trim(), time, days, gia: String(v) })
+    setBusy(false)
     if (message) return setError(message)
     onClose()
   }
 
   return (
     <>
-      <Dialog title={mode === 'edit' ? 'Sửa khung giờ' : 'Thêm khung giờ'} level={1} width={520} onClose={onClose}>
+      <Dialog title={mode === 'edit' ? 'Sửa khung giờ' : 'Thêm khung giờ'} level={1} width={520} onClose={() => !busy && onClose()}>
+        <label className="dialog-field">
+          <span>Cơ sở:</span>
+          <select className="input" value={maCoSo} onChange={changeBranch} disabled={mode === 'edit' || busy}>
+            {branches.map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="dialog-field">
           <span>Tên sự kiện:</span>
           <input
@@ -2240,6 +2255,11 @@ function AddPriceDialog({ open, close, mode = 'add', initial, lockName = false, 
               Chọn khung giờ
             </button>
           )}
+          {open && (
+            <small className="dialog-note">
+              Giờ mở cửa của cơ sở: {open}–{close}. Khung giờ không được trùng khung đã có của cùng cơ sở (khác cơ sở thì không ảnh hưởng).
+            </small>
+          )}
         </div>
 
         <div className="dialog-field">
@@ -2258,23 +2278,6 @@ function AddPriceDialog({ open, close, mode = 'add', initial, lockName = false, 
           )}
         </div>
 
-        <div className="dialog-field">
-          <span>Chọn ngày:</span>
-          <div className="date-pair">
-            <label>
-              Từ <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </label>
-            <label>
-              Đến <input className="input" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
-            </label>
-          </div>
-          <small className="dialog-note">
-            {from || to
-              ? 'Backend chưa có giá theo ngày: khung này chỉ lưu trên máy này và chưa áp dụng cho khách.'
-              : 'Bỏ trống nếu áp dụng quanh năm.'}
-          </small>
-        </div>
-
         <label className="dialog-field">
           <span>Giá (đ/giờ):</span>
           <input className="input" type="number" min="0" step="1000" placeholder="Nhập giá" value={gia} onChange={(e) => setGia(e.target.value)} />
@@ -2282,11 +2285,11 @@ function AddPriceDialog({ open, close, mode = 'add', initial, lockName = false, 
 
         {error && <p className="dialog-error">{error}</p>}
         <div className="dialog-two">
-          <button type="button" className="dialog-ghost" onClick={onClose}>
+          <button type="button" className="dialog-ghost" onClick={onClose} disabled={busy}>
             Hủy
           </button>
-          <button type="button" className="dialog-primary" onClick={submit}>
-            {mode === 'edit' ? 'Lưu' : 'Thêm'}
+          <button type="button" className="dialog-primary" onClick={submit} disabled={busy}>
+            {busy ? 'Đang lưu...' : mode === 'edit' ? 'Lưu' : 'Thêm'}
           </button>
         </div>
       </Dialog>
@@ -2430,46 +2433,85 @@ function findClassOverlap(entries) {
   return null
 }
 
-// Quản lý bảng giá: API có sẵn GET /api/chu-san/dang-ky (khungGias), PUT /api/chu-san/co-so/bang-gia.
+// Quản lý bảng giá theo từng cơ sở. API có sẵn:
+//   GET /api/chu-san/co-so (danh sách cơ sở), GET /api/chu-san/co-so/:maCoSo/bang-gia (xem bảng giá),
+//   POST /api/chu-san/co-so/:maCoSo/bang-gia (thêm một khung giờ), PUT /api/chu-san/co-so/:maCoSo/bang-gia (sửa / xóa khung giờ),
+//   PUT /api/chu-san/co-so/:maCoSo (sửa giờ mở cửa)
+const ALL_BRANCHES_ID = 'all'
+
 function PricingPage({ user }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
-  const [branch, setBranch] = useState(null)
-  const [entries, setEntries] = useState([]) // dòng giá có thể lưu vào database
-  const [dated, setDated] = useState([]) // dòng giá theo ngày: chỉ lưu trên máy này
-  const [savedIds, setSavedIds] = useState([]) // các dòng giá đã đồng bộ với database
+  const [branches, setBranches] = useState([]) // các cơ sở của chủ sân
+  const [selectedId, setSelectedId] = useState(ALL_BRANCHES_ID) // cơ sở đang xem ("all" = tất cả cơ sở)
+  const [data, setData] = useState({}) // maCoSo → { branch: { maCoSo, tenCoSo, gioMoCua, gioDongCua }, entries }
   const [loading, setLoading] = useState(isOwner)
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState(null)
   const [dialog, setDialog] = useState(null) // { mode, ten, lockName, initial }
+  const [hoursDialog, setHoursDialog] = useState(null) // { maCoSo, open, close, error, busy }
+  const [reloadKey, setReloadKey] = useState(0)
 
+  // Danh sách cơ sở
   useEffect(() => {
     if (!isOwner) return
     let cancelled = false
-    async function load() {
-      try {
-        const data = await callApi('/api/chu-san/dang-ky', { token })
+    callApi('/api/chu-san/co-so', { token })
+      .then((resp) => {
         if (cancelled) return
-        const coSo = data.coSo ?? null
-        setBranch(coSo)
-        const rows = (data.khungGias ?? []).map(toRow)
-        const meta = coSo ? readPriceMeta(coSo.maCoSo) : {}
-        const list = restoreEntries(rows, meta)
-        setEntries(list)
-        setDated(meta.dated ?? [])
-        setSavedIds(list.map((x) => x.id))
-      } catch (err) {
-        if (!cancelled) setResult({ type: 'error', message: err.message })
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
+        const list = Array.isArray(resp) ? resp : resp ? [resp] : []
+        setBranches(list)
+        setSelectedId((cur) => (cur === ALL_BRANCHES_ID || list.some((b) => String(b.maCoSo) === cur) ? cur : ALL_BRANCHES_ID))
+        if (list.length === 0) setLoading(false)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setResult({ type: 'error', message: describeApiError(err) })
+          setLoading(false)
+        }
+      })
     return () => {
       cancelled = true
     }
   }, [isOwner, token])
+
+  // Bảng giá của các cơ sở đang xem (một cơ sở, hoặc tất cả)
+  const visibleIds = selectedId === ALL_BRANCHES_ID ? branches.map((b) => String(b.maCoSo)) : [selectedId]
+  const visibleKey = visibleIds.join(',')
+  useEffect(() => {
+    if (!isOwner || !visibleKey) return
+    let cancelled = false
+    setLoading(true)
+    Promise.all(
+      visibleKey.split(',').map((id) =>
+        callApi(`/api/chu-san/co-so/${id}/bang-gia`, { token }).then(
+          (d) => ({
+            id,
+            value: {
+              branch: { maCoSo: d.maCoSo, tenCoSo: d.tenCoSo, gioMoCua: d.gioMoCua, gioDongCua: d.gioDongCua },
+              entries: restoreEntries((d.khungGias ?? []).map(toRow), readPriceMeta(d.maCoSo)),
+            },
+          }),
+          (err) => ({ id, error: describeApiError(err) }),
+        ),
+      ),
+    ).then((list) => {
+      if (cancelled) return
+      const next = {}
+      const errors = []
+      list.forEach((r) => {
+        if (r.value) next[r.id] = r.value
+        else errors.push(r.error)
+      })
+      setData(next)
+      if (errors.length > 0) setResult({ type: 'error', message: errors[0] })
+      setLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token, visibleKey, reloadKey])
 
   if (!isOwner) {
     return (
@@ -2479,72 +2521,42 @@ function PricingPage({ user }) {
     )
   }
 
-  const maCoSo = branch?.maCoSo
-  const open = cut5(branch?.gioMoCua)
-  const close = cut5(branch?.gioDongCua)
-  const gaps = findPriceGaps(rowsFromEntries(entries), open, close)
+  const showAll = selectedId === ALL_BRANCHES_ID
+  const blocks = visibleIds.map((id) => data[id]).filter(Boolean) // các cơ sở đang hiển thị (đã tải xong)
+  const single = !showAll ? data[selectedId] : null
 
-  const persist = (nextEntries, nextDated) => {
-    if (maCoSo) writePriceMeta(maCoSo, nextEntries, nextDated)
+  const changeBranch = (e) => {
+    setSelectedId(e.target.value)
+    setData({})
+    setResult(null)
   }
 
-  // Dựng lại bảng từ khung giá backend vừa trả về (sau khi lưu / xóa)
-  const applyServerRows = (savedRows, nextEntries, nextDated) => {
-    persist(nextEntries, nextDated)
-    const list = restoreEntries(savedRows.map(toRow), readPriceMeta(maCoSo))
-    setEntries(list)
-    setDated(nextDated)
-    setSavedIds(list.map((x) => x.id))
+  const setEntriesOf = (id, entries) => setData((d) => (d[id] ? { ...d, [id]: { ...d[id], entries } } : d))
+
+  // Dựng lại bảng của một cơ sở từ khung giá backend vừa trả về (sau khi sửa / xóa)
+  const applyServerRows = (id, savedRows, nextEntries) => {
+    writePriceMeta(id, nextEntries, [])
+    setEntriesOf(String(id), restoreEntries(savedRows.map(toRow), readPriceMeta(id)))
   }
 
-  // Thêm / sửa một dòng giá từ cửa sổ
-  const submitEntry = ({ id, ten, time, days, gia, ngay }) => {
-    const kind = dayRangeKind(days[0], days[1])
-    const [s, e] = time
-
-    if (ngay) {
-      // Theo ngày: chỉ lưu trên máy này; kiểm tra không trùng với dòng theo ngày khác
-      const trung = dated.find(
-        (d) =>
-          d.id !== id &&
-          d.ngay.from <= ngay.to &&
-          ngay.from <= d.ngay.to &&
-          toMinutes(d.time[0]) < toMinutes(e) &&
-          toMinutes(s) < toMinutes(d.time[1]) &&
-          kindsOverlap(d.kind, kind),
-      )
-      if (trung) {
-        return `Trùng với khung ${trung.time[0]}–${trung.time[1]} (${toViDate(trung.ngay.from)} – ${toViDate(trung.ngay.to)}).`
-      }
-      const item = { id: id ?? `n-${Date.now()}`, ten, time, kind, gia, ngay }
-      const nextDated = [...dated.filter((d) => d.id !== item.id), item]
-      const nextEntries = id ? entries.filter((x) => x.id !== id) : entries
-      setDated(nextDated)
-      setEntries(nextEntries)
-      persist(nextEntries, nextDated)
-      setResult({ type: 'success', message: 'Đã thêm khung theo ngày. Khung này chỉ lưu trên máy này vì backend chưa có giá theo ngày.' })
-      return null
+  // Ghi nhớ trên máy này tên sự kiện + loại thứ của khung vừa thêm (backend không lưu hai thông tin này)
+  const rememberNewSlot = (idCoSo, { ten, time, kind }) => {
+    const meta = readPriceMeta(idCoSo)
+    const key = keyOfTime(time)
+    const names = { ...(meta.names ?? {}) }
+    if (ten) names[key] = ten
+    else delete names[key]
+    const kinds = { ...(meta.kinds ?? {}), [key]: [kind] }
+    try {
+      localStorage.setItem(priceMetaKey(idCoSo), JSON.stringify({ entries: [], names, kinds, dated: [] }))
+    } catch {
+      // trình duyệt không cho lưu: bỏ qua
     }
-
-    // Không chọn ngày: lưu được vào database. Chỉ báo trùng khi cùng loại thứ mà trùng giờ.
-    const base = id ? entries.filter((x) => x.id !== id) : entries
-    const item = { id: id ?? `e-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, ten, time, kind, gia }
-    const next = [...base, item]
-    const trung = findClassOverlap(next)
-    if (trung) return trung
-    const message = validatePricing(rowsFromEntries(next), open, close)
-    if (message) return message
-    const nextDated = id ? dated.filter((d) => d.id !== id) : dated
-    setEntries(next)
-    setDated(nextDated)
-    persist(next, nextDated)
-    setResult({ type: 'success', message: 'Đã cập nhật khung giờ. Bấm "Lưu bảng giá" để lưu vào database.' })
-    return null
   }
 
-  // Gửi danh sách khung giá lên database (backend thay toàn bộ BangGia của cơ sở bằng danh sách này)
-  const putRows = (list) =>
-    callApi('/api/chu-san/co-so/bang-gia', {
+  // Gửi bảng giá của một cơ sở lên database (PUT thay toàn bộ bảng giá của cơ sở đó)
+  const putRows = (idCoSo, list) =>
+    callApi(`/api/chu-san/co-so/${idCoSo}/bang-gia`, {
       method: 'PUT',
       token,
       body: {
@@ -2559,95 +2571,171 @@ function PricingPage({ user }) {
       },
     })
 
-  // Xóa: dòng theo ngày hoặc chưa lưu thì bỏ trên màn hình; khung giờ đã có trong database bị xóa hẳn thì xóa luôn khỏi database
-  const removeEntry = async (item) => {
-    if (item.ngay) {
-      const nextDated = dated.filter((d) => d.id !== item.id)
-      setDated(nextDated)
-      persist(entries, nextDated)
-      setResult(null)
-      return
+  // Nút Thêm / Lưu trong cửa sổ: ghi thẳng vào database, trả về thông báo lỗi (hoặc null nếu thành công)
+  const submitEntry = async ({ id, maCoSo: idCoSo, ten, time, days, gia }) => {
+    const kind = dayRangeKind(days[0], days[1])
+    const [s, e] = time
+
+    if (!id) {
+      // Thêm khung mới: POST (backend kiểm tra giờ mở cửa và trùng giờ trong CÙNG cơ sở)
+      const v = Number(gia)
+      try {
+        const saved = await callApi(`/api/chu-san/co-so/${idCoSo}/bang-gia`, {
+          method: 'POST',
+          token,
+          body: {
+            gioBatDau: s,
+            gioKetThuc: e,
+            giaNgayThuongKhachVangLai: v,
+            giaNgayThuongKhachCoDinh: v,
+            giaCuoiTuanKhachVangLai: v,
+            giaCuoiTuanKhachCoDinh: v,
+          },
+        })
+        rememberNewSlot(idCoSo, { ten, time, kind })
+        if (showAll || String(idCoSo) === selectedId) {
+          setReloadKey((n) => n + 1) // tải lại để hiện khung mới
+        } else {
+          // thêm vào cơ sở khác với cơ sở đang xem: chuyển sang xem cơ sở đó
+          setSelectedId(String(idCoSo))
+          setData({})
+        }
+        setResult({ type: 'success', message: `Đã thêm khung giờ ${s}–${e} vào ${saved.tenCoSo}.` })
+        return null
+      } catch (err) {
+        return describeApiError(err)
+      }
     }
-    const next = entries.filter((x) => x.id !== item.id)
-    if (!savedIds.includes(item.id)) {
-      // dòng mới thêm, chưa lưu vào database: chỉ bỏ trên màn hình
-      setEntries(next)
-      persist(next, dated)
-      setResult(null)
-      return
+
+    // Sửa một dòng giá: cập nhật bảng giá của cơ sở rồi lưu (PUT)
+    const block = data[String(idCoSo)]
+    if (!block) return 'Chưa tải xong bảng giá của cơ sở này.'
+    const open = cut5(block.branch.gioMoCua)
+    const close = cut5(block.branch.gioDongCua)
+    const next = [...block.entries.filter((x) => x.id !== id), { id, ten, time, kind, gia }]
+    const trung = findClassOverlap(next)
+    if (trung) return trung
+    const message = validatePricing(rowsFromEntries(next), open, close)
+    if (message) return message
+    try {
+      const saved = await putRows(idCoSo, rowsFromEntries(next))
+      applyServerRows(idCoSo, saved, next)
+      setResult({ type: 'success', message: 'Đã lưu khung giờ vào database.' })
+      return null
+    } catch (err) {
+      return describeApiError(err)
     }
+  }
+
+  // Xóa một dòng giá: lưu ngay vào database
+  const removeEntry = async (block, item) => {
+    const idCoSo = block.branch.maCoSo
+    const next = block.entries.filter((x) => x.id !== item.id)
     if (next.length === 0) {
-      return setResult({ type: 'error', message: 'Cơ sở cần có ít nhất 1 khung giá, không thể xóa khung cuối cùng.' })
+      return setResult({ type: 'error', message: `${block.branch.tenCoSo}: cơ sở cần có ít nhất 1 khung giá, không thể xóa khung cuối cùng.` })
     }
-    if (!window.confirm(`Xóa khung giờ ${item.time[0]}–${item.time[1]} (${kindText(item.kind)}) khỏi bảng giá? Thay đổi được lưu ngay vào database.`)) return
+    if (!window.confirm(`Xóa khung giờ ${item.time[0]}–${item.time[1]} (${kindText(item.kind)}) của ${block.branch.tenCoSo}? Thay đổi được lưu ngay vào database.`)) return
     const rows = rowsFromEntries(next)
-    const message = validatePricing(rows, open, close)
+    const message = validatePricing(rows, cut5(block.branch.gioMoCua), cut5(block.branch.gioDongCua))
     if (message) return setResult({ type: 'error', message })
     setSaving(true)
     try {
-      const saved = await putRows(rows)
-      applyServerRows(saved, next, dated)
+      const saved = await putRows(idCoSo, rows)
+      applyServerRows(idCoSo, saved, next)
       setResult({ type: 'success', message: `Đã xóa khung giờ ${item.time[0]}–${item.time[1]} (${kindText(item.kind)}).` })
     } catch (err) {
-      setResult({ type: 'error', message: err.message })
+      setResult({ type: 'error', message: describeApiError(err) })
     } finally {
       setSaving(false)
     }
   }
 
-  const handleSave = async () => {
-    const rows = rowsFromEntries(entries)
-    const message = validatePricing(rows, open, close)
-    if (message) return setResult({ type: 'error', message })
-    setSaving(true)
+  // Sửa giờ mở cửa / đóng cửa của một cơ sở: PUT /api/chu-san/co-so/:maCoSo (API có sẵn, nhận đủ thông tin cơ sở)
+  // nên gửi lại nguyên thông tin cơ sở, chỉ đổi hai trường giờ. Backend từ chối nếu còn khung giá nằm ngoài giờ mới.
+  const saveHours = async () => {
+    const { maCoSo: idCoSo, open: newOpen, close: newClose } = hoursDialog
+    if (!newOpen || !newClose) return setHoursDialog((d) => ({ ...d, error: 'Vui lòng chọn giờ mở cửa và giờ đóng cửa.' }))
+    if (newOpen >= newClose) return setHoursDialog((d) => ({ ...d, error: 'Giờ đóng cửa phải sau giờ mở cửa.' }))
+    const full = branches.find((b) => b.maCoSo === idCoSo)
+    if (!full) return
+    const body = {
+      tenCoSo: full.tenCoSo,
+      diaChi: full.diaChi,
+      tinhThanh: full.tinhThanh,
+      quanHuyen: full.quanHuyen,
+      soDienThoai: full.soDienThoai,
+      linkBanDo: full.linkBanDo,
+      gioMoCua: newOpen,
+      gioDongCua: newClose,
+      soPhutDatToiThieu: Number(full.soPhutDatToiThieu),
+    }
+    if (full.moTa) body.moTa = full.moTa
+    setHoursDialog((d) => ({ ...d, busy: true, error: '' }))
     try {
-      const saved = await putRows(rows)
-      applyServerRows(saved, entries, dated)
-      setResult({ type: 'success', message: 'Đã lưu bảng giá. Giá mới áp dụng cho các lượt đặt tiếp theo.' })
+      const updated = await callApi(`/api/chu-san/co-so/${idCoSo}`, { method: 'PUT', token, body })
+      setBranches((prev) => prev.map((b) => (b.maCoSo === idCoSo ? { ...b, ...updated } : b)))
+      setData((d) => (d[String(idCoSo)] ? { ...d, [String(idCoSo)]: { ...d[String(idCoSo)], branch: { ...d[String(idCoSo)].branch, gioMoCua: newOpen, gioDongCua: newClose } } } : d))
+      setHoursDialog(null)
+      setResult({ type: 'success', message: `Đã lưu giờ mở cửa của ${full.tenCoSo}: ${newOpen}–${newClose}.` })
     } catch (err) {
-      setResult({ type: 'error', message: err.message })
-    } finally {
-      setSaving(false)
+      setHoursDialog((d) => ({ ...d, busy: false, error: describeApiError(err) }))
     }
   }
 
-  // Nhóm các dòng giá theo sự kiện
-  const all = [...entries.map((e) => ({ ...e, local: false })), ...dated.map((d) => ({ ...d, local: true }))]
-  const groupMap = new Map()
-  all.forEach((it) => {
-    const k = it.ten || ''
-    groupMap.set(k, [...(groupMap.get(k) ?? []), it])
-  })
-  const groups = [...groupMap.entries()]
-    .map(([ten, items]) => ({
-      ten,
-      items: items.sort(
-        (a, b) => toMinutes(a.time[0]) - toMinutes(b.time[0]) || (a.ngay ? 1 : 0) - (b.ngay ? 1 : 0) || (a.ngay?.from ?? '').localeCompare(b.ngay?.from ?? ''),
-      ),
-    }))
-    .sort((a, b) => toMinutes(a.items[0].time[0]) - toMinutes(b.items[0].time[0]))
+  // Nhóm các dòng giá của một cơ sở theo sự kiện
+  const groupsOf = (entries) => {
+    const groupMap = new Map()
+    entries.forEach((it) => {
+      const k = it.ten || ''
+      groupMap.set(k, [...(groupMap.get(k) ?? []), it])
+    })
+    return [...groupMap.entries()]
+      .map(([ten, items]) => ({ ten, items: items.sort((a, b) => toMinutes(a.time[0]) - toMinutes(b.time[0])) }))
+      .sort((a, b) => toMinutes(a.items[0].time[0]) - toMinutes(b.items[0].time[0]))
+  }
 
-  const openEdit = (item) =>
+  const openEdit = (block, item) =>
     setDialog({
       mode: 'edit',
       ten: item.ten,
       lockName: false,
-      initial: { id: item.id, ten: item.ten, time: item.time, days: kindToDays(item.kind), gia: String(item.gia), ngay: item.ngay ?? null },
+      defaultBranchId: block.branch.maCoSo,
+      initial: { id: item.id, ten: item.ten, time: item.time, days: kindToDays(item.kind), gia: String(item.gia) },
     })
+
+  const colCount = showAll ? 6 : 5
 
   return (
     <Page>
       <div className="filters filters-inline">
-        <div className="field-inline">
-          <span>Cơ sở hiện tại: </span>
-          <strong>{branch?.tenCoSo ?? '—'}</strong>
-        </div>
-        {branch && (
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={selectedId} onChange={changeBranch} disabled={branches.length === 0}>
+            {branches.length === 0 && <option value="">Chưa có cơ sở</option>}
+            {branches.length > 0 && <option value={ALL_BRANCHES_ID}>Hiển thị tất cả cơ sở</option>}
+            {branches.map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
+        {single && (
           <div className="field-inline">
             <span>Giờ mở cửa: </span>
             <strong>
-              {open}–{close}
+              {cut5(single.branch.gioMoCua)}–{cut5(single.branch.gioDongCua)}
             </strong>
+            {/* Cờ lê: sửa giờ mở cửa / đóng cửa của cơ sở đang chọn */}
+            <button
+              type="button"
+              className="icon-btn icon-btn-wrench"
+              title="Sửa giờ mở cửa của cơ sở"
+              aria-label="Sửa giờ mở cửa của cơ sở"
+              onClick={() => setHoursDialog({ maCoSo: single.branch.maCoSo, open: cut5(single.branch.gioMoCua), close: cut5(single.branch.gioDongCua), error: '', busy: false })}
+            >
+              <WrenchIcon />
+            </button>
           </div>
         )}
       </div>
@@ -2657,6 +2745,7 @@ function PricingPage({ user }) {
           <table className="table table-pricing">
             <thead>
               <tr>
+                {showAll && <th>Cơ sở</th>}
                 <th>Tên sự kiện</th>
                 <th>Khung giờ</th>
                 <th>Thứ</th>
@@ -2667,99 +2756,156 @@ function PricingPage({ user }) {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={5} className="table-empty">
+                  <td colSpan={colCount} className="table-empty">
                     Đang tải bảng giá...
                   </td>
                 </tr>
               )}
-              {!loading && !branch && (
+              {!loading && branches.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="table-empty">
-                    Tài khoản chưa khai báo cơ sở.
+                  <td colSpan={colCount} className="table-empty">
+                    Tài khoản chưa có cơ sở. Hãy thêm cơ sở ở trang Quản lý cơ sở.
                   </td>
                 </tr>
               )}
-              {!loading && branch && groups.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="table-empty">
-                    Cơ sở chưa có khung giá nào. Bấm &quot;Thêm khung giờ&quot; để tạo.
-                  </td>
-                </tr>
-              )}
-              {groups.map((g) =>
-                g.items.map((it, idx) => (
-                  <tr key={it.id} className={idx === 0 ? 'group-first' : undefined}>
-                    {idx === 0 && (
-                      <td rowSpan={g.items.length} className="event-cell">
-                        <div className="event-name">{g.ten || <span className="muted">Giờ cố định</span>}</div>
-                        {/* Dấu + xanh lá: thêm khung giờ + thứ + giá vào cùng sự kiện */}
-                        <button
-                          type="button"
-                          className="icon-btn icon-btn-plus"
-                          title="Thêm khung giờ vào sự kiện này"
-                          aria-label="Thêm khung giờ vào sự kiện này"
-                          onClick={() => setDialog({ mode: 'add', ten: g.ten, lockName: true, initial: { ten: g.ten } })}
-                        >
-                          <PlusIcon />
-                        </button>
-                      </td>
-                    )}
-                    <td>
-                      <span className="pill pill-sm">{it.time[0]}</span> - <span className="pill pill-sm">{it.time[1]}</span>
-                    </td>
-                    <td>
-                      {kindText(it.kind)}
-                      {it.ngay && (
-                        <div className="cell-sub">
-                          {toViDate(it.ngay.from)} – {toViDate(it.ngay.to)}
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {formatVnd(Number(it.gia))}/giờ
-                      {it.local && <div className="cell-sub">Chỉ lưu trên máy này</div>}
-                    </td>
-                    <td className="td-center">
-                      <div className="row-actions row-actions-center">
-                        {/* Cờ lê xanh dương: sửa giá, thứ hoặc thời gian */}
-                        <button type="button" className="icon-btn icon-btn-wrench" title="Sửa" aria-label="Sửa" onClick={() => openEdit(it)} disabled={saving}>
-                          <WrenchIcon />
-                        </button>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeEntry(it)} disabled={saving}>
-                          Xóa
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )),
-              )}
+              {!loading &&
+                blocks.map((block) => {
+                  const groups = groupsOf(block.entries)
+                  const total = block.entries.length
+                  if (groups.length === 0) {
+                    return (
+                      <tr key={`empty-${block.branch.maCoSo}`}>
+                        {showAll && <td className="event-cell">{block.branch.tenCoSo}</td>}
+                        <td colSpan={colCount - (showAll ? 1 : 0)} className="table-empty">
+                          Cơ sở chưa có khung giá nào. Bấm &quot;Thêm khung giờ&quot; để tạo.
+                        </td>
+                      </tr>
+                    )
+                  }
+                  let first = true
+                  return groups.map((g) =>
+                    g.items.map((it, idx) => {
+                      const showBranchCell = showAll && first
+                      first = false
+                      return (
+                        <tr key={`${block.branch.maCoSo}-${it.id}`} className={idx === 0 ? 'group-first' : undefined}>
+                          {showBranchCell && (
+                            <td rowSpan={total} className="event-cell">
+                              <div className="event-name">{block.branch.tenCoSo}</div>
+                              <div className="cell-sub">
+                                {cut5(block.branch.gioMoCua)}–{cut5(block.branch.gioDongCua)}
+                              </div>
+                              {/* Cờ lê: sửa giờ mở cửa của cơ sở này */}
+                              <button
+                                type="button"
+                                className="icon-btn icon-btn-wrench"
+                                title="Sửa giờ mở cửa của cơ sở"
+                                aria-label="Sửa giờ mở cửa của cơ sở"
+                                onClick={() =>
+                                  setHoursDialog({ maCoSo: block.branch.maCoSo, open: cut5(block.branch.gioMoCua), close: cut5(block.branch.gioDongCua), error: '', busy: false })
+                                }
+                              >
+                                <WrenchIcon />
+                              </button>
+                            </td>
+                          )}
+                          {idx === 0 && (
+                            <td rowSpan={g.items.length} className="event-cell">
+                              <div className="event-name">{g.ten || <span className="muted">Giờ cố định</span>}</div>
+                              {/* Dấu + xanh lá: thêm khung giờ + thứ + giá vào cùng sự kiện */}
+                              <button
+                                type="button"
+                                className="icon-btn icon-btn-plus"
+                                title="Thêm khung giờ vào sự kiện này"
+                                aria-label="Thêm khung giờ vào sự kiện này"
+                                onClick={() => setDialog({ mode: 'add', ten: g.ten, lockName: true, defaultBranchId: block.branch.maCoSo, initial: { ten: g.ten } })}
+                              >
+                                <PlusIcon />
+                              </button>
+                            </td>
+                          )}
+                          <td>
+                            <span className="pill pill-sm">{it.time[0]}</span> - <span className="pill pill-sm">{it.time[1]}</span>
+                          </td>
+                          <td>{kindText(it.kind)}</td>
+                          <td>{formatVnd(Number(it.gia))}/giờ</td>
+                          <td className="td-center">
+                            <div className="row-actions row-actions-center">
+                              {/* Cờ lê xanh dương: sửa giá, thứ hoặc thời gian */}
+                              <button type="button" className="icon-btn icon-btn-wrench" title="Sửa" aria-label="Sửa" onClick={() => openEdit(block, it)} disabled={saving}>
+                                <WrenchIcon />
+                              </button>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeEntry(block, it)} disabled={saving}>
+                                Xóa
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    }),
+                  )
+                })}
             </tbody>
           </table>
         </div>
 
         <div className="pricing-actions">
-          <button type="button" className="btn btn-ghost btn-lg" onClick={() => setDialog({ mode: 'add', ten: '', lockName: false, initial: null })} disabled={!branch || loading}>
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            onClick={() => setDialog({ mode: 'add', ten: '', lockName: false, defaultBranchId: showAll ? branches[0]?.maCoSo : Number(selectedId), initial: null })}
+            disabled={branches.length === 0 || loading}
+          >
             Thêm khung giờ
-          </button>
-          <button type="button" className="btn btn-primary btn-lg" onClick={handleSave} disabled={!branch || loading || saving}>
-            {saving ? 'Đang lưu...' : 'Lưu bảng giá'}
           </button>
         </div>
       </section>
 
-      {gaps.length > 0 && (
-        <Alert type="error">
-          Chưa có giá cho khoảng giờ: {gaps.join(', ')}. Khách sẽ không đặt được các khung này.
-          {dated.length > 0 && ' (Các khung theo ngày chỉ lưu trên máy này nên chưa được tính vào bảng giá áp dụng cho khách.)'}
-        </Alert>
-      )}
+      {!loading &&
+        blocks.map((block) => {
+          const gaps = findPriceGaps(rowsFromEntries(block.entries), cut5(block.branch.gioMoCua), cut5(block.branch.gioDongCua))
+          return gaps.length > 0 ? (
+            <Alert key={`gap-${block.branch.maCoSo}`} type="error">
+              {block.branch.tenCoSo}: chưa có giá cho khoảng giờ {gaps.join(', ')}. Khách sẽ không đặt được các khung này.
+            </Alert>
+          ) : null
+        })}
       {result && <Alert type={result.type}>{result.message}</Alert>}
+
+      {hoursDialog && (
+        <Dialog
+          title={`Giờ mở cửa - ${branches.find((b) => b.maCoSo === hoursDialog.maCoSo)?.tenCoSo ?? ''}`}
+          width={460}
+          onClose={() => !hoursDialog.busy && setHoursDialog(null)}
+        >
+          <div className="date-pair">
+            <label className="dialog-field">
+              <span>Giờ mở cửa:</span>
+              <input className="input" type="time" value={hoursDialog.open} onChange={(e) => setHoursDialog((d) => ({ ...d, open: e.target.value, error: '' }))} />
+            </label>
+            <label className="dialog-field">
+              <span>Giờ đóng cửa:</span>
+              <input className="input" type="time" value={hoursDialog.close} onChange={(e) => setHoursDialog((d) => ({ ...d, close: e.target.value, error: '' }))} />
+            </label>
+          </div>
+          <p className="picker-hint">Các khung giá phải nằm trong giờ mở cửa mới; nếu còn khung nằm ngoài, hãy sửa hoặc xóa khung đó trước.</p>
+          {hoursDialog.error && <p className="dialog-error">{hoursDialog.error}</p>}
+          <div className="dialog-two">
+            <button type="button" className="dialog-ghost" onClick={() => setHoursDialog(null)} disabled={hoursDialog.busy}>
+              Hủy
+            </button>
+            <button type="button" className="dialog-primary" onClick={saveHours} disabled={hoursDialog.busy}>
+              {hoursDialog.busy ? 'Đang lưu...' : 'Lưu'}
+            </button>
+          </div>
+        </Dialog>
+      )}
 
       {dialog && (
         <AddPriceDialog
-          key={dialog.initial?.id ?? `new-${dialog.ten}`}
-          open={open}
-          close={close}
+          key={dialog.initial?.id ?? `new-${dialog.ten}-${dialog.defaultBranchId}`}
+          branches={branches}
+          defaultBranchId={dialog.defaultBranchId}
           mode={dialog.mode}
           initial={dialog.initial}
           lockName={dialog.lockName}
