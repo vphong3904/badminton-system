@@ -2565,3 +2565,108 @@ a.btn {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   Thanh cuộn dọc cho bảng dài: Quản lý bảng giá, Đánh giá khách hàng, Danh sách khách đặt sân
+   ============================================================ */
+.content > .table-card .table-scroll.scroll-y {
+  display: block;
+  flex: 0 1 auto;
+  min-height: 200px;
+  max-height: calc(100vh - 330px);
+  overflow: auto;
+}
+
+.table-scroll.scroll-y thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f3f6f4;
+}
+
+/* ============================================================
+   Quản lý cơ sở: các cơ sở xếp theo chiều dọc, có thanh cuộn dọc
+   ============================================================ */
+.branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  max-height: calc(100vh - 250px);
+  padding-right: 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.branch-list .branch-slide {
+  flex: 0 0 auto;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.branch-list .branch-slide:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.branch-photo-btn {
+  display: inline-flex;
+  align-self: flex-start;
+  margin: 0 0 12px;
+}
+
+.branch-slide-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.branch-slide-body .branch-info {
+  width: 100%;
+}
+
+/* ============================================================
+   Trang chủ sân: Avatar của chủ sân (nhãn + nút cùng hàng, ảnh nhỏ bên trái)
+   ============================================================ */
+.avatar-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-label {
+  font-weight: 600;
+}
+
+.avatar-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  background: #eef0f1;
+  border-radius: 50%;
+}
+
+.avatar-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.branch-info dt,
+.branch-info dd {
+  text-align: left;
+}

@@ -1355,7 +1355,7 @@ function validateBranchForm(f) {
   return { body }
 }
 
-function BranchCard({ b }) {
+function BranchCard({ b, uploading, onChangeImage }) {
   const st = BRANCH_STATUS[b.trangThai] ?? { label: b.trangThai, className: 'status-wait', hint: '' }
   const place = [b.quanHuyen, b.tinhThanh].filter(Boolean).join(', ')
   return (
@@ -1368,6 +1368,21 @@ function BranchCard({ b }) {
           <h3>{b.tenCoSo}</h3>
           <span className={`status-badge ${st.className}`}>{st.label}</span>
         </div>
+        {/* Nút đổi ảnh cơ sở nằm trên phần địa chỉ (API có sẵn POST /api/chu-san/co-so/:maCoSo/anh) */}
+        <label className={`btn btn-ghost btn-sm file-btn branch-photo-btn${uploading ? ' is-disabled' : ''}`}>
+          {uploading ? 'Đang tải ảnh...' : 'Đổi ảnh cơ sở'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
+            disabled={uploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) onChangeImage(b, file)
+            }}
+          />
+        </label>
         <dl className="branch-info">
           <div>
             <dt>Địa chỉ</dt>
@@ -1427,13 +1442,13 @@ function BranchesPage({ user }) {
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [index, setIndex] = useState(0) // cơ sở đang xem trên thanh trượt
+  const [uploadingId, setUploadingId] = useState(null) // cơ sở đang tải ảnh
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_BRANCH_FORM)
   const [imageFile, setImageFile] = useState(null)
   const [dialogError, setDialogError] = useState('')
   const [saving, setSaving] = useState(false)
-  const trackRef = useRef(null)
+  const listRef = useRef(null)
   const tick = useAutoRefresh()
 
   useEffect(() => {
@@ -1462,17 +1477,20 @@ function BranchesPage({ user }) {
     )
   }
 
-  const go = (i) => {
-    const next = Math.max(0, Math.min(branches.length - 1, i))
-    setIndex(next)
-    const el = trackRef.current
-    if (el) el.scrollTo({ left: next * el.clientWidth, behavior: 'smooth' })
-  }
-  // Vuốt/kéo thanh trượt thì cập nhật cơ sở đang xem
-  const onScroll = (e) => {
-    const el = e.currentTarget
-    const i = Math.round(el.scrollLeft / Math.max(el.clientWidth, 1))
-    if (i !== index) setIndex(i)
+  // Đổi ảnh cơ sở: POST /api/chu-san/co-so/:maCoSo/anh (multipart, trường tepAnh)
+  const changeImage = async (b, file) => {
+    setUploadingId(b.maCoSo)
+    setError('')
+    setSuccess('')
+    try {
+      const saved = await uploadBranchImage(token, file, b.maCoSo)
+      setBranches((prev) => prev.map((x) => (x.maCoSo === b.maCoSo ? { ...x, duongDanAnh: saved.duongDanAnh } : x)))
+      setSuccess(`Đã cập nhật ảnh của ${b.tenCoSo}.`)
+    } catch (err) {
+      setError(describeApiError(err))
+    } finally {
+      setUploadingId(null)
+    }
   }
 
   const openDialog = () => {
@@ -1511,8 +1529,8 @@ function BranchesPage({ user }) {
       setDialogOpen(false)
       setError('')
       setSuccess(`Đã thêm cơ sở ${created.tenCoSo}.${imageWarning}`)
-      // đợi thanh trượt vẽ xong cơ sở mới rồi trượt tới đó
-      setTimeout(() => go(next.length - 1), 50)
+      // đợi danh sách vẽ xong cơ sở mới rồi cuộn xuống cuối
+      setTimeout(() => listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' }), 50)
     } catch (err) {
       setDialogError(describeApiError(err))
     } finally {
@@ -1541,24 +1559,9 @@ function BranchesPage({ user }) {
           </div>
         )}
         {branches.length > 0 && (
-          <div className="branch-slider">
-            <button type="button" className="branch-arrow" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Cơ sở trước">
-              ‹
-            </button>
-            <div className="branch-track" ref={trackRef} onScroll={onScroll}>
-              {branches.map((b) => (
-                <BranchCard key={b.maCoSo} b={b} />
-              ))}
-            </div>
-            <button type="button" className="branch-arrow" onClick={() => go(index + 1)} disabled={index >= branches.length - 1} aria-label="Cơ sở sau">
-              ›
-            </button>
-          </div>
-        )}
-        {branches.length > 1 && (
-          <div className="branch-dots" role="tablist" aria-label="Chọn cơ sở">
-            {branches.map((b, i) => (
-              <button key={b.maCoSo} type="button" className={`branch-dot${i === index ? ' is-active' : ''}`} onClick={() => go(i)} title={b.tenCoSo} aria-label={b.tenCoSo} />
+          <div className="branch-list" ref={listRef}>
+            {branches.map((b) => (
+              <BranchCard key={b.maCoSo} b={b} uploading={uploadingId === b.maCoSo} onChangeImage={changeImage} />
             ))}
           </div>
         )}
@@ -1813,14 +1816,22 @@ function CourtsPage({ user }) {
     }
     setAdding(true)
     try {
-      const created = await callApi('/api/chu-san/san', {
+      let created = await callApi('/api/chu-san/san', {
         method: 'POST',
         token,
         body: { maCoSo: branch.maCoSo, tenSan, trangThai: 'active' },
       })
+      // Backend luôn tạo sân mới ở trạng thái đóng (maintenance) nên bật sân ngay bằng API có sẵn PATCH /san/:maSan/mo
+      let openWarning = ''
+      try {
+        const opened = await callApi(`/api/chu-san/san/${created.maSan}/mo`, { method: 'PATCH', token })
+        created = { ...created, ...opened }
+      } catch (err) {
+        openWarning = ` Nhưng chưa bật được sân (${describeApiError(err)}), sân đang ở trạng thái Đã đóng — bấm Mở sân để bật.`
+      }
       setCourts((prev) => [...prev, created])
       setNewName('')
-      setSuccess(`Đã thêm ${created.tenSan} vào ${branch.tenCoSo}. Sân đã ở trạng thái Hoạt động.`)
+      setSuccess(`Đã thêm ${created.tenSan} vào ${branch.tenCoSo}.${openWarning || ' Sân đang ở trạng thái Hoạt động.'}`)
       // Sân mới thuộc cơ sở khác với bộ lọc đang xem thì chuyển bộ lọc sang cơ sở đó để thấy ngay
       if (filterId !== 'all' && filterId !== addBranchId) setFilterId(addBranchId)
     } catch (err) {
@@ -2642,7 +2653,7 @@ function PricingPage({ user }) {
       </div>
 
       <section className="card table-card">
-        <div className="table-scroll">
+        <div className="table-scroll scroll-y">
           <table className="table table-pricing">
             <thead>
               <tr>
@@ -2801,7 +2812,7 @@ function ReviewsPage() {
       </div>
 
       <section className="card table-card">
-        <div className="table-scroll">
+        <div className="table-scroll scroll-y">
           <table className="table table-reviews">
             <thead>
               <tr>
@@ -2925,7 +2936,7 @@ function CustomersPage({ user }) {
       </div>
 
       <section className="card table-card">
-        <div className="table-scroll">
+        <div className="table-scroll scroll-y">
           <table className="table table-customers">
             <thead>
               <tr>
@@ -3042,16 +3053,47 @@ async function uploadBranchImage(token, file, maCoSo) {
   return payload.duLieu
 }
 
-// Trang chủ sân: ảnh cơ sở, thông tin tài khoản và đổi mật khẩu
+// Trang chủ sân: avatar chủ sân, thông tin tài khoản và đổi mật khẩu
 // API có sẵn: GET /api/tai-khoan/ca-nhan, POST /api/tai-khoan/doi-mat-khau ({ matKhauCu, matKhauMoi })
+// Avatar chủ sân: backend không có API/cột lưu avatar (cột NguoiDung.AnhDaiDien đã bị bỏ) nên ảnh chỉ được
+// lưu trong trình duyệt này (localStorage), thu nhỏ còn 256×256 trước khi lưu.
+const avatarKey = (id) => `avatar-chu-san:${id}`
+function loadAvatar(id) {
+  try {
+    return localStorage.getItem(avatarKey(id))
+  } catch {
+    return null
+  }
+}
+function resizeToDataUrl(file, size = 256) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const side = Math.min(img.width, img.height)
+      const canvas = document.createElement('canvas')
+      canvas.width = size
+      canvas.height = size
+      canvas.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Không đọc được ảnh này.'))
+    }
+    img.src = url
+  })
+}
+
 function ProfilePage({ user }) {
   const token = user.maTruyCap
+  const avatarId = user.maNguoiDung ?? user.email
   const [info, setInfo] = useState(null)
   const [form, setForm] = useState({ current: '', next: '', confirm: '' })
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
-  const [coSo, setCoSo] = useState(null) // cơ sở (để hiện ảnh bìa)
-  const [uploading, setUploading] = useState(false)
+  const [avatar, setAvatar] = useState(() => loadAvatar(avatarId))
   const [imageMsg, setImageMsg] = useState(null)
 
   useEffect(() => {
@@ -3066,33 +3108,21 @@ function ProfilePage({ user }) {
     }
   }, [token])
 
-  useEffect(() => {
-    if (user.vaiTro !== 'owner') return
-    let cancelled = false
-    fetchCoSo(token)
-      .then((data) => {
-        if (!cancelled) setCoSo(data)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [token, user.vaiTro])
-
-  const changeImage = async (e) => {
+  const changeAvatar = async (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    setUploading(true)
     setImageMsg(null)
+    if (!file.type.startsWith('image/')) {
+      return setImageMsg({ type: 'error', message: 'Vui lòng chọn một tệp ảnh.' })
+    }
     try {
-      const saved = await uploadBranchImage(token, file)
-      setCoSo((prev) => ({ ...prev, duongDanAnh: saved.duongDanAnh }))
-      setImageMsg({ type: 'success', message: 'Đã cập nhật ảnh cơ sở.' })
+      const dataUrl = await resizeToDataUrl(file)
+      localStorage.setItem(avatarKey(avatarId), dataUrl)
+      setAvatar(dataUrl)
+      setImageMsg({ type: 'success', message: 'Đã cập nhật avatar.' })
     } catch (err) {
-      setImageMsg({ type: 'error', message: describeApiError(err) })
-    } finally {
-      setUploading(false)
+      setImageMsg({ type: 'error', message: err.message || 'Không lưu được ảnh, vui lòng thử lại.' })
     }
   }
 
@@ -3138,16 +3168,17 @@ function ProfilePage({ user }) {
       <section className="card profile-card">
         <h2 className="card-title">Thông tin tài khoản</h2>
         {user.vaiTro === 'owner' && (
-          <div className="branch-photo">
-            {coSo?.duongDanAnh ? (
-              <img src={fileUrl(coSo.duongDanAnh)} alt="Ảnh cơ sở" />
-            ) : (
-              <div className="branch-photo-empty">Cơ sở chưa có ảnh</div>
-            )}
-            <label className={`btn btn-ghost btn-sm file-btn${!coSo || uploading ? ' is-disabled' : ''}`}>
-              {uploading ? 'Đang tải...' : 'Đổi ảnh'}
-              <input type="file" accept="image/*" hidden onChange={changeImage} disabled={!coSo || uploading} />
-            </label>
+          <div className="avatar-block">
+            {/* Nhãn và nút thêm ảnh cùng một hàng; ảnh thu nhỏ nằm bên trái */}
+            <div className="avatar-row">
+              <span className="avatar-label">Avatar của chủ sân</span>
+              <label className="btn btn-ghost btn-sm file-btn">
+                {avatar ? 'Đổi ảnh' : 'Thêm ảnh'}
+                <input type="file" accept="image/*" hidden onChange={changeAvatar} />
+              </label>
+            </div>
+            <div className="avatar-box">{avatar ? <img src={avatar} alt="Avatar của chủ sân" /> : <span>Không có ảnh</span>}</div>
+            <span className="field-hint">Ảnh chỉ được lưu trên trình duyệt này.</span>
             {imageMsg && <Alert type={imageMsg.type}>{imageMsg.message}</Alert>}
           </div>
         )}
