@@ -1544,10 +1544,10 @@ select {
   white-space: normal;
 }
 
-.table-reviews th:nth-child(3),
-.table-reviews td:nth-child(3),
-.table-reviews th:nth-child(5),
-.table-reviews td:nth-child(5) {
+.table-reviews th:nth-child(4),
+.table-reviews td:nth-child(4),
+.table-reviews th:nth-child(6),
+.table-reviews td:nth-child(6) {
   width: 30%;
 }
 
@@ -2669,4 +2669,325 @@ a.btn {
 .branch-info dt,
 .branch-info dd {
   text-align: left;
+}
+
+/* ============================================================
+   Doanh thu của cơ sở: tooltip khi lia chuột, chọn tuần / năm
+   ============================================================ */
+.stats.stats-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.chart-col {
+  position: relative;
+}
+
+.chart-col:hover,
+.chart-col:focus-visible {
+  background: rgba(31, 111, 84, 0.07);
+  outline: none;
+}
+
+.chart-tip {
+  display: none;
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  z-index: 5;
+  width: 240px;
+  padding: 10px 12px;
+  font-size: 12px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.chart-col:hover .chart-tip,
+.chart-col:focus-visible .chart-tip {
+  display: block;
+}
+
+.chart-col.tip-left .chart-tip {
+  left: 0;
+  transform: none;
+}
+
+.chart-col.tip-right .chart-tip {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+.chart-tip strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.chart-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.period-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+}
+
+.period-year {
+  min-width: 48px;
+  text-align: center;
+}
+
+/* ============================================================
+   Khiếu nại: giao diện kiểu tin nhắn (danh sách người gửi + nội dung)
+   ============================================================ */
+.chat-card {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  min-height: 480px;
+  height: calc(100vh - 220px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #eef1f0;
+  cursor: pointer;
+}
+
+.chat-item:hover,
+.chat-item.is-active {
+  background: #eaf3ef;
+}
+
+.chat-avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  font-weight: 700;
+  color: #fff;
+  background: #3f8f6f;
+  border-radius: 50%;
+}
+
+.chat-avatar.is-admin {
+  background: #b3261e;
+}
+
+.chat-item-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.chat-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-item-top small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-item-preview {
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-item.is-unread .chat-item-preview {
+  font-weight: 600;
+  color: var(--text, #17231e);
+}
+
+.chat-badge {
+  min-width: 20px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+  background: #d93025;
+  border-radius: 10px;
+}
+
+.chat-more {
+  margin: 10px auto;
+}
+
+.chat-detail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #f6f8f7;
+}
+
+.chat-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+}
+
+.warn-badge {
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #8a5300;
+  background: #fff1d6;
+  border-radius: 14px;
+}
+
+.warn-badge.is-banned {
+  color: #fff;
+  background: #b3261e;
+}
+
+.chat-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.chat-bubble {
+  align-self: flex-start;
+  max-width: min(560px, 85%);
+  padding: 10px 14px;
+  background: #fff;
+  border-radius: 4px 14px 14px 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.chat-bubble p {
+  margin: 4px 0 6px;
+  line-height: 1.45;
+}
+
+.chat-bubble small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-placeholder {
+  margin: auto;
+  color: var(--muted);
+}
+
+.chat-bubble,
+.chat-item,
+.chat-detail-head {
+  text-align: left;
+}
+
+
+/* ===== Trang chủ sân: cảnh cáo + lịch sử ===== */
+.warn-count { color: var(--text, inherit); }
+.warn-count.warn-max { color: #c0392b; }
+.warn-history { margin-top: 14px; display: grid; gap: 6px; }
+.warn-box {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.warn-box ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.warn-box li { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.warn-empty { margin: 0; color: var(--muted); font-size: 14px; }
+
+
+/* ===== Hoàn tiền: hai tab dính liền với bảng ===== */
+.tab-strip { display: flex; gap: 4px; margin-top: 20px; padding-left: 0; }
+.tab-strip-btn {
+  height: 42px;
+  padding: 0 20px;
+  border: 1px solid var(--border, #d9d9d9);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+  top: 1px;
+  color: #000;
+}
+.tab-strip-btn.active { background: var(--green); color: #fff; border-color: var(--green); }
+.tab-attached { border-top-left-radius: 0; margin-top: 0; }
+
+
+/* Đánh giá khách hàng: chỉ cột "Bình luận của khách hàng" và "Phản hồi của chủ sân" rộng, các cột còn lại thu nhỏ */
+.table-reviews {
+  min-width: 900px;
+  table-layout: fixed;
+}
+
+.table-reviews thead th:nth-child(1),
+.table-reviews tbody td:nth-child(1) {
+  width: 12%;
+}
+
+.table-reviews thead th:nth-child(2),
+.table-reviews tbody td:nth-child(2) {
+  width: 9%;
+}
+
+.table-reviews thead th:nth-child(3),
+.table-reviews tbody td:nth-child(3) {
+  width: 14%;
+}
+
+.table-reviews thead th:nth-child(4),
+.table-reviews tbody td:nth-child(4),
+.table-reviews thead th:nth-child(6),
+.table-reviews tbody td:nth-child(6) {
+  width: 29%;
+}
+
+.table-reviews thead th:nth-child(5),
+.table-reviews tbody td:nth-child(5) {
+  width: 7%;
+}
+
+.table-reviews tbody td {
+  padding: 10px 8px;
+  overflow-wrap: anywhere;
 }

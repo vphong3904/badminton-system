@@ -10,11 +10,22 @@ const MENU = [
   { id: 'courts', label: 'Quản lý sân' },
   { id: 'bookings', label: 'Quản lý đặt sân' },
   { id: 'refunds', label: 'Hoàn tiền' },
+  { id: 'complaints', label: 'Khiếu nại' },
   { id: 'calendar', label: 'Lịch hoạt động' },
   { id: 'pricing', label: 'Quản lý bảng giá' },
   { id: 'reviews', label: 'Đánh giá khách hàng' },
   { id: 'users', label: 'Danh sách khách đặt sân' },
-  { id: 'overview', label: 'Dashboard và thống kê' },
+  { id: 'overview', label: 'Doanh thu của cơ sở' },
+]
+
+// Địa bàn khi thêm cơ sở: app khách chỉ phục vụ TP. Hồ Chí Minh nên ô Tỉnh/Thành chỉ có một lựa chọn.
+// Quận/Huyện là các đơn vị cấp huyện của TP.HCM trước 01/07/2026 (16 quận, 1 thành phố Thủ Đức, 5 huyện).
+// Viết đúng như dữ liệu trong database (vd "Thủ Đức", "Gò Vấp") vì app khách lọc cơ sở theo đúng chuỗi này.
+const BRANCH_PROVINCE = 'TP. Hồ Chí Minh'
+const BRANCH_DISTRICTS = [
+  'Quận 1', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 6', 'Quận 7', 'Quận 8', 'Quận 10', 'Quận 11', 'Quận 12',
+  'Bình Tân', 'Bình Thạnh', 'Gò Vấp', 'Phú Nhuận', 'Tân Bình', 'Tân Phú', 'Thủ Đức',
+  'Bình Chánh', 'Cần Giờ', 'Củ Chi', 'Hóc Môn', 'Nhà Bè',
 ]
 
 const ALL_BRANCHES = 'Tất cả cơ sở'
@@ -91,6 +102,19 @@ const BANKS = [
 const WrenchIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+  </svg>
+)
+// Ổ khoá đóng (sân đang bị khoá) và ổ khoá mở (sân đang hoạt động)
+const LockClosedIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="4" y="11" width="16" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+)
+const LockOpenIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="4" y="11" width="16" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 7.5-2" />
   </svg>
 )
 const PlusIcon = () => (
@@ -238,9 +262,9 @@ function Filters({ date, setDate, branch, setBranch, branches }) {
   )
 }
 
-function BarChart({ data, max = 800, ticks = Y_TICKS, unit = '' }) {
+function BarChart({ data, max = 800, ticks = Y_TICKS, label = 'Biểu đồ doanh thu' }) {
   return (
-    <div className="chart" role="img" aria-label="Biểu đồ doanh thu theo tuần">
+    <div className="chart" role="img" aria-label={label}>
       <div className="chart-y">
         {ticks.map((t) => (
           <span key={t}>{t}</span>
@@ -252,11 +276,26 @@ function BarChart({ data, max = 800, ticks = Y_TICKS, unit = '' }) {
             <div key={t} className="chart-line" />
           ))}
         </div>
-        <div className="chart-bars">
-          {data.map((d) => (
-            <div key={d.day} className="chart-col">
-              <div className="chart-bar" style={{ '--v': d.value / max }} title={`${d.day}: ${d.value.toLocaleString('vi-VN')}${unit}`} />
+        <div className="chart-bars" style={{ gridTemplateColumns: `repeat(${data.length}, 1fr)` }}>
+          {data.map((d, i) => (
+            <div
+              key={d.day}
+              className={`chart-col${i < 2 ? ' tip-left' : ''}${i >= data.length - 2 ? ' tip-right' : ''}`}
+              tabIndex={0}
+            >
+              <div className="chart-bar" style={{ '--v': d.value / max }} />
               <span className="chart-x">{d.day}</span>
+              {d.tip && (
+                <div className="chart-tip" role="tooltip">
+                  <strong>{d.tipTitle}</strong>
+                  {d.tip.map(([k, v]) => (
+                    <div key={k} className="chart-tip-row">
+                      <span>{k}</span>
+                      <b>{v}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -272,14 +311,29 @@ function BarChart({ data, max = 800, ticks = Y_TICKS, unit = '' }) {
 const WEEK_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
 const pad2 = (n) => String(n).padStart(2, '0')
 
-// 7 ngày (Thứ 2 → Chủ nhật) của tuần chứa ngày đã chọn
-function weekOf(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const offset = (new Date(y, m - 1, d).getDay() + 6) % 7 // Thứ 2 = 0
-  return WEEK_LABELS.map((label, i) => {
-    const dt = new Date(y, m - 1, d - offset + i)
-    return { label, iso: `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}` }
-  })
+const parseISO = (str) => {
+  const [y, m, d] = str.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+const isoOf = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
+const addDays = (str, n) => {
+  const dt = parseISO(str)
+  dt.setDate(dt.getDate() + n)
+  return isoOf(dt)
+}
+// Thứ 2 của tuần chứa ngày đã chọn
+const mondayOf = (str) => addDays(str, -((parseISO(str).getDay() + 6) % 7))
+// Thứ 2 → giá trị của ô chọn tuần "YYYY-Www" (tuần ISO) và ngược lại
+function weekValueOf(mondayIso) {
+  const thu = parseISO(addDays(mondayIso, 3)) // thứ 5 quyết định năm của tuần ISO
+  const dayOfYear = Math.round((thu - new Date(thu.getFullYear(), 0, 1)) / 86400000) + 1
+  return `${thu.getFullYear()}-W${pad2(Math.floor((dayOfYear - 1) / 7) + 1)}`
+}
+function mondayOfWeekValue(value) {
+  const m = /^(\d{4})-W(\d{2})$/.exec(value)
+  if (!m) return null
+  const jan4 = `${m[1]}-01-04`
+  return addDays(mondayOf(jan4), (Number(m[2]) - 1) * 7)
 }
 
 const toViDate = (iso) => iso.split('-').reverse().join('/')
@@ -299,44 +353,69 @@ function Overview({ user, onNavigate }) {
   const isOwner = user.vaiTro === 'owner'
 
   const [date, setDate] = useState(todayISO())
-  const [branch, setBranch] = useState(null)
-  const [courts, setCourts] = useState([])
-  const [revenueByDay, setRevenueByDay] = useState({})
-  const [debt, setDebt] = useState(0)
-  const [unpaidNew, setUnpaidNew] = useState(0) // tiền các đơn khách đặt từ app nhưng chưa thanh toán
+  const [weekStart, setWeekStart] = useState(() => mondayOf(todayISO())) // Thứ 2 của tuần đang xem
+  const [year, setYear] = useState(() => Number(todayISO().slice(0, 4))) // năm đang xem ở dạng "Tháng"
+  const [branches, setBranches] = useState([])
+  const [maCoSo, setMaCoSo] = useState(null)
+  const [activeCourts, setActiveCourts] = useState(0)
+  const [revenueByDay, setRevenueByDay] = useState({}) // ngày → { revenue, count } của tuần đang xem
+  const [revenueByMonth, setRevenueByMonth] = useState({}) // tháng (1-12) → { revenue, count } của năm đang xem
   const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
   const [range, setRange] = useState('week') // biểu đồ xem theo tuần hoặc tháng
-  const [bookingCount, setBookingCount] = useState(null) // số lịch đặt của ngày đã chọn (null = đang tải)
+  const [dayStats, setDayStats] = useState(null) // { count, revenue } của ngày đã chọn (null = đang tải)
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
 
+  // Danh sách cơ sở: API có sẵn GET /api/chu-san/co-so
   useEffect(() => {
     if (!isOwner) return
     let cancelled = false
+    callApi('/api/chu-san/co-so', { token })
+      .then((list) => {
+        if (cancelled) return
+        const all = Array.isArray(list) ? list : []
+        setBranches(all)
+        setMaCoSo((prev) => prev ?? all[0]?.maCoSo ?? null)
+        if (all.length === 0) setLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err.message)
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token])
+
+  // Số sân hoạt động + doanh thu của tuần (hoặc của cả năm khi xem theo tháng): API có sẵn
+  // GET /api/chu-san/san?maCoSo= và GET /api/chu-san/bao-cao/doanh-thu?maCoSo=&tuNgay=&denNgay= | &nam=
+  useEffect(() => {
+    if (!isOwner || !maCoSo) return
+    let cancelled = false
     async function load() {
       try {
-        // Dùng các API có sẵn của chủ sân (số liệu lấy trực tiếp từ database)
-        const coSo = await fetchCoSo(token)
-        const locCoSo = coSo ? `?maCoSo=${coSo.maCoSo}` : '' // doanh thu chỉ tính cơ sở hiện tại
-        const [cacSan, doanhThu, congNo, donChuaTra] = await Promise.all([
-          callApi('/api/chu-san/san', { token }),
-          callApi(`/api/chu-san/bao-cao/doanh-thu${locCoSo}`, { token }),
-          callApi('/api/chu-san/bao-cao/cong-no', { token }),
-          // Đơn khách đặt qua app nhưng chưa thanh toán: tiền nợ mới = tổng tiền sân (giá × số giờ) của các đơn này
-          coSo
-            ? callApi(`/api/chu-san/dat-san?maCoSo=${coSo.maCoSo}&trangThai=pending_payment&trangThaiThanhToan=pending&soDong=200`, { token })
-            : { cacDon: [] },
+        const loc = range === 'week' ? `tuNgay=${weekStart}&denNgay=${addDays(weekStart, 6)}` : `nam=${year}`
+        const [cacSan, doanhThu] = await Promise.all([
+          callApi(`/api/chu-san/san?maCoSo=${maCoSo}`, { token }),
+          callApi(`/api/chu-san/bao-cao/doanh-thu?maCoSo=${maCoSo}&${loc}`, { token }),
         ])
         if (cancelled) return
-        const byDay = {}
-        doanhThu.theoNgay.forEach((r) => {
-          byDay[String(r.ngay).slice(0, 10)] = { revenue: Number(r.doanhThu), count: Number(r.soLuotDat) }
-        })
-        setBranch(coSo)
-        setCourts(cacSan)
-        setRevenueByDay(byDay)
-        setDebt(Number(congNo.tongNo))
-        setUnpaidNew(donChuaTra.cacDon.reduce((sum, d) => sum + Number(d.tongTien), 0))
+        setActiveCourts(cacSan.filter((c) => c.trangThai === 'active').length)
+        if (range === 'week') {
+          const byDay = {}
+          doanhThu.theoNgay.forEach((r) => {
+            byDay[String(r.ngay).slice(0, 10)] = { revenue: Number(r.doanhThu), count: Number(r.soLuotDat) }
+          })
+          setRevenueByDay(byDay)
+        } else {
+          const byMonth = {}
+          doanhThu.theoThang.forEach((r) => {
+            byMonth[Number(r.thang)] = { revenue: Number(r.doanhThu), count: Number(r.soLuotDat) }
+          })
+          setRevenueByMonth(byMonth)
+        }
+        setError('')
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -347,22 +426,25 @@ function Overview({ user, onNavigate }) {
     return () => {
       cancelled = true
     }
-  }, [isOwner, token, tick])
+  }, [isOwner, token, maCoSo, range, weekStart, year, tick])
 
-  // Lịch đặt trong ngày: API có sẵn GET /api/chu-san/dat-san?ngay=... (đếm đơn đã thanh toán: confirmed + completed)
-  const maCoSo = branch?.maCoSo
+  // Lịch đặt + doanh thu của ngày đã chọn: GET /api/chu-san/dat-san?ngay= (đếm đơn confirmed + completed)
+  // và GET /api/chu-san/bao-cao/doanh-thu?tuNgay=&denNgay= (cùng một ngày)
   useEffect(() => {
     if (!isOwner || !maCoSo || !date) return
     let cancelled = false
-    callApi(`/api/chu-san/dat-san?ngay=${date}&maCoSo=${maCoSo}&soDong=200`, { token })
-      .then((data) => {
+    Promise.all([
+      callApi(`/api/chu-san/dat-san?ngay=${date}&maCoSo=${maCoSo}&soDong=200`, { token }),
+      callApi(`/api/chu-san/bao-cao/doanh-thu?maCoSo=${maCoSo}&tuNgay=${date}&denNgay=${date}`, { token }),
+    ])
+      .then(([datSan, doanhThu]) => {
         if (cancelled) return
-        const paid = data.cacDon.filter((d) => d.trangThai === 'confirmed' || d.trangThai === 'completed')
-        setBookingCount(paid.length)
+        const paid = datSan.cacDon.filter((d) => d.trangThai === 'confirmed' || d.trangThai === 'completed')
+        setDayStats({ count: paid.length, revenue: Number(doanhThu.tongCong.doanhThu) })
       })
       .catch((err) => {
         if (!cancelled) {
-          setBookingCount(0)
+          setDayStats({ count: 0, revenue: 0 })
           setError(err.message)
         }
       })
@@ -379,26 +461,45 @@ function Overview({ user, onNavigate }) {
     )
   }
 
-  const day = revenueByDay[date] ?? { revenue: 0, count: 0 }
   const show = (v) => (loading ? '...' : v)
-
   const stats = [
-    { label: 'Lịch đặt trong ngày', value: show(bookingCount ?? '...') },
-    { label: 'Doanh thu trong ngày', value: show(formatVnd(day.revenue)) },
-    { label: 'Sân hoạt động', value: show(courts.filter((c) => c.trangThai === 'active').length) },
-    { label: 'Số tiền mà khách hàng chưa thanh toán', value: show(formatVnd(debt + unpaidNew)) },
+    { label: 'Lịch đặt trong ngày', value: show(dayStats?.count ?? '...') },
+    { label: 'Doanh thu trong ngày', value: show(dayStats ? formatVnd(dayStats.revenue) : '...') },
+    { label: 'Sân hoạt động', value: show(activeCourts) },
   ]
 
-  const week = weekOf(date || todayISO())
-  const periodDays = range === 'week' ? week : monthOf(date || todayISO())
-  const weekly = periodDays.map((w) => ({
-    day: w.label,
-    value: Math.round((revenueByDay[w.iso]?.revenue ?? 0) / 1000),
-    iso: w.iso,
-  }))
-  const scale = niceScale(Math.max(...weekly.map((w) => w.value)))
-  const periodRevenue = periodDays.reduce((sum, w) => sum + (revenueByDay[w.iso]?.revenue ?? 0), 0)
-  const periodOrders = periodDays.reduce((sum, w) => sum + (revenueByDay[w.iso]?.count ?? 0), 0)
+  // Dữ liệu cột. Backend không lưu lịch sử số sân hoạt động nên "Sân hoạt động" là số sân đang hoạt động hiện tại.
+  const chartData =
+    range === 'week'
+      ? WEEK_LABELS.map((label, i) => {
+          const iso = addDays(weekStart, i)
+          const r = revenueByDay[iso] ?? { revenue: 0, count: 0 }
+          return {
+            day: label,
+            value: Math.round(r.revenue / 1000),
+            tipTitle: `${label} · ${toViDate(iso)}`,
+            tip: [
+              ['Lịch đặt trong ngày', r.count],
+              ['Doanh thu trong ngày', formatVnd(r.revenue)],
+              ['Sân hoạt động', activeCourts],
+            ],
+          }
+        })
+      : Array.from({ length: 12 }, (_, i) => {
+          const r = revenueByMonth[i + 1] ?? { revenue: 0, count: 0 }
+          return {
+            day: `Th${i + 1}`,
+            value: Math.round(r.revenue / 1000),
+            tipTitle: `Tháng ${i + 1}/${year}`,
+            tip: [
+              ['Tổng doanh thu tháng', formatVnd(r.revenue)],
+              ['Tổng lịch đặt', r.count],
+              ['Sân hoạt động (nhiều nhất)', activeCourts],
+            ],
+          }
+        })
+  const scale = niceScale(Math.max(0, ...chartData.map((w) => w.value)))
+  const weekEnd = addDays(weekStart, 6)
 
   return (
     <Page subtitle="">
@@ -407,15 +508,31 @@ function Overview({ user, onNavigate }) {
       <div className="filters filters-inline">
         <label className="field-inline">
           <span>Ngày: </span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value)
+              if (e.target.value) {
+                setWeekStart(mondayOf(e.target.value))
+                setYear(Number(e.target.value.slice(0, 4)))
+              }
+            }}
+          />
         </label>
-        <div className="field-inline">
-          <span>Cơ sở hiện tại: </span>
-          <strong>{branch?.tenCoSo ?? '—'}</strong>
-        </div>
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={maCoSo ?? ''} onChange={(e) => setMaCoSo(Number(e.target.value))} disabled={branches.length < 2}>
+            {branches.map((b) => (
+              <option key={b.maCoSo} value={b.maCoSo}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <div className="stats">
+      <div className="stats stats-3">
         {stats.map((s) => (
           <div key={s.label} className="card stat">
             <div className="stat-label">{s.label}</div>
@@ -424,18 +541,43 @@ function Overview({ user, onNavigate }) {
         ))}
       </div>
 
-      <p className="hint">
-        Số tiền khách chưa thanh toán = công nợ cũ <strong>{formatVnd(debt)}</strong> + đơn khách đặt qua app chưa thanh toán <strong>{formatVnd(unpaidNew)}</strong> (tiền sân × số giờ đặt).
-      </p>
-
       <section className="card chart-card">
         <div className="chart-head">
           <h2>
             {range === 'week'
-              ? `Doanh thu theo tuần (${toViDate(week[0].iso)} – ${toViDate(week[6].iso)}) · nghìn đồng`
-              : `Doanh thu theo tháng ${date.slice(5, 7)}/${date.slice(0, 4)} · nghìn đồng`}
+              ? `Doanh thu theo tuần (${toViDate(weekStart)} – ${toViDate(weekEnd)}) · nghìn đồng`
+              : `Doanh thu theo tháng năm ${year} · nghìn đồng`}
           </h2>
           <div className="actions">
+            {range === 'week' ? (
+              <div className="period-picker">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setWeekStart(addDays(weekStart, -7))} aria-label="Tuần trước">
+                  ‹
+                </button>
+                <input
+                  type="week"
+                  value={weekValueOf(weekStart)}
+                  onChange={(e) => {
+                    const monday = mondayOfWeekValue(e.target.value)
+                    if (monday) setWeekStart(monday)
+                  }}
+                  aria-label="Chọn tuần"
+                />
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setWeekStart(addDays(weekStart, 7))} aria-label="Tuần sau">
+                  ›
+                </button>
+              </div>
+            ) : (
+              <div className="period-picker">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setYear(year - 1)} aria-label="Năm trước">
+                  ‹
+                </button>
+                <strong className="period-year">{year}</strong>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setYear(year + 1)} aria-label="Năm sau">
+                  ›
+                </button>
+              </div>
+            )}
             <button type="button" className={`btn btn-sm ${range === 'week' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setRange('week')}>
               Tuần
             </button>
@@ -444,10 +586,7 @@ function Overview({ user, onNavigate }) {
             </button>
           </div>
         </div>
-        <p className="hint">
-          Tổng doanh thu: <strong>{formatVnd(periodRevenue)}</strong> · Số lượt đặt: <strong>{periodOrders}</strong>
-        </p>
-        <BarChart data={weekly} max={scale.max} ticks={scale.ticks} unit="k" />
+        <BarChart data={chartData} max={scale.max} ticks={scale.ticks} label={range === 'week' ? 'Biểu đồ doanh thu theo tuần' : 'Biểu đồ doanh thu theo tháng'} />
       </section>
 
       <div className="actions">
@@ -460,16 +599,6 @@ function Overview({ user, onNavigate }) {
       </div>
     </Page>
   )
-}
-
-// Các ngày trong tháng của ngày đã chọn
-function monthOf(dateStr) {
-  const [y, m] = dateStr.split('-').map(Number)
-  const n = new Date(y, m, 0).getDate()
-  return Array.from({ length: n }, (_, i) => ({
-    iso: `${y}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`,
-    label: String(i + 1),
-  }))
 }
 
 // Đổi "HH:mm" thành vị trí cột (mỗi cột = 30 phút, cột 0 = 06:00)
@@ -507,7 +636,8 @@ function CourtMatrix({ user }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
-  const [branch, setBranch] = useState(null) // cơ sở tài khoản đang quản lý
+  const { branches, error: branchError } = useBranches(token, isOwner)
+  const [branchId, setBranchId] = useState(readLastBranch) // mặc định: cơ sở được chọn cuối cùng
   const [courts, setCourts] = useState([]) // tất cả sân của cơ sở đó
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
@@ -516,7 +646,13 @@ function CourtMatrix({ user }) {
   // Đơn đã thanh toán của ngày đang xem (API có sẵn GET /api/chu-san/dat-san): confirmed (đã đặt) và completed (hoàn tất)
   // → vẽ thanh vàng từ giờ bắt đầu đến giờ kết thúc kèm tên khách. Đổi ngày thì tải lại.
   const [donTheoNgay, setDonTheoNgay] = useState([])
+  // Cơ sở đang xem: cơ sở chọn cuối cùng nếu còn tồn tại, không thì cơ sở đầu tiên
+  const branch = branches?.find((b) => String(b.maCoSo) === branchId) ?? branches?.[0] ?? null
   const maCoSoLich = branch?.maCoSo
+  const chooseBranch = (id) => {
+    setBranchId(id)
+    saveLastBranch(id)
+  }
   useEffect(() => {
     if (!isOwner || !maCoSoLich) return
     let cancelled = false
@@ -569,15 +705,19 @@ function CourtMatrix({ user }) {
   }, [])
 
   useEffect(() => {
-    if (!isOwner) return
+    if (!isOwner || branches === null) return
+    if (!maCoSoLich) {
+      setCourts([])
+      setLoading(false)
+      return
+    }
     let cancelled = false
     async function load() {
       try {
-        const coSo = await fetchCoSo(token)
-        const cacSan = coSo ? await callApi('/api/chu-san/san', { token }) : []
+        const cacSan = await callApi(`/api/chu-san/san?maCoSo=${maCoSoLich}`, { token })
         if (cancelled) return
-        setBranch(coSo)
         setCourts(cacSan)
+        setError('')
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -588,7 +728,7 @@ function CourtMatrix({ user }) {
     return () => {
       cancelled = true
     }
-  }, [isOwner, token, tick])
+  }, [isOwner, token, branches, maCoSoLich, tick])
 
   if (!isOwner) {
     return (
@@ -600,17 +740,23 @@ function CourtMatrix({ user }) {
 
   return (
     <Page>
-      {error && <Alert type="error">{error}</Alert>}
+      {(error || branchError) && <Alert type="error">{error || branchError}</Alert>}
 
       <div className="filters filters-inline">
         <label className="field-inline">
           <span>Ngày: </span>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
-        <div className="field-inline">
-          <span>Cơ sở hiện tại: </span>
-          <strong>{branch?.tenCoSo ?? '—'}</strong>
-        </div>
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={branch ? String(branch.maCoSo) : ''} onChange={(e) => chooseBranch(e.target.value)}>
+            {(branches ?? []).map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
         {/* Chú thích màu trạng thái */}
         <div className="legend" aria-label="Chú thích màu">
           <span className="legend-item">
@@ -771,7 +917,8 @@ function BookingsPage({ user, filters }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
-  const [branch, setBranch] = useState(null)
+  const { branches, error: branchError } = useBranches(token, isOwner)
+  const [branchId, setBranchId] = useState('all') // mặc định hiển thị tất cả cơ sở
   const [orders, setOrders] = useState([])
   const [total, setTotal] = useState(0)
   const [reasons, setReasons] = useState({}) // maDatSan → lý do chủ sân đã huỷ/từ chối
@@ -803,30 +950,14 @@ function BookingsPage({ user, filters }) {
     return () => clearInterval(id)
   }, [setDate])
 
+  const maCoSo = branchId // 'all' hoặc mã cơ sở
+  const hasBranches = (branches?.length ?? 0) > 0
   useEffect(() => {
-    if (!isOwner) return
-    let cancelled = false
-    fetchCoSo(token)
-      .then((coSo) => {
-        if (!cancelled) {
-          setBranch(coSo)
-          if (!coSo) setLoading(false)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err.message)
-          setLoading(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [isOwner, token])
+    if (branches !== null && branches.length === 0) setLoading(false)
+  }, [branches])
 
-  const maCoSo = branch?.maCoSo
   useEffect(() => {
-    if (!isOwner || !maCoSo) return
+    if (!isOwner || !hasBranches) return
     let cancelled = false
     // Tải lại theo chu kỳ / sau thao tác thì không hiện "Đang tải" (tránh nhấp nháy)
     const key = `${maCoSo}|${date}|${allDays}`
@@ -834,7 +965,8 @@ function BookingsPage({ user, filters }) {
     lastKey.current = key
     if (!silent) setLoading(true)
     const loc = allDays ? '' : `&ngay=${date}`
-    callApi(`/api/chu-san/dat-san?maCoSo=${maCoSo}&soDong=200${loc}`, { token })
+    const locCoSo = maCoSo === 'all' ? '' : `&maCoSo=${maCoSo}`
+    callApi(`/api/chu-san/dat-san?soDong=200${locCoSo}${loc}`, { token })
       .then((data) => {
         if (cancelled) return
         setOrders(data.cacDon)
@@ -849,7 +981,7 @@ function BookingsPage({ user, filters }) {
     return () => {
       cancelled = true
     }
-  }, [isOwner, token, maCoSo, date, allDays, reload, tick])
+  }, [isOwner, token, hasBranches, maCoSo, date, allDays, reload, tick])
 
   // Danh sách đơn không trả lý do huỷ → với đơn "chưa thanh toán" lấy chi tiết để biết lý do chủ sân đã nhập
   useEffect(() => {
@@ -927,7 +1059,7 @@ function BookingsPage({ user, filters }) {
       return true
     })
     .sort((a, b) => (allDays ? 0 : a.gioBatDau.localeCompare(b.gioBatDau)))
-  const colCount = allDays ? 7 : 6
+  const colCount = allDays ? 8 : 7
 
   if (!isOwner) {
     return (
@@ -939,7 +1071,7 @@ function BookingsPage({ user, filters }) {
 
   return (
     <Page>
-      {error && <Alert type="error">{error}</Alert>}
+      {(error || branchError) && <Alert type="error">{error || branchError}</Alert>}
       {notice && <Alert type="success">{notice}</Alert>}
 
       <div className="filters filters-inline">
@@ -951,10 +1083,17 @@ function BookingsPage({ user, filters }) {
           <input type="checkbox" checked={allDays} onChange={(e) => setAllDays(e.target.checked)} />
           <span>Mọi ngày</span>
         </label>
-        <div className="field-inline">
-          <span>Cơ sở hiện tại: </span>
-          <strong>{branch?.tenCoSo ?? '—'}</strong>
-        </div>
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="all">Hiển thị tất cả cơ sở</option>
+            {(branches ?? []).map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="toolbar">
@@ -984,6 +1123,7 @@ function BookingsPage({ user, filters }) {
                 {allDays && <th>Ngày</th>}
                 <th>Giờ bắt đầu</th>
                 <th>Giờ kết thúc</th>
+                <th>Cơ sở</th>
                 <th>Trạng thái</th>
                 <th>Thao tác</th>
               </tr>
@@ -1012,6 +1152,7 @@ function BookingsPage({ user, filters }) {
                       {allDays && <td>{toViDate(String(d.ngay).slice(0, 10))}</td>}
                       <td>{d.gioBatDau.slice(0, 5)}</td>
                       <td>{d.gioKetThuc.slice(0, 5)}</td>
+                      <td>{d.tenCoSo ?? '—'}</td>
                       <td>
                         <span className={`status-badge status-${BOOKING_BADGE[d.hienThi] ?? 'unpaid'}`}>{d.hienThi}</span>
                       </td>
@@ -1113,7 +1254,7 @@ function BookingsPage({ user, filters }) {
 
 // Hoàn tiền: khách huỷ đơn đã thanh toán → chủ sân chuyển khoản hoàn rồi bấm "Đã hoàn tiền"
 // API có sẵn: GET /api/chu-san/hoan-tien?trangThai=processing|refunded, POST /api/chu-san/hoan-tien/:maThanhToan/hoan-thanh
-function RefundsPage({ user }) {
+function RefundsPage({ user, onNavigate }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
   const [tab, setTab] = useState('processing')
@@ -1180,16 +1321,16 @@ function RefundsPage({ user }) {
       {error && <Alert type="error">{error}</Alert>}
       {notice && <Alert type="success">{notice}</Alert>}
 
-      <div className="actions">
-        <button type="button" className={`btn btn-sm ${tab === 'processing' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('processing')}>
+      <div className="tab-strip" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'processing'} className={`tab-strip-btn${tab === 'processing' ? ' active' : ''}`} onClick={() => setTab('processing')}>
           Chờ hoàn tiền
         </button>
-        <button type="button" className={`btn btn-sm ${tab === 'refunded' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('refunded')}>
+        <button type="button" role="tab" aria-selected={tab === 'refunded'} className={`tab-strip-btn${tab === 'refunded' ? ' active' : ''}`} onClick={() => setTab('refunded')}>
           Đã hoàn tiền
         </button>
       </div>
 
-      <section className="card table-card">
+      <section className="card table-card tab-attached">
         <div className="table-scroll">
           <table className="table table-refunds">
             <thead>
@@ -1197,7 +1338,7 @@ function RefundsPage({ user }) {
                 <th>Khách</th>
                 <th>Đơn đặt</th>
                 <th>Số tiền hoàn</th>
-                <th>Tài khoản nhận hoàn</th>
+                <th>Tài khoản nhận hoàn tiền</th>
                 <th>{tab === 'processing' ? 'Thao tác' : 'Ngày hoàn'}</th>
               </tr>
             </thead>
@@ -1580,12 +1721,26 @@ function BranchesPage({ user }) {
                 <input className="input" value={form.diaChi} onChange={update('diaChi')} maxLength={255} placeholder="Số nhà, đường, phường" />
               </label>
               <label className="dialog-field">
-                <span>Quận/Huyện *</span>
-                <input className="input" value={form.quanHuyen} onChange={update('quanHuyen')} maxLength={80} />
+                <span>Tỉnh/Thành *</span>
+                <select className="input" value={form.tinhThanh} onChange={(e) => setForm((f) => ({ ...f, tinhThanh: e.target.value, quanHuyen: '' }))}>
+                  <option value="">Chọn Tỉnh/Thành</option>
+                  {[BRANCH_PROVINCE].map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="dialog-field">
-                <span>Tỉnh/Thành *</span>
-                <input className="input" value={form.tinhThanh} onChange={update('tinhThanh')} maxLength={80} />
+                <span>Quận/Huyện *</span>
+                <select className="input" value={form.quanHuyen} onChange={update('quanHuyen')} disabled={!form.tinhThanh}>
+                  <option value="">{form.tinhThanh ? 'Chọn Quận/Huyện' : 'Chọn Tỉnh/Thành trước'}</option>
+                  {(form.tinhThanh === BRANCH_PROVINCE ? BRANCH_DISTRICTS : []).map((q) => (
+                    <option key={q} value={q}>
+                      {q}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="dialog-field">
                 <span>Số điện thoại *</span>
@@ -1651,6 +1806,182 @@ function BranchesPage({ user }) {
   )
 }
 
+// Trang Khiếu nại (giao diện kiểu tin nhắn): backend không có API khiếu nại riêng cho chủ sân, nên dùng API có sẵn
+// GET /api/thong-bao (thông báo của chính chủ sân) và chỉ lấy thông báo có loaiThamChieu = 'complaint':
+//  - complaint_received: khách khiếu nại (nội dung dạng "<tên khách> khiếu nại về đơn <mã đơn> (<cơ sở>)...")
+//  - owner_warning / owner_banned: quản trị viên cảnh cáo / khoá tài khoản (kèm "lần vi phạm thứ N/3")
+const MAX_WARNINGS = 3
+
+function describeComplaint(n) {
+  if (n.loai === 'owner_warning' || n.loai === 'owner_banned') {
+    const m = /lần vi phạm thứ (\d)\//.exec(n.noiDung)
+    const warnings = n.loai === 'owner_banned' ? MAX_WARNINGS : m ? Number(m[1]) : null
+    return { key: 'admin', sender: 'Quản trị viên', fromAdmin: true, warnings, banned: n.loai === 'owner_banned' }
+  }
+  const m = /^(.+?) khiếu nại về đơn/.exec(n.noiDung)
+  const sender = m ? m[1] : 'Khách hàng'
+  return { key: `khach:${sender}`, sender, fromAdmin: false, warnings: null, banned: false }
+}
+
+const viTime = (iso) => (iso ? new Date(iso).toLocaleString('vi-VN', { hour12: false }) : '')
+
+function ComplaintsPage({ user }) {
+  const token = user.maTruyCap
+  const isOwner = user.vaiTro === 'owner'
+  const [items, setItems] = useState([])
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [loading, setLoading] = useState(isOwner)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState('')
+  const [selected, setSelected] = useState(null)
+  const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
+
+  const merge = (prev, incoming) => {
+    const map = new Map(prev.map((x) => [x.maThongBao, x]))
+    incoming.forEach((x) => map.set(x.maThongBao, x))
+    return [...map.values()].sort((a, b) => b.maThongBao - a.maThongBao)
+  }
+
+  useEffect(() => {
+    if (!isOwner) return
+    let cancelled = false
+    callApi('/api/thong-bao?trang=1&soLuong=50', { token })
+      .then((data) => {
+        if (cancelled) return
+        const complaints = data.cacThongBao.filter((n) => n.loaiThamChieu === 'complaint')
+        setItems((prev) => merge(prev, complaints))
+        setHasMore(data.cacThongBao.length >= 50)
+        setError('')
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token, tick])
+
+  const loadMore = async () => {
+    setLoadingMore(true)
+    try {
+      const next = page + 1
+      const data = await callApi(`/api/thong-bao?trang=${next}&soLuong=50`, { token })
+      setItems((prev) => merge(prev, data.cacThongBao.filter((n) => n.loaiThamChieu === 'complaint')))
+      setHasMore(data.cacThongBao.length >= 50)
+      setPage(next)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // Gom thông báo thành các cuộc trò chuyện theo người gửi; quản trị viên luôn ở đầu danh sách
+  const threads = []
+  const byKey = new Map()
+  items.forEach((n) => {
+    const info = describeComplaint(n)
+    if (!byKey.has(info.key)) {
+      const thread = { key: info.key, sender: info.sender, fromAdmin: info.fromAdmin, messages: [], unread: 0, warnings: 0, banned: false }
+      byKey.set(info.key, thread)
+      threads.push(thread)
+    }
+    const t = byKey.get(info.key)
+    t.messages.push(n) // items đã sắp mới → cũ
+    if (!n.daDoc) t.unread += 1
+    if (info.warnings) t.warnings = Math.max(t.warnings, info.warnings)
+    if (info.banned) t.banned = true
+  })
+  threads.sort((a, b) => Number(b.fromAdmin) - Number(a.fromAdmin) || b.messages[0].maThongBao - a.messages[0].maThongBao)
+  const current = threads.find((t) => t.key === selected) ?? null
+
+  // Mở một cuộc trò chuyện: đánh dấu đã đọc bằng PATCH /api/thong-bao/:maThongBao/da-doc
+  const openThread = (thread) => {
+    setSelected(thread.key)
+    thread.messages
+      .filter((m) => !m.daDoc)
+      .forEach((m) => {
+        callApi(`/api/thong-bao/${m.maThongBao}/da-doc`, { method: 'PATCH', token })
+          .then(() => setItems((prev) => prev.map((x) => (x.maThongBao === m.maThongBao ? { ...x, daDoc: true } : x))))
+          .catch(() => {})
+      })
+  }
+
+  if (!isOwner) {
+    return (
+      <Page>
+        <Alert>Tài khoản quản trị viên không quản lý cơ sở nào.</Alert>
+      </Page>
+    )
+  }
+
+  return (
+    <Page>
+      {error && <Alert type="error">{error}</Alert>}
+      <section className="card chat-card">
+        <aside className="chat-list">
+          {loading && <p className="table-empty">Đang tải...</p>}
+          {!loading && threads.length === 0 && <p className="table-empty">Chưa có khiếu nại nào.</p>}
+          {threads.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={`chat-item${current?.key === t.key ? ' is-active' : ''}${t.unread ? ' is-unread' : ''}`}
+              onClick={() => openThread(t)}
+            >
+              <span className={`chat-avatar${t.fromAdmin ? ' is-admin' : ''}`}>{t.sender.trim().charAt(0).toUpperCase()}</span>
+              <span className="chat-item-body">
+                <span className="chat-item-top">
+                  <strong>{t.sender}</strong>
+                  <small>{new Date(t.messages[0].ngayTao).toLocaleDateString('vi-VN')}</small>
+                </span>
+                <span className="chat-item-preview">{t.messages[0].noiDung}</span>
+              </span>
+              {t.unread > 0 && <span className="chat-badge">{t.unread}</span>}
+            </button>
+          ))}
+          {hasMore && (
+            <button type="button" className="btn btn-ghost btn-sm chat-more" onClick={loadMore} disabled={loadingMore}>
+              {loadingMore ? 'Đang tải...' : 'Xem thêm tin cũ hơn'}
+            </button>
+          )}
+        </aside>
+
+        <div className="chat-detail">
+          {!current && <p className="chat-placeholder">Chọn một người gửi ở bên trái để xem nội dung khiếu nại.</p>}
+          {current && (
+            <>
+              <div className="chat-detail-head">
+                <span className={`chat-avatar${current.fromAdmin ? ' is-admin' : ''}`}>{current.sender.trim().charAt(0).toUpperCase()}</span>
+                <strong>{current.sender}</strong>
+                {/* Tin từ quản trị viên: chỉ số cảnh cáo, đủ 3 lần thì tài khoản bị khoá */}
+                {current.fromAdmin && (
+                  <span className={`warn-badge${current.banned ? ' is-banned' : ''}`}>
+                    {current.banned ? `Cảnh cáo ${MAX_WARNINGS}/${MAX_WARNINGS} · Tài khoản đã bị khoá` : `Cảnh cáo ${current.warnings}/${MAX_WARNINGS}`}
+                  </span>
+                )}
+              </div>
+              <div className="chat-messages">
+                {[...current.messages].reverse().map((m) => (
+                  <div key={m.maThongBao} className="chat-bubble">
+                    <strong>{m.tieuDe}</strong>
+                    <p>{m.noiDung}</p>
+                    <small>{viTime(m.ngayTao)}</small>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+    </Page>
+  )
+}
+
 function CourtsPage({ user }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
@@ -1666,6 +1997,8 @@ function CourtsPage({ user }) {
   const [newName, setNewName] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [adding, setAdding] = useState(false)
+  const [addOpen, setAddOpen] = useState(false) // cửa sổ Thêm sân
+  const [addError, setAddError] = useState('')
   const [giaTheoCoSo, setGiaTheoCoSo] = useState({}) // maCoSo → bảng giá (khungGias) của cơ sở đó, để hiện giá theo từng cơ sở
   const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
 
@@ -1761,7 +2094,7 @@ function CourtsPage({ user }) {
     setSuccess('')
   }
 
-  // Đóng sân / Mở sân: sân đóng thì khách (app) không đặt được nữa, đơn đã đặt vẫn giữ nguyên
+  // Khoá sân / Mở khoá sân: sân bị khoá thì khách (app) không đặt được nữa, đơn đã đặt vẫn giữ nguyên
   const toggleStatus = async (court) => {
     const closing = court.trangThai === 'active'
     setBusyId(court.maSan)
@@ -1798,18 +2131,24 @@ function CourtsPage({ user }) {
     }
   }
 
+  const openAddDialog = () => {
+    setAddError('')
+    setNewName('')
+    if (filterId !== 'all') setAddBranchId(filterId) // mặc định chọn cơ sở đang lọc
+    setAddOpen(true)
+  }
+
   // Thêm sân mới vào cơ sở đã chọn: sân ở trạng thái Hoạt động ngay
   const addCourt = async (e) => {
     e.preventDefault()
     const tenSan = newName.trim()
-    setError('')
-    setSuccess('')
+    setAddError('')
     if (!tenSan) {
-      setError('Vui lòng nhập tên sân.')
+      setAddError('Vui lòng nhập tên sân.')
       return
     }
     if (!branch) {
-      setError('Vui lòng chọn cơ sở.')
+      setAddError('Vui lòng chọn cơ sở.')
       return
     }
     setAdding(true)
@@ -1819,26 +2158,27 @@ function CourtsPage({ user }) {
         token,
         body: { maCoSo: branch.maCoSo, tenSan, trangThai: 'active' },
       })
-      // Backend luôn tạo sân mới ở trạng thái đóng (maintenance) nên bật sân ngay bằng API có sẵn PATCH /san/:maSan/mo
+      // Backend luôn tạo sân mới ở trạng thái khoá (maintenance) nên bật sân ngay bằng API có sẵn PATCH /san/:maSan/mo
       let openWarning = ''
       try {
         const opened = await callApi(`/api/chu-san/san/${created.maSan}/mo`, { method: 'PATCH', token })
         created = { ...created, ...opened }
       } catch (err) {
-        openWarning = ` Nhưng chưa bật được sân (${describeApiError(err)}), sân đang ở trạng thái Đã đóng — bấm Mở sân để bật.`
+        openWarning = ` Nhưng chưa bật được sân (${describeApiError(err)}), sân đang ở trạng thái Đã khoá — bấm ổ khoá để mở khoá sân.`
       }
       setCourts((prev) => [...prev, created])
       setNewName('')
+      setError('')
       setSuccess(`Đã thêm ${created.tenSan} vào ${branch.tenCoSo}.${openWarning || ' Sân đang ở trạng thái Hoạt động.'}`)
+      setAddOpen(false)
       // Sân mới thuộc cơ sở khác với bộ lọc đang xem thì chuyển bộ lọc sang cơ sở đó để thấy ngay
       if (filterId !== 'all' && filterId !== addBranchId) setFilterId(addBranchId)
     } catch (err) {
-      setError(describeApiError(err))
+      setAddError(describeApiError(err))
     } finally {
       setAdding(false)
     }
   }
-
 
   return (
     <Page>
@@ -1858,6 +2198,10 @@ function CourtsPage({ user }) {
             ))}
           </select>
         </label>
+        {/* Nút mở cửa sổ Thêm sân, nằm cạnh ô chọn cơ sở */}
+        <button type="button" className="btn btn-primary" onClick={openAddDialog} disabled={branches.length === 0}>
+          <PlusIcon /> Thêm sân
+        </button>
       </div>
 
       <section className="card table-card">
@@ -1892,7 +2236,7 @@ function CourtsPage({ user }) {
                 const conKhach = busyCourts.has(c.maSan)
                 const coTheXoa = !active && !conKhach
                 let tieuDeXoa = 'Xoá sân khỏi hệ thống'
-                if (active) tieuDeXoa = 'Cần đóng sân trước khi xoá'
+                if (active) tieuDeXoa = 'Cần khoá sân trước khi xoá'
                 else if (conKhach) tieuDeXoa = 'Sân còn khách đã đặt, chưa xoá được'
                 return (
                   <tr key={c.maSan}>
@@ -1900,20 +2244,20 @@ function CourtsPage({ user }) {
                     <td>{c.tenCoSo ?? branch?.tenCoSo}</td>
                     <td>{priceOf(c)}</td>
                     <td>
-                      <span className={`status-badge ${active ? 'status-ok' : 'status-maint'}`}>{active ? 'Hoạt động' : 'Đã đóng'}</span>
+                      <span className={`status-badge ${active ? 'status-ok' : 'status-maint'}`}>{active ? 'Hoạt động' : 'Đã khoá'}</span>
                     </td>
                     <td className="td-center">
                       <div className="row-actions row-actions-center">
-                        {/* Cờ lê: Đóng sân (khách không đặt được, đơn đã đặt giữ nguyên) / Mở sân lại */}
+                        {/* Ổ khoá: sân hoạt động hiện ổ khoá mở (bấm để khoá sân); sân đã khoá hiện ổ khoá đóng (bấm để mở khoá) */}
                         <button
                           type="button"
                           className={`icon-btn icon-btn-wrench${active ? '' : ' is-on'}`}
                           onClick={() => toggleStatus(c)}
                           disabled={busyId === c.maSan}
-                          title={active ? 'Đóng sân' : 'Sân đang đóng — bấm để mở lại'}
-                          aria-label={active ? 'Đóng sân' : 'Mở sân'}
+                          title={active ? 'Khoá sân' : 'Sân đang khoá — bấm để mở khoá'}
+                          aria-label={active ? 'Khoá sân' : 'Mở khoá sân'}
                         >
-                          <WrenchIcon />
+                          {active ? <LockOpenIcon /> : <LockClosedIcon />}
                         </button>
                         {/* Thùng rác đỏ: chỉ dùng được khi sân đã đóng và không còn khách đặt */}
                         <button
@@ -1936,29 +2280,35 @@ function CourtsPage({ user }) {
         </div>
       </section>
 
-      <form className="card form-card form-card-spaced" onSubmit={addCourt}>
-        <h2 className="card-title">Thêm sân</h2>
-        <div className="add-court-row">
-          <label className="field-block">
-            <span className="label">Tên sân</span>
-            <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
-          </label>
-          <label className="field-block">
-            <span className="label">Cơ sở</span>
-            <select className="input" value={addBranchId} onChange={(e) => setAddBranchId(e.target.value)} disabled={branches.length === 0}>
-              {branches.length === 0 && <option value="">Chưa có cơ sở</option>}
-              {branches.map((b) => (
-                <option key={b.maCoSo} value={String(b.maCoSo)}>
-                  {b.tenCoSo}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit" className="btn btn-primary btn-lg" disabled={adding || !branch}>
-            {adding ? 'Đang thêm...' : 'Thêm sân'}
-          </button>
-        </div>
-      </form>
+      {addOpen && (
+        <Dialog title="Thêm sân" width={460} onClose={() => !adding && setAddOpen(false)}>
+          <form onSubmit={addCourt} noValidate>
+            <label className="dialog-field">
+              <span>Tên sân *</span>
+              <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={50} autoFocus />
+            </label>
+            <label className="dialog-field">
+              <span>Cơ sở *</span>
+              <select className="input" value={addBranchId} onChange={(e) => setAddBranchId(e.target.value)}>
+                {branches.map((b) => (
+                  <option key={b.maCoSo} value={String(b.maCoSo)}>
+                    {b.tenCoSo}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {addError && <p className="dialog-error">{addError}</p>}
+            <div className="dialog-two">
+              <button type="button" className="dialog-ghost" onClick={() => setAddOpen(false)} disabled={adding}>
+                Huỷ
+              </button>
+              <button type="submit" className="dialog-primary" disabled={adding || !branch}>
+                {adding ? 'Đang thêm...' : 'Thêm sân'}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
     </Page>
   )
 }
@@ -2257,7 +2607,7 @@ function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lock
           )}
           {open && (
             <small className="dialog-note">
-              Giờ mở cửa của cơ sở: {open}–{close}. Khung giờ không được trùng khung đã có của cùng cơ sở (khác cơ sở thì không ảnh hưởng).
+              Giờ mở cửa của cơ sở: {open}–{close}. Khung giờ không được trùng khung đã có của cùng cơ sở VÀ cùng loại thứ (khác cơ sở, hoặc khác thứ T2–T6 / T7–CN thì được trùng giờ).
             </small>
           )}
         </div>
@@ -2426,7 +2776,7 @@ function findClassOverlap(entries) {
       const a = entries[i]
       const b = entries[j]
       if (kindsOverlap(a.kind, b.kind) && toMinutes(a.time[0]) < toMinutes(b.time[1]) && toMinutes(b.time[0]) < toMinutes(a.time[1])) {
-        return `Khung ${a.time[0]}–${a.time[1]} (${kindText(a.kind)}) trùng giờ với khung ${b.time[0]}–${b.time[1]} (${kindText(b.kind)}) của sự kiện "${b.ten || 'Giờ cố định'}".`
+        return `Khung ${a.time[0]}–${a.time[1]} (${kindText(a.kind)}) trùng giờ và trùng thứ với khung ${b.time[0]}–${b.time[1]} (${kindText(b.kind)}) của sự kiện "${b.ten || 'Giờ cố định'}". Hãy đổi sang khoảng thứ khác (T2–T6 hoặc T7–CN) hoặc đổi giờ.`
       }
     }
   }
@@ -2539,21 +2889,6 @@ function PricingPage({ user }) {
     setEntriesOf(String(id), restoreEntries(savedRows.map(toRow), readPriceMeta(id)))
   }
 
-  // Ghi nhớ trên máy này tên sự kiện + loại thứ của khung vừa thêm (backend không lưu hai thông tin này)
-  const rememberNewSlot = (idCoSo, { ten, time, kind }) => {
-    const meta = readPriceMeta(idCoSo)
-    const key = keyOfTime(time)
-    const names = { ...(meta.names ?? {}) }
-    if (ten) names[key] = ten
-    else delete names[key]
-    const kinds = { ...(meta.kinds ?? {}), [key]: [kind] }
-    try {
-      localStorage.setItem(priceMetaKey(idCoSo), JSON.stringify({ entries: [], names, kinds, dated: [] }))
-    } catch {
-      // trình duyệt không cho lưu: bỏ qua
-    }
-  }
-
   // Gửi bảng giá của một cơ sở lên database (PUT thay toàn bộ bảng giá của cơ sở đó)
   const putRows = (idCoSo, list) =>
     callApi(`/api/chu-san/co-so/${idCoSo}/bang-gia`, {
@@ -2577,22 +2912,20 @@ function PricingPage({ user }) {
     const [s, e] = time
 
     if (!id) {
-      // Thêm khung mới: POST (backend kiểm tra giờ mở cửa và trùng giờ trong CÙNG cơ sở)
-      const v = Number(gia)
+      // Thêm khung mới: backend (POST thêm 1 khung) chặn mọi khung trùng giờ mà không biết thứ, nên web ghép lại
+      // cả bảng giá (khung cũ + khung mới) rồi lưu bằng PUT: khác loại thứ (T2–T6 / T7–CN) thì được trùng giờ.
       try {
-        const saved = await callApi(`/api/chu-san/co-so/${idCoSo}/bang-gia`, {
-          method: 'POST',
-          token,
-          body: {
-            gioBatDau: s,
-            gioKetThuc: e,
-            giaNgayThuongKhachVangLai: v,
-            giaNgayThuongKhachCoDinh: v,
-            giaCuoiTuanKhachVangLai: v,
-            giaCuoiTuanKhachCoDinh: v,
-          },
-        })
-        rememberNewSlot(idCoSo, { ten, time, kind })
+        const cur = await callApi(`/api/chu-san/co-so/${idCoSo}/bang-gia`, { token })
+        const open = cut5(cur.gioMoCua)
+        const close = cut5(cur.gioDongCua)
+        const cu = restoreEntries((cur.khungGias ?? []).map(toRow), readPriceMeta(idCoSo))
+        const next = [...cu, { id: `moi-${Date.now()}`, ten, time, kind, gia: String(Number(gia)) }]
+        const trung = findClassOverlap(next)
+        if (trung) return trung
+        const message = validatePricing(rowsFromEntries(next), open, close)
+        if (message) return message
+        const saved = await putRows(idCoSo, rowsFromEntries(next))
+        applyServerRows(idCoSo, saved, next)
         if (showAll || String(idCoSo) === selectedId) {
           setReloadKey((n) => n + 1) // tải lại để hiện khung mới
         } else {
@@ -2600,7 +2933,7 @@ function PricingPage({ user }) {
           setSelectedId(String(idCoSo))
           setData({})
         }
-        setResult({ type: 'success', message: `Đã thêm khung giờ ${s}–${e} vào ${saved.tenCoSo}.` })
+        setResult({ type: 'success', message: `Đã thêm khung giờ ${s}–${e} (${kindText(kind)}) vào ${cur.tenCoSo}.` })
         return null
       } catch (err) {
         return describeApiError(err)
@@ -2917,25 +3250,72 @@ function PricingPage({ user }) {
   )
 }
 
-// Dữ liệu mẫu theo đúng cột bảng DanhGia (SoSao, NoiDung, NgayTao, PhanHoiChuSan, BiAn).
-// Backend chưa có API chủ sân đọc DanhGia (chờ bạn duyệt đề xuất GET /api/chu-san/danh-gia), nên tạm dùng dữ liệu mẫu.
-const SAMPLE_REVIEWS = [
-  { maDanhGia: 1, tenKhach: 'Nguyễn Thị Mai', soSao: 5, noiDung: 'Sân sạch, đèn sáng, nhân viên thân thiện.', ngayTao: '2026-11-10T19:30:00', phanHoiChuSan: 'Cảm ơn bạn đã ủng hộ!' },
-  { maDanhGia: 2, tenKhach: 'Trần Văn Nam', soSao: 4, noiDung: 'Sân tốt nhưng giờ cao điểm hơi đông.', ngayTao: '2026-11-09T21:10:00', phanHoiChuSan: null },
-  { maDanhGia: 3, tenKhach: 'Lê Hoàng Phúc', soSao: 3, noiDung: 'Mặt sân hơi trơn vào buổi tối.', ngayTao: '2026-11-07T20:00:00', phanHoiChuSan: 'Cơ sở đã lau sân kỹ hơn, mong bạn quay lại.' },
-  { maDanhGia: 4, tenKhach: 'Phạm Thu Hà', soSao: 5, noiDung: 'Giá hợp lý, đặt sân nhanh.', ngayTao: '2026-11-05T08:45:00', phanHoiChuSan: null },
-]
-
-function ReviewsPage() {
+function ReviewsPage({ user }) {
+  const token = user.maTruyCap
+  const isOwner = user.vaiTro === 'owner'
+  const { branches, error: branchError } = useBranches(token, isOwner)
+  const [branchId, setBranchId] = useState('all') // mặc định hiển thị tất cả cơ sở
   const [stars, setStars] = useState('Tất cả')
-  const reviews = SAMPLE_REVIEWS
+  const [reviews, setReviews] = useState([])
+  const [loading, setLoading] = useState(isOwner)
+  const [error, setError] = useState('')
+  const tick = useAutoRefresh()
+
+  // API có sẵn GET /api/chu-san/danh-gia?maCoSo=&soSao=&trang=&soLuong=50 (tất cả cơ sở nếu bỏ maCoSo)
+  useEffect(() => {
+    if (!isOwner) return
+    let cancelled = false
+    async function load() {
+      try {
+        const all = []
+        for (let page = 1; page <= 10; page += 1) {
+          const loc = branchId === 'all' ? '' : `&maCoSo=${branchId}`
+          const data = await callApi(`/api/chu-san/danh-gia?trang=${page}&soLuong=50${loc}`, { token })
+          all.push(...(data.cacDanhGia ?? []))
+          if ((data.cacDanhGia ?? []).length < 50) break
+        }
+        if (cancelled) return
+        setReviews(all.filter((r) => !r.biAn)) // đánh giá bị quản trị viên ẩn thì không hiển thị
+        setError('')
+      } catch (err) {
+        if (!cancelled) setError(describeApiError(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token, branchId, tick])
+
   const average = reviews.length ? reviews.reduce((sum, r) => sum + r.soSao, 0) / reviews.length : 0
   const visible = reviews.filter((r) => stars === 'Tất cả' || r.soSao === Number(stars))
   const fmt = (iso) => new Date(iso).toLocaleDateString('vi-VN')
 
+  if (!isOwner) {
+    return (
+      <Page>
+        <Alert>Tài khoản quản trị viên không quản lý cơ sở nào.</Alert>
+      </Page>
+    )
+  }
+
   return (
     <Page>
+      {(error || branchError) && <Alert type="error">{error || branchError}</Alert>}
       <div className="filters filters-inline">
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={branchId} onChange={(e) => { setLoading(true); setBranchId(e.target.value) }}>
+            <option value="all">Hiển thị tất cả cơ sở</option>
+            {(branches ?? []).map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="field-inline">
           <span>Điểm trung bình: </span>
           <strong>{average.toFixed(1)} / 5</strong>
@@ -2964,20 +3344,28 @@ function ReviewsPage() {
               <tr>
                 <th>Khách hàng</th>
                 <th>Đánh giá</th>
-                <th>Nội dung</th>
+                <th>Cơ sở</th>
+                <th>Bình luận của khách hàng</th>
                 <th>Ngày</th>
                 <th>Phản hồi của chủ sân</th>
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && (
+              {loading && (
                 <tr>
-                  <td colSpan={5} className="table-empty">
+                  <td colSpan={6} className="table-empty">
+                    Đang tải đánh giá...
+                  </td>
+                </tr>
+              )}
+              {!loading && visible.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="table-empty">
                     Chưa có đánh giá nào.
                   </td>
                 </tr>
               )}
-              {visible.map((r) => (
+              {!loading && visible.map((r) => (
                 <tr key={r.maDanhGia}>
                   <td>{r.tenKhach}</td>
                   <td>
@@ -2986,6 +3374,7 @@ function ReviewsPage() {
                       {'☆'.repeat(5 - r.soSao)}
                     </span>
                   </td>
+                  <td>{r.tenCoSo}</td>
                   <td>{r.noiDung}</td>
                   <td>{fmt(r.ngayTao)}</td>
                   <td>{r.phanHoiChuSan ?? '—'}</td>
@@ -3031,7 +3420,8 @@ function CustomersPage({ user }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
-  const [branch, setBranch] = useState(null)
+  const { branches, error: branchError } = useBranches(token, isOwner)
+  const [branchId, setBranchId] = useState('all') // mặc định hiển thị tất cả cơ sở
   const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
@@ -3042,14 +3432,12 @@ function CustomersPage({ user }) {
     let cancelled = false
     async function load() {
       try {
-        // Dùng các API có sẵn: cơ sở của chủ sân + thống kê khách đã đặt sân (bao-cao/top-khach)
-        const [coSo, khach] = await Promise.all([
-          fetchCoSo(token),
-          callApi('/api/chu-san/bao-cao/top-khach', { token }),
-        ])
+        // API có sẵn GET /api/chu-san/bao-cao/khach-hang (có lọc maCoSo, tối đa 100 khách mỗi trang)
+        const locCoSo = branchId === 'all' ? '' : `&maCoSo=${branchId}`
+        const data = await callApi(`/api/chu-san/bao-cao/khach-hang?soDong=100&sapXep=luot-dat${locCoSo}`, { token })
         if (cancelled) return
-        setBranch(coSo)
-        setCustomers(khach)
+        setCustomers(data.cacKhach ?? [])
+        setError('')
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -3060,7 +3448,7 @@ function CustomersPage({ user }) {
     return () => {
       cancelled = true
     }
-  }, [isOwner, token, tick])
+  }, [isOwner, token, branchId, tick])
 
   if (!isOwner) {
     return (
@@ -3072,13 +3460,20 @@ function CustomersPage({ user }) {
 
   return (
     <Page subtitle="Khách đã đặt sân và thanh toán tại cơ sở của bạn, xếp theo số lượt đặt nhiều nhất.">
-      {error && <Alert type="error">{error}</Alert>}
+      {(error || branchError) && <Alert type="error">{error || branchError}</Alert>}
 
       <div className="filters filters-inline">
-        <div className="field-inline">
-          <span>Cơ sở hiện tại: </span>
-          <strong>{branch?.tenCoSo ?? '—'}</strong>
-        </div>
+        <label className="field-inline">
+          <span>Cơ sở: </span>
+          <select className="input" value={branchId} onChange={(e) => { setLoading(true); setBranchId(e.target.value) }}>
+            <option value="all">Hiển thị tất cả cơ sở</option>
+            {(branches ?? []).map((b) => (
+              <option key={b.maCoSo} value={String(b.maCoSo)}>
+                {b.tenCoSo}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <section className="card table-card">
@@ -3241,6 +3636,44 @@ function ProfilePage({ user }) {
   const [result, setResult] = useState(null)
   const [avatar, setAvatar] = useState(() => loadAvatar(avatarId))
   const [imageMsg, setImageMsg] = useState(null)
+  const isOwner = user.vaiTro === 'owner'
+  const [warnings, setWarnings] = useState([]) // lịch sử cảnh cáo (thông báo owner_warning / owner_banned)
+  const tick = useAutoRefresh()
+
+  // Chưa có API riêng trả số lần cảnh cáo → lấy từ GET /api/thong-bao (admin xử lý khiếu nại sẽ gửi thông báo cho chủ sân)
+  useEffect(() => {
+    if (!isOwner) return
+    let cancelled = false
+    async function load() {
+      try {
+        const all = []
+        for (let page = 1; page <= 10; page += 1) {
+          const data = await callApi(`/api/thong-bao?trang=${page}&soLuong=50`, { token })
+          const list = data.cacThongBao ?? []
+          all.push(...list)
+          if (list.length < 50) break
+        }
+        if (cancelled) return
+        setWarnings(
+          all
+            .filter((n) => n.loaiThamChieu === 'complaint' && (n.loai === 'owner_warning' || n.loai === 'owner_banned'))
+            .sort((a, b) => new Date(b.ngayTao) - new Date(a.ngayTao)),
+        )
+      } catch {
+        /* không tải được thì giữ nguyên */
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token, tick])
+  const warningCount = Math.min(
+    MAX_WARNINGS,
+    warnings.some((n) => n.loai === 'owner_banned')
+      ? MAX_WARNINGS
+      : warnings.reduce((max, n) => Math.max(max, describeComplaint(n).warnings ?? 0), warnings.length),
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -3341,7 +3774,35 @@ function ProfilePage({ user }) {
             <dt>Số điện thoại</dt>
             <dd>{person.soDienThoai ?? '—'}</dd>
           </div>
+          {isOwner && (
+            <div>
+              <dt>Cảnh cáo</dt>
+              <dd className={warningCount >= MAX_WARNINGS ? 'warn-count warn-max' : 'warn-count'}>
+                {warningCount}/{MAX_WARNINGS}
+              </dd>
+            </div>
+          )}
         </dl>
+        {isOwner && (
+          <div className="warn-history">
+            <span className="label">Lịch sử bị cảnh cáo</span>
+            <div className="warn-box">
+              {warnings.length === 0 ? (
+                <p className="warn-empty">Chưa có cảnh cáo nào.</p>
+              ) : (
+                <ul>
+                  {warnings.map((n) => (
+                    <li key={n.maThongBao}>
+                      <strong>{viTime(n.ngayTao)}</strong>
+                      <span>{n.loai === 'owner_banned' ? 'Tài khoản và các cơ sở bị tạm dừng hoạt động' : n.tieuDe || 'Bị cảnh cáo do khiếu nại của khách'}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <span className="field-hint">Quá {MAX_WARNINGS} lần cảnh cáo, tài khoản và tất cả cơ sở sẽ bị tạm dừng hoạt động.</span>
+          </div>
+        )}
       </section>
 
       <form className="card profile-card" onSubmit={handleSubmit}>
@@ -3412,7 +3873,9 @@ function AdminApp({ user, onLogout }) {
       case 'bookings':
         return <BookingsPage user={user} filters={filters} />
       case 'refunds':
-        return <RefundsPage user={user} />
+        return <RefundsPage user={user} onNavigate={setActive} />
+      case 'complaints':
+        return <ComplaintsPage user={user} />
       case 'branches':
         return <BranchesPage user={user} />
       case 'courts':
@@ -3422,7 +3885,7 @@ function AdminApp({ user, onLogout }) {
       case 'revenue':
         return <RevenuePage filters={filters} />
       case 'reviews':
-        return <ReviewsPage />
+        return <ReviewsPage user={user} />
       case 'users':
         return <CustomersPage user={user} />
       case 'settings':
@@ -3508,7 +3971,9 @@ async function callApi(path, { method = 'GET', body, token } = {}) {
   }
 
   if (!res.ok || !payload?.thanhCong) {
-    throw new ApiError(res.status, payload?.loi?.thongBao || 'Có lỗi xảy ra, vui lòng thử lại.', payload?.loi?.chiTiet)
+    // Đang đăng nhập mà token hết hạn / không hợp lệ → báo cho App đưa về trang đăng nhập
+    if (res.status === 401 && token) window.dispatchEvent(new Event('session-expired'))
+    throw new ApiError(res.status, payload?.loi?.thongBao || 'Có lỗi xảy ra, vui lòng thử lại.', payload?.loi?.chiTiet, payload?.loi?.maLoi)
   }
   return payload.duLieu
 }
@@ -3518,6 +3983,47 @@ async function callApi(path, { method = 'GET', body, token } = {}) {
 async function fetchCoSo(token) {
   const data = await callApi('/api/chu-san/co-so', { token })
   return Array.isArray(data) ? data[0] ?? null : data
+}
+
+// Danh sách cơ sở của chủ sân (API có sẵn GET /api/chu-san/co-so). null = đang tải.
+function useBranches(token, isOwner) {
+  const [branches, setBranches] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!isOwner) return
+    let cancelled = false
+    callApi('/api/chu-san/co-so', { token })
+      .then((data) => {
+        if (!cancelled) setBranches(Array.isArray(data) ? data : data ? [data] : [])
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message)
+          setBranches([])
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOwner, token])
+  return { branches, error }
+}
+
+// Nhớ cơ sở được chọn cuối cùng (Lịch hoạt động) trên trình duyệt này
+const LAST_BRANCH_KEY = 'lich-hoat-dong-co-so-cuoi'
+const readLastBranch = () => {
+  try {
+    return localStorage.getItem(LAST_BRANCH_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+const saveLastBranch = (id) => {
+  try {
+    localStorage.setItem(LAST_BRANCH_KEY, String(id))
+  } catch {
+    /* bỏ qua */
+  }
 }
 
 // Thông báo lỗi chung chung khi đăng nhập sai (không tiết lộ email/tên đăng nhập có tồn tại hay không)
@@ -3942,13 +4448,81 @@ function RegisterPage({ onRegistered, onGoLogin }) {
    App (mặc định hiện trang đăng nhập)
    ============================================================ */
 
+// Phiên đăng nhập: token của backend (JWT) sống 7 ngày. Lưu trong localStorage nên đóng trang / tải lại trang vẫn
+// còn đăng nhập, chỉ thoát khi bấm Đăng xuất, token hết hạn hoặc backend trả 401. Không có thoát do chờ lâu.
+// (Backend chưa có API làm mới token, nên token không tự đổi sau 15 phút.)
+const SESSION_KEY = 'chu-san-phien-dang-nhap'
+
+function jwtExpiry(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(payload)).exp * 1000
+  } catch {
+    return 0
+  }
+}
+function saveSession(user) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user))
+  } catch {
+    // bộ nhớ trình duyệt đầy / bị chặn: bỏ qua, vẫn dùng được trong phiên hiện tại
+  }
+}
+function clearSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY)
+  } catch {
+    // bỏ qua
+  }
+}
+function loadSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY))
+    if (saved?.maTruyCap && jwtExpiry(saved.maTruyCap) > Date.now()) return saved
+  } catch {
+    // dữ liệu hỏng: coi như chưa đăng nhập
+  }
+  clearSession()
+  return null
+}
+
 function App() {
-  const [user, setUser] = useState(null) // { ...nguoiDung, maTruyCap }
+  const [user, setUser] = useState(loadSession) // { ...nguoiDung, maTruyCap }
   const [view, setView] = useState('login') // 'login' | 'register'
   const [notice, setNotice] = useState('')
   const [lastEmail, setLastEmail] = useState('')
 
-  if (user) return <AdminApp user={user} onLogout={() => setUser(null)} />
+  const login = (nguoiDung) => {
+    saveSession(nguoiDung)
+    setUser(nguoiDung)
+  }
+  const logout = (message = '') => {
+    clearSession()
+    setNotice(message)
+    setView('login')
+    setUser(null)
+  }
+
+  // Token hết hạn / bị thu hồi → về trang đăng nhập; tự thoát đúng lúc token hết hạn
+  useEffect(() => {
+    if (!user) return
+    const expired = () => logout('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.')
+    window.addEventListener('session-expired', expired)
+    const timer = setTimeout(expired, Math.max(0, Math.min(jwtExpiry(user.maTruyCap) - Date.now(), 2 ** 31 - 1)))
+    return () => {
+      window.removeEventListener('session-expired', expired)
+      clearTimeout(timer)
+    }
+  }, [user])
+
+  // Phiên khôi phục sau khi mở lại trang: kiểm tra token còn dùng được (API có sẵn GET /api/tai-khoan/ca-nhan)
+  useEffect(() => {
+    if (user) callApi('/api/tai-khoan/ca-nhan', { token: user.maTruyCap }).catch(() => {})
+    // chỉ chạy một lần khi mở trang
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (user) return <AdminApp user={user} onLogout={() => logout()} />
 
   if (view === 'register') {
     return (
@@ -3978,7 +4552,7 @@ function App() {
         setNotice('')
         setView('register')
       }}
-      onLogin={setUser}
+      onLogin={login}
     />
   )
 }
