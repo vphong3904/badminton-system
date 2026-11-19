@@ -2991,3 +2991,127 @@ a.btn {
   padding: 10px 8px;
   overflow-wrap: anywhere;
 }
+
+
+/* ===== Biểu tượng menu / tiêu đề trang ===== */
+.nav-item,
+.sidebar-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nav-icon {
+  flex: 0 0 auto;
+}
+.page-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  margin-right: 14px;
+  vertical-align: middle;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+}
+.tab-strip-btn .nav-icon {
+  vertical-align: -3px;
+}
+
+/* ===== Hoàn tiền ===== */
+.refund-policy {
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+.refund-pct {
+  display: inline-block;
+  padding: 2px 10px;
+  font-weight: 700;
+  color: #b26a00;
+  background: #fff3e0;
+  border-radius: 999px;
+}
+.refund-pct.is-full {
+  color: #1f7a5d;
+  background: #e3f1ea;
+}
+.refund-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  line-height: 1.5;
+  background: #f3f6f4;
+  border-radius: 10px;
+}
+.refund-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: #14523f;
+}
+.refund-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.refund-check input {
+  margin-top: 3px;
+}
+
+/* Icon trong tiêu đề trang: không dùng luật phủ kín `.page-banner svg` của hình nền trang trí */
+.page-banner .page-banner-icon .nav-icon {
+  position: static;
+  inset: auto;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+/* Hoàn tiền (Chờ hoàn tiền / Đã hoàn tiền): 6 cột chia đều cân đối, căn giữa */
+.table-refunds {
+  min-width: 920px;
+  table-layout: fixed;
+}
+
+.table-refunds thead th,
+.table-refunds tbody td {
+  padding: 10px 12px;
+  text-align: center !important;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.table-refunds thead th:nth-child(1),
+.table-refunds tbody td:nth-child(1) {
+  width: 17%;
+}
+
+.table-refunds thead th:nth-child(2),
+.table-refunds tbody td:nth-child(2) {
+  width: 17%;
+}
+
+.table-refunds thead th:nth-child(3),
+.table-refunds tbody td:nth-child(3) {
+  width: 14%;
+}
+
+.table-refunds thead th:nth-child(4),
+.table-refunds tbody td:nth-child(4) {
+  width: 14%;
+}
+
+.table-refunds thead th:nth-child(5),
+.table-refunds tbody td:nth-child(5) {
+  width: 22%;
+}
+
+.table-refunds thead th:nth-child(6),
+.table-refunds tbody td:nth-child(6) {
+  width: 16%;
+}

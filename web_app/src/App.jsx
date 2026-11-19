@@ -98,6 +98,71 @@ const BANKS = [
   { code: 'MB', name: 'MB Bank' },
 ]
 
+// Biểu tượng cho menu và tiêu đề trang (SVG, giúp người mới dùng web dễ phân biệt các trang)
+const NAV_ICONS = {
+  branches: <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" />,
+  courts: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="1" />
+      <path d="M12 5v14M3 12h18" />
+    </>
+  ),
+  bookings: (
+    <>
+      <rect x="6" y="4" width="12" height="17" rx="2" />
+      <path d="M9 4h6v3H9zM9 14l2 2 4-4" />
+    </>
+  ),
+  refunds: (
+    <>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5M12 8v8M9.5 14.5c.5 1 1.4 1.5 2.5 1.5 1.4 0 2.5-.7 2.5-1.8s-1-1.5-2.5-1.9-2.5-.8-2.5-1.9S10.6 8 12 8c1 0 1.9.5 2.4 1.3" />
+    </>
+  ),
+  complaints: (
+    <>
+      <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M12 7v4M12 14h.01" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M16 3v4M8 3v4M3 11h18" />
+    </>
+  ),
+  pricing: (
+    <>
+      <path d="M20 12l-8 8-9-9V3h8z" />
+      <circle cx="7.5" cy="7.5" r="1" />
+    </>
+  ),
+  reviews: <polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3" />,
+  users: (
+    <>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+      <circle cx="10" cy="7" r="4" />
+      <path d="M21 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8" />
+    </>
+  ),
+  overview: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
+  profile: <path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z" />,
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" />
+    </>
+  ),
+  logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
+}
+function NavIcon({ id, size = 18 }) {
+  return (
+    <svg className="nav-icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {NAV_ICONS[id] ?? NAV_ICONS.overview}
+    </svg>
+  )
+}
+
 // Biểu tượng cờ lê và thùng rác (SVG)
 const WrenchIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1287,25 +1352,63 @@ function RefundsPage({ user, onNavigate }) {
     }
   }, [isOwner, token, tab, reload, tick])
 
-  const complete = async (r) => {
-    const maGD = window.prompt(`Đã chuyển khoản hoàn tiền cho ${r.tenKhach}? Nhập mã giao dịch hoàn (có thể bỏ trống):`)
-    if (maGD === null) return
+  const [confirming, setConfirming] = useState(null) // yêu cầu đang mở hộp xác nhận hoàn tiền
+  const [maGD, setMaGD] = useState('')
+  const [daChuyen, setDaChuyen] = useState(false)
+  const [dialogError, setDialogError] = useState('')
+
+  const openConfirm = (r) => {
+    setConfirming(r)
+    setMaGD('')
+    setDaChuyen(false)
+    setDialogError('')
+  }
+
+  // Chủ sân chuyển khoản cho khách trước, rồi nhập mã giao dịch (biên lai) và xác nhận.
+  // API có sẵn: POST /api/chu-san/hoan-tien/:maThanhToan/hoan-thanh { maGiaoDichHoan } — backend gửi thông báo kèm mã này cho khách.
+  const complete = async (e) => {
+    e.preventDefault()
+    const r = confirming
+    const text = maGD.trim()
+    if (!text) {
+      setDialogError('Vui lòng nhập mã giao dịch (mã biên lai chuyển tiền) để khách đối chiếu.')
+      return
+    }
+    if (!daChuyen) {
+      setDialogError('Vui lòng tích xác nhận bạn đã chuyển khoản đúng số tiền cho khách.')
+      return
+    }
     setBusyId(r.maThanhToan)
+    setDialogError('')
     setError('')
     try {
-      const text = maGD.trim()
       await callApi(`/api/chu-san/hoan-tien/${r.maThanhToan}/hoan-thanh`, {
         method: 'POST',
         token,
-        body: text ? { maGiaoDichHoan: text } : {},
+        body: { maGiaoDichHoan: text },
       })
-      setNotice(`Đã ghi nhận hoàn tiền cho ${r.tenKhach}.`)
+      setNotice(`Đã ghi nhận hoàn tiền cho ${r.tenKhach}. Khách sẽ nhận thông báo kèm mã giao dịch ${text}.`)
+      setConfirming(null)
       setReload((n) => n + 1)
     } catch (err) {
-      setError(describeApiError(err))
+      setDialogError(describeApiError(err))
     } finally {
       setBusyId(null)
     }
+  }
+
+  // Mức hoàn theo chính sách: huỷ trước ≥24h hoàn 100%, 12–24h hoàn 50% (huỷ < 12h không có yêu cầu hoàn tiền)
+  const refundLevel = (r) => {
+    const daTra = Number(r.soTienDaTra)
+    const hoan = Number(r.soTienHoan ?? r.soTienDaTra)
+    const pct = daTra > 0 ? Math.round((hoan / daTra) * 100) : 100
+    let hours = null
+    if (r.ngayHuy && r.ngay && r.gioBatDau) {
+      const play = new Date(`${String(r.ngay).slice(0, 10)}T${String(r.gioBatDau).slice(0, 8)}`)
+      const gap = (play - new Date(r.ngayHuy)) / 3600000
+      if (Number.isFinite(gap)) hours = Math.max(0, Math.floor(gap))
+    }
+    return { pct, hours }
   }
 
   if (!isOwner) {
@@ -1323,12 +1426,19 @@ function RefundsPage({ user, onNavigate }) {
 
       <div className="tab-strip" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'processing'} className={`tab-strip-btn${tab === 'processing' ? ' active' : ''}`} onClick={() => setTab('processing')}>
-          Chờ hoàn tiền
+          <NavIcon id="refunds" size={16} /> Chờ hoàn tiền
         </button>
         <button type="button" role="tab" aria-selected={tab === 'refunded'} className={`tab-strip-btn${tab === 'refunded' ? ' active' : ''}`} onClick={() => setTab('refunded')}>
           Đã hoàn tiền
         </button>
       </div>
+
+      {tab === 'processing' && (
+        <p className="hint refund-policy">
+          Quy định hoàn tiền: khách huỷ sân trước giờ chơi <strong>từ 24 giờ trở lên</strong> được hoàn <strong>100%</strong>; <strong>từ 12 đến dưới 24 giờ</strong> hoàn <strong>50%</strong>; dưới 12 giờ không hoàn tiền.
+          Hãy chuyển khoản cho khách trước, sau đó bấm “Hoàn tiền” và nhập mã giao dịch (biên lai) để khách đối chiếu.
+        </p>
+      )}
 
       <section className="card table-card tab-attached">
         <div className="table-scroll">
@@ -1337,22 +1447,23 @@ function RefundsPage({ user, onNavigate }) {
               <tr>
                 <th>Khách</th>
                 <th>Đơn đặt</th>
+                <th>Mức hoàn</th>
                 <th>Số tiền hoàn</th>
                 <th>Tài khoản nhận hoàn tiền</th>
-                <th>{tab === 'processing' ? 'Thao tác' : 'Ngày hoàn'}</th>
+                <th>{tab === 'processing' ? 'Thao tác' : 'Ngày hoàn · mã giao dịch'}</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={5} className="table-empty">
+                  <td colSpan={6} className="table-empty">
                     Đang tải...
                   </td>
                 </tr>
               )}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="table-empty">
+                  <td colSpan={6} className="table-empty">
                     {tab === 'processing' ? 'Không có yêu cầu hoàn tiền nào đang chờ.' : 'Chưa có khoản hoàn tiền nào.'}
                   </td>
                 </tr>
@@ -1370,6 +1481,10 @@ function RefundsPage({ user, onNavigate }) {
                         {r.gioBatDau.slice(0, 5)} – {r.gioKetThuc.slice(0, 5)}
                       </div>
                     </td>
+                    <td>
+                      <span className={`refund-pct${refundLevel(r).pct >= 100 ? ' is-full' : ''}`}>Hoàn {refundLevel(r).pct}%</span>
+                      {refundLevel(r).hours !== null && <div className="cell-sub">Huỷ trước giờ chơi {refundLevel(r).hours} giờ</div>}
+                    </td>
                     <td>{formatVnd(Number(r.soTienHoan ?? r.soTienDaTra))}</td>
                     <td>
                       {r.tenNganHang ? (
@@ -1383,11 +1498,14 @@ function RefundsPage({ user, onNavigate }) {
                     </td>
                     <td>
                       {tab === 'processing' ? (
-                        <button type="button" className="btn btn-sm btn-approve" disabled={busyId === r.maThanhToan} onClick={() => complete(r)}>
-                          Đã hoàn tiền
+                        <button type="button" className="btn btn-sm btn-approve" disabled={busyId === r.maThanhToan} onClick={() => openConfirm(r)}>
+                          Hoàn tiền
                         </button>
                       ) : (
-                        r.ngayHoan ? toViDate(String(r.ngayHoan).slice(0, 10)) : '—'
+                        <>
+                          {r.ngayHoan ? toViDate(String(r.ngayHoan).slice(0, 10)) : '—'}
+                          {r.maGiaoDichHoan && <div className="cell-sub">Mã GD: {r.maGiaoDichHoan}</div>}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -1396,14 +1514,68 @@ function RefundsPage({ user, onNavigate }) {
           </table>
         </div>
       </section>
+
+      {confirming && (
+        <Dialog title="Xác nhận hoàn tiền cho khách" onClose={() => busyId === null && setConfirming(null)} width={520}>
+          <form onSubmit={complete} noValidate>
+            <div className="refund-summary">
+              <div>
+                Khách: <strong>{confirming.tenKhach}</strong> · {confirming.soDienThoai}
+              </div>
+              <div>
+                Đơn: {confirming.tenSan} · {toViDate(String(confirming.ngay).slice(0, 10))} · {confirming.gioBatDau.slice(0, 5)} – {confirming.gioKetThuc.slice(0, 5)}
+              </div>
+              <div>
+                Mức hoàn: <strong>{refundLevel(confirming).pct}%</strong>
+                {refundLevel(confirming).hours !== null && ` (khách huỷ trước giờ chơi ${refundLevel(confirming).hours} giờ)`}
+              </div>
+              <div className="refund-amount">Số tiền cần chuyển: {formatVnd(Number(confirming.soTienHoan ?? confirming.soTienDaTra))}</div>
+              <div>
+                Chuyển tới:{' '}
+                {confirming.tenNganHang ? (
+                  <strong>
+                    {confirming.tenNganHang} · {confirming.soTaiKhoan} · {confirming.chuTaiKhoan}
+                  </strong>
+                ) : (
+                  'Khách chưa cung cấp tài khoản nhận tiền'
+                )}
+              </div>
+            </div>
+            <label className="dialog-field">
+              <span>Mã giao dịch (mã biên lai chuyển tiền) *</span>
+              <input className="input" value={maGD} onChange={(e) => setMaGD(e.target.value)} maxLength={100} placeholder="Nhập mã giao dịch trên biên lai" autoFocus />
+            </label>
+            <label className="refund-check">
+              <input type="checkbox" checked={daChuyen} onChange={(e) => setDaChuyen(e.target.checked)} />
+              <span>Tôi đã chuyển khoản đúng số tiền cho khách. Khách sẽ nhận thông báo kèm mã giao dịch này.</span>
+            </label>
+            {dialogError && <p className="dialog-error">{dialogError}</p>}
+            <div className="dialog-two">
+              <button type="button" className="dialog-ghost" onClick={() => setConfirming(null)} disabled={busyId !== null}>
+                Huỷ
+              </button>
+              <button type="submit" className="dialog-primary" disabled={busyId !== null}>
+                {busyId !== null ? 'Đang gửi...' : 'Xác nhận đã chuyển tiền'}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
     </Page>
   )
 }
 
-function PageBanner({ title }) {
+function PageBanner({ title, icon }) {
   return (
     <div className="page-banner">
-      <h1 className="page-banner-title">{title}</h1>
+      <h1 className="page-banner-title">
+        {icon && (
+          <span className="page-banner-icon">
+            <NavIcon id={icon} size={28} />
+          </span>
+        )}
+        {title}
+      </h1>
     </div>
   )
 }
@@ -3904,7 +4076,8 @@ function AdminApp({ user, onLogout }) {
           onClick={() => setActive('profile')}
           title="Mở trang chủ sân"
         >
-          Xin chào, {user.hoTen}
+          <NavIcon id="profile" />
+          <span>Xin chào, {user.hoTen}</span>
         </button>
         <nav>
           {MENU.map((m) => (
@@ -3913,18 +4086,20 @@ function AdminApp({ user, onLogout }) {
               className={`nav-item${m.id === active ? ' is-active' : ''}`}
               onClick={() => setActive(m.id)}
             >
-              {m.label}
+              <NavIcon id={m.id} />
+              <span>{m.label}</span>
             </button>
           ))}
         </nav>
         <button className="nav-item nav-logout" onClick={onLogout}>
-          Đăng xuất
+          <NavIcon id="logout" />
+          <span>Đăng xuất</span>
         </button>
       </aside>
 
       {/* key theo trang để form được reset khi chuyển trang */}
       <main className={`content${active === 'courts' ? ' content-fit' : ''}`} key={active}>
-        <PageBanner title={current.label} />
+        <PageBanner title={current.label} icon={current.id} />
         {renderPage()}
       </main>
     </div>
