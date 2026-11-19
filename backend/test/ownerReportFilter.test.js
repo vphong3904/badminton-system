@@ -47,7 +47,9 @@ test('service doanh thu: loc khoang ngay + co so, tra tongCong', async () => {
   const goi = [];
   db.pool.query = async (sql, tham) => {
     goi.push({ sql, tham });
-    if (/COALESCE\(SUM/.test(sql)) return [[{ doanhThu: '300000', phiNenTang: '30000', tienChuSan: '270000', soLuotDat: 3 }]];
+    if (!/GROUP BY/.test(sql)) {
+      return [[{ doanhThu: '300000', tongDaThu: '400000', tienDaHoan: '100000', choHoan: '50000', phiNenTang: '30000', tienChuSan: '270000', soLuotDat: 3 }]];
+    }
     return [[]];
   };
   try {
@@ -55,9 +57,16 @@ test('service doanh thu: loc khoang ngay + co so, tra tongCong', async () => {
     const dv = require('../src/services/ownerReportService');
     const kq = await dv.layDoanhThu(5, { tuNgay: '2026-11-01', denNgay: '2026-11-13', maCoSo: 2, nam: 2026 });
     assert.equal(kq.tongCong.doanhThu, 300000);
+    // Hoàn tiền: doanh thu = đã thu − đã hoàn; khoản đang chờ hoàn báo riêng
+    assert.equal(kq.tongCong.tongDaThu, 400000);
+    assert.equal(kq.tongCong.tienDaHoan, 100000);
+    assert.equal(kq.tongCong.choHoan, 50000);
     assert.equal(kq.boLoc.nam, null); // khoang ngay uu tien hon nam
-    const truyVan = goi.find((g) => /GROUP BY d\.NgayChoi/.test(g.sql));
-    assert.deepEqual(truyVan.tham, [5, 2, '2026-11-01', '2026-11-13']);
+    const truyVan = goi.find((g) => /GROUP BY x\.ngay/.test(g.sql));
+    // Trừ tiền đã hoàn (refunded) khỏi doanh thu, đơn huỷ đã trả vẫn được tính phần giữ lại
+    assert.match(truyVan.sql, /SUM\(x\.gross - x\.daHoan\)/);
+    assert.match(truyVan.sql, /TrangThaiHoanTien='refunded'/);
+    assert.deepEqual(truyVan.tham, [5, 2, '2026-11-01', '2026-11-13', 5, 2, '2026-11-01', '2026-11-13']); // 2 nhánh UNION (app + owner)
     assert.match(truyVan.sql, /cs\.MaCoSo=\?/);
     assert.doesNotMatch(truyVan.sql, /YEAR\(d\.NgayChoi\)=\?/);
   } finally { db.pool.query = goc; }

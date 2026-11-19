@@ -33,6 +33,12 @@ dinhTuyen.delete('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.dongXoaSan), dieuKhie
 dinhTuyen.patch('/co-so/:maCoSo/dong', kiemTraHopLe(kiemTraDuLieu.dongXoaCoSo), dieuKhien.dongCoSo);
 dinhTuyen.patch('/co-so/:maCoSo/mo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.moCoSo);
 dinhTuyen.delete('/co-so/:maCoSo', kiemTraHopLe(kiemTraDuLieu.dongXoaCoSo), dieuKhien.xoaCoSo);
+dinhTuyen.get('/nguoi-dung', kiemTraHopLe(kiemTraDuLieu.danhSachNguoiDung), dieuKhien.lietKeNguoiDung);
+dinhTuyen.patch('/nguoi-dung/:maNguoiDung/khoa',
+  kiemTraHopLe(kiemTraDuLieu.khoaTaiKhoan), dieuKhien.khoaTaiKhoan);
+dinhTuyen.patch('/nguoi-dung/:maNguoiDung/mo-khoa',
+  kiemTraHopLe(kiemTraDuLieu.maNguoiDung), dieuKhien.moKhoaTaiKhoan);
+dinhTuyen.get('/co-so', kiemTraHopLe(kiemTraDuLieu.danhSachCoSo), dieuKhien.lietKeCoSo);
 dinhTuyen.get('/nhat-ky', kiemTraHopLe(kiemTraDuLieu.danhSachNhatKy), dieuKhien.lietKeNhatKy);
 
 module.exports = dinhTuyen;

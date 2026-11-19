@@ -9,4 +9,4 @@ const layMaChuSan = (yeuCau) => yeuCau.nguoiDung.maNguoiDung;
 exports.layDoanhThu = xuLy((yeuCau) => dichVu.layDoanhThu(layMaChuSan(yeuCau), yeuCau.query));
 exports.layTopKhach = xuLy((yeuCau) => dichVu.layTopKhach(layMaChuSan(yeuCau), yeuCau.query));
 exports.layTopSan = xuLy((yeuCau) => dichVu.layTopSan(layMaChuSan(yeuCau), yeuCau.query));
-exports.layCongNo = xuLy((yeuCau) => dichVu.layCongNo(layMaChuSan(yeuCau)));
+exports.layCongNo = xuLy((yeuCau) => dichVu.layCongNo(layMaChuSan(yeuCau), yeuCau.query));

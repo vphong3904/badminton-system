@@ -406,6 +406,7 @@ module.exports = {
         query: [
           thamSoTruyVan('maCoSo', 'Chỉ lấy đánh giá của cơ sở này'),
           thamSoTruyVan('soSao', 'Lọc theo số sao 1–5'),
+          thamSoTruyVan('sapXep', 'moi-nhat (mặc định) | sao-thap (1→5 sao) | sao-cao (5→1 sao)'),
           thamSoTruyVan('chuaPhanHoi', 'true = chỉ đánh giá chưa phản hồi · false = chỉ đánh giá đã phản hồi'),
           thamSoTruyVan('trang', 'Trang, từ 1 (mặc định 1)'),
           thamSoTruyVan('soLuong', 'Số dòng mỗi trang, 1–50 (mặc định 20)'),
@@ -419,6 +420,13 @@ module.exports = {
           auth: true,
           params: maDanhGia,
           body: 'PhanHoiDanhGia',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
+      delete: endpoint(
+        'Chủ sân xoá phản hồi của mình (đánh giá của khách giữ nguyên, phản hồi lại được); chưa có phản hồi → 409 REVIEW_NO_REPLY',
+        'Đánh giá', {
+          auth: true,
+          params: maDanhGia,
           responses: { 404: response.Loi, 409: response.Loi },
         }),
     },
@@ -463,7 +471,21 @@ module.exports = {
         responses: { 404: response.Loi, 409: response.Loi },
       }),
     },
+    '/api/chu-san/dat-san/{maDatSan}/da-thu': {
+      patch: endpoint('Đánh dấu đã thu tiền ngoài hệ thống cho đơn do chủ sân tạo (?tatCaBuoi=true: cả lịch cố định)', 'Chủ sân', {
+        auth: true,
+        params: maDatSan,
+        query: [thamSoTruyVan('tatCaBuoi', 'true = đánh dấu mọi buổi chưa thu của lịch cố định (mặc định 1 buổi)')],
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
     '/api/chu-san/dat-san/{maDatSan}/huy': {
+      patch: endpoint('Chủ sân huỷ đơn do mình tạo (không hoàn tiền, giải phóng lịch; ?tatCaBuoi=true: cả lịch cố định). Đơn app → 409', 'Chủ sân', {
+        auth: true,
+        params: maDatSan,
+        query: [thamSoTruyVan('tatCaBuoi', 'true = huỷ mọi buổi chưa chơi của lịch cố định (mặc định 1 buổi)')],
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
       post: endpoint('Chủ sân huỷ đơn đã đặt (kèm lý do) → khách được hoàn 100%, vào hàng đợi hoàn tiền', 'Chủ sân', {
         auth: true,
         params: maDatSan,
@@ -555,7 +577,10 @@ module.exports = {
       }),
     },
     '/api/chu-san/bao-cao/cong-no': {
-      get: endpoint('Xem công nợ khách đặt tại sân', 'Chủ sân', { auth: true }),
+      get: endpoint('Xem công nợ khách đặt tại sân (đơn chủ sân tạo, chưa thu)', 'Chủ sân', {
+        auth: true,
+        query: [thamSoTruyVan('maCoSo', 'Chỉ 1 cơ sở của tôi')],
+      }),
     },
     '/api/quan-tri/san/{maSan}/dong': {
       patch: endpoint('Đóng tạm sân (cùng điều kiện với chủ sân)', 'Quản trị', { auth: true, params: maSan, body: 'LyDoDongXoa' }),
@@ -574,6 +599,41 @@ module.exports = {
     },
     '/api/quan-tri/co-so/{maCoSo}': {
       delete: endpoint('Xoá cơ sở (phải đóng trước)', 'Quản trị', { auth: true, params: maCoSo, body: 'LyDoDongXoa' }),
+    },
+    '/api/quan-tri/nguoi-dung': {
+      get: endpoint('Admin liệt kê tài khoản khách hàng hoặc chủ sân (kèm lý do khóa, số đơn / số cơ sở)', 'Quản trị', {
+        auth: true,
+        query: [
+          thamSoTruyVan('vaiTro', 'customer | owner', true),
+          thamSoTruyVan('trangThai', 'active | locked | all (mặc định all)'),
+          thamSoTruyVan('tuKhoa', 'Tìm theo họ tên, email hoặc số điện thoại'),
+          thamSoTruyVan('trang', 'Trang, từ 1 (mặc định 1)'),
+          thamSoTruyVan('soLuong', 'Số dòng mỗi trang, 1–50 (mặc định 20)'),
+        ],
+      }),
+    },
+    '/api/quan-tri/nguoi-dung/{maNguoiDung}/khoa': {
+      patch: endpoint(
+        'Admin khóa tài khoản khách / chủ sân (bắt buộc lyDo 3–255 ký tự; chủ sân bị khóa thì cơ sở đang hoạt động cũng bị khóa). Khi đăng nhập, người dùng nhận thông báo kèm lý do này',
+        'Quản trị', {
+          auth: true,
+          params: maNguoiDung,
+          body: 'KhoaTaiKhoan',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
+    },
+    '/api/quan-tri/nguoi-dung/{maNguoiDung}/mo-khoa': {
+      patch: endpoint('Admin mở khóa tài khoản khách / chủ sân', 'Quản trị', {
+        auth: true,
+        params: maNguoiDung,
+        responses: { 404: response.Loi, 409: response.Loi },
+      }),
+    },
+    '/api/quan-tri/co-so': {
+      get: endpoint('Admin liệt kê cơ sở kèm điểm trung bình, số đánh giá hiển thị và số đánh giá đã xóa', 'Quản trị', {
+        auth: true,
+        query: [thamSoTruyVan('tuKhoa', 'Tìm theo tên cơ sở hoặc tên chủ sân')],
+      }),
     },
     '/api/quan-tri/chu-san/cho-duyet': {
       get: endpoint('Liệt kê hồ sơ chủ sân chờ duyệt', 'Quản trị', { auth: true }),
@@ -709,32 +769,30 @@ module.exports = {
       DoanhNghiep: {
         type: 'object',
         required: ['tenDoanhNghiep'],
-        properties: { tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150, example: 'Cong ty TNHH The thao ABC' } },
+        properties: { tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150 } },
       },
       DangNhap: {
         type: 'object',
         required: ['email', 'matKhau'],
         properties: {
           email: { type: 'string', format: 'email', example: 'khach@example.com' },
-          matKhau: { type: 'string', format: 'password', example: '12345678' },
+          matKhau: { type: 'string', format: 'password', example: 'MatKhau123' },
         },
       },
       DoiMatKhau: {
         type: 'object',
         required: ['matKhauCu', 'matKhauMoi'],
         properties: {
-          matKhauCu: { type: 'string', format: 'password', description: 'Mật khẩu hiện tại', example: '12345678' },
-          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu', example: 'MatKhau123' },
+          matKhauCu: { type: 'string', format: 'password' },
+          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu' },
         },
       },
       CapNhatCaNhan: {
         type: 'object',
-        minProperties: 1,
-        description: 'Gửi ít nhất 1 trường. Nếu ĐỔI số điện thoại thì bắt buộc là số di động (10 số).',
         properties: {
-          hoTen: { type: 'string', minLength: 2, maxLength: 100, example: 'Nguyen Van A' },
-          soDienThoai: { type: 'string', example: '0901234567' },
-          email: { type: 'string', format: 'email', example: 'khach@example.com' },
+          hoTen: { type: 'string' },
+          soDienThoai: { type: 'string' },
+          email: { type: 'string', format: 'email' },
         },
       },
       DatSan: {
@@ -742,12 +800,12 @@ module.exports = {
         required: ['maSan', 'ngay', 'gioBatDau', 'gioKetThuc', 'tenKhach', 'soDienThoai'],
         properties: {
           maSan: { type: 'integer', example: 1 },
-          ngay: { type: 'string', format: 'date', description: 'YYYY-MM-DD, phải là ngày chưa qua giờ bắt đầu', example: '2026-11-25' },
-          gioBatDau: { type: 'string', description: 'HH:MM, theo mốc 30 phút', example: '18:00' },
-          gioKetThuc: { type: 'string', description: 'HH:MM, mốc 30 phút, sau gioBatDau, đủ soPhutDatToiThieu của cơ sở', example: '19:00' },
-          tenKhach: { type: 'string', minLength: 2, maxLength: 100, example: 'Nguyen Van A' },
-          soDienThoai: { type: 'string', description: 'Di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0', example: '0901234567' },
-          ghiChu: { type: 'string', maxLength: 500, example: 'Can them 1 hop cau' },
+          ngay: { type: 'string', format: 'date', example: '2026-11-15' },
+          gioBatDau: { type: 'string', example: '18:00' },
+          gioKetThuc: { type: 'string', example: '19:00' },
+          tenKhach: { type: 'string', example: 'Nguyen Van A' },
+          soDienThoai: { type: 'string', example: '0901234567' },
+          ghiChu: { type: 'string' },
         },
       },
       ChuSanTaoDon: {
@@ -757,7 +815,7 @@ module.exports = {
             type: 'object',
             properties: {
               ngayKetThuc: {
-                type: 'string', format: 'date', example: '2026-12-25',
+                type: 'string', format: 'date', example: '2026-12-15',
                 description: 'Có → khách cố định, tạo đơn mỗi ngày từ ngay đến ngayKetThuc',
               },
               daThu: { type: 'boolean', example: true, description: 'Khách đã trả tiền chưa (mặc định false)' },
@@ -771,7 +829,7 @@ module.exports = {
           {
             type: 'object',
             required: ['ngayKetThuc'],
-            properties: { ngayKetThuc: { type: 'string', format: 'date', description: 'Phải từ ngày bắt đầu trở đi', example: '2026-12-25' } },
+            properties: { ngayKetThuc: { type: 'string', format: 'date', example: '2026-12-15' } },
           },
         ],
       },
@@ -779,7 +837,7 @@ module.exports = {
         type: 'object',
         required: ['noiDung'],
         properties: {
-          noiDung: { type: 'string', minLength: 10, maxLength: 1000, example: 'Toi da chuyen khoan nhung san khong duoc giu cho.' },
+          noiDung: { type: 'string', minLength: 10, maxLength: 1000 },
           giaiDoan: { type: 'string', enum: ['at_cancel', 'after_cancel'], description: 'at_cancel: bấm ngay sau khi hủy' },
         },
       },
@@ -814,6 +872,13 @@ module.exports = {
           noiDung: { type: 'string', minLength: 2, maxLength: 1000, description: 'Đã trim', example: 'Cảm ơn bạn đã ủng hộ sân!' },
         },
       },
+      KhoaTaiKhoan: {
+        type: 'object',
+        required: ['lyDo'],
+        properties: {
+          lyDo: { type: 'string', minLength: 3, maxLength: 255, description: 'Hiện cho người dùng khi đăng nhập', example: 'không tuân thủ quy định của hệ thống' },
+        },
+      },
       AnHienDanhGia: {
         type: 'object',
         required: ['an'],
@@ -844,10 +909,10 @@ module.exports = {
         type: 'object',
         required: ['tenNganHang', 'maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
         properties: {
-          tenNganHang: { type: 'string', minLength: 2, maxLength: 100, example: 'MB Bank' },
-          maNganHang: { type: 'string', minLength: 2, maxLength: 20, example: 'MB' },
-          soTaiKhoan: { type: 'string', description: '6–30 chữ số (bỏ dấu cách/gạch)', example: '0123456789' },
-          chuTaiKhoan: { type: 'string', minLength: 2, maxLength: 100, example: 'NGUYEN VAN A' },
+          tenNganHang: { type: 'string' },
+          maNganHang: { type: 'string' },
+          soTaiKhoan: { type: 'string' },
+          chuTaiKhoan: { type: 'string' },
         },
       },
       CoSo: {
@@ -857,11 +922,11 @@ module.exports = {
           'linkBanDo', 'gioMoCua', 'gioDongCua', 'soPhutDatToiThieu',
         ],
         properties: {
-          tenCoSo: { type: 'string', minLength: 2, maxLength: 150, example: 'Cau Long Thanh Cong' },
-          diaChi: { type: 'string', minLength: 5, maxLength: 255, example: '123 Truong Chinh, Phuong 13' },
-          tinhThanh: { type: 'string', minLength: 2, maxLength: 80, example: 'TP. Ho Chi Minh' },
-          quanHuyen: { type: 'string', minLength: 2, maxLength: 80, example: 'Tan Binh' },
-          soDienThoai: { type: 'string', example: '0912345671' },
+          tenCoSo: { type: 'string' },
+          diaChi: { type: 'string' },
+          tinhThanh: { type: 'string' },
+          quanHuyen: { type: 'string' },
+          soDienThoai: { type: 'string' },
           linkBanDo: {
             type: 'string', format: 'uri',
             description: 'Link Google Maps (kể cả maps.app.goo.gl). Backend tự đọc vĩ độ/kinh độ từ link này để tính "sân gần tôi"; không gửi viDo/kinhDo.',
@@ -870,7 +935,7 @@ module.exports = {
           moTa: { type: 'string' },
           gioMoCua: { type: 'string', example: '06:00' },
           gioDongCua: { type: 'string', example: '22:00' },
-          soPhutDatToiThieu: { type: 'integer', minimum: 30, description: 'Bội số của 30', example: 60 },
+          soPhutDatToiThieu: { type: 'integer', example: 60 },
         },
       },
       BangGia: {
@@ -924,16 +989,16 @@ module.exports = {
       },
       LyDoDongXoa: {
         type: 'object',
-        properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, description: 'Tuỳ chọn, ghi vào nhật ký', example: 'Dong de bao tri' } },
+        properties: { lyDo: { type: 'string', maxLength: 255, description: 'Tuỳ chọn, ghi vào nhật ký' } },
       },
       NganHang: {
         type: 'object',
         required: ['tenNganHang', 'maNganHang', 'soTaiKhoan', 'chuTaiKhoan'],
         properties: {
-          tenNganHang: { type: 'string', minLength: 2, maxLength: 100, example: 'MB Bank' },
-          maNganHang: { type: 'string', minLength: 2, maxLength: 20, example: 'MB' },
-          soTaiKhoan: { type: 'string', pattern: '^[0-9]{6,20}$', example: '0123456789' },
-          chuTaiKhoan: { type: 'string', minLength: 2, maxLength: 100, example: 'NGUYEN VAN A' },
+          tenNganHang: { type: 'string' },
+          maNganHang: { type: 'string' },
+          soTaiKhoan: { type: 'string' },
+          chuTaiKhoan: { type: 'string' },
         },
       },
       TaoSan: {
@@ -955,9 +1020,9 @@ module.exports = {
         type: 'object',
         required: ['maSan', 'thoiGianBatDau', 'thoiGianKetThuc'],
         properties: {
-          maSan: { type: 'integer', example: 1 },
-          thoiGianBatDau: { type: 'string', description: 'YYYY-MM-DD HH:MM', example: '2026-11-25 12:00' },
-          thoiGianKetThuc: { type: 'string', description: 'YYYY-MM-DD HH:MM, sau thoiGianBatDau', example: '2026-11-25 14:00' },
+          maSan: { type: 'integer' },
+          thoiGianBatDau: { type: 'string', example: '2026-11-15 12:00' },
+          thoiGianKetThuc: { type: 'string', example: '2026-11-15 14:00' },
           lyDo: { type: 'string' },
         },
       },
@@ -966,7 +1031,7 @@ module.exports = {
         required: ['trangThai'],
         properties: {
           trangThai: { type: 'string', enum: ['approved', 'rejected'] },
-          lyDoTuChoi: { type: 'string', minLength: 3, maxLength: 255, description: 'Bắt buộc khi trangThai=rejected', example: 'Ho so thieu giay phep kinh doanh' },
+          lyDoTuChoi: { type: 'string' },
         },
       },
       TuChoiThanhToan: {
@@ -981,12 +1046,12 @@ module.exports = {
       },
       HoanThanhHoanTien: {
         type: 'object',
-        properties: { maGiaoDichHoan: { type: 'string', minLength: 1, maxLength: 100, description: 'Mã giao dịch chuyển khoản hoàn (không bắt buộc)', example: 'FT26322100001' } },
+        properties: { maGiaoDichHoan: { type: 'string', maxLength: 100, description: 'Mã giao dịch chuyển khoản hoàn (không bắt buộc)' } },
       },
       MaGiaoDichHoan: {
         type: 'object',
         required: ['maGiaoDichHoan'],
-        properties: { maGiaoDichHoan: { type: 'string', minLength: 3, maxLength: 100, example: 'FT26322100001' } },
+        properties: { maGiaoDichHoan: { type: 'string' } },
       },
       MaGiaoDich: {
         type: 'object',

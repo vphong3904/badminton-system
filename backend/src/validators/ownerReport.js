@@ -30,6 +30,7 @@ exports.doanhThu = {
     path: ['thang'],
   }),
 };
+exports.congNo = { query: z.object({ maCoSo: z.coerce.number().int().positive().optional() }) };
 exports.topKhach = { query: boLocNgay };
 exports.topSan = { query: boLocNgay };
 
@@ -65,6 +66,21 @@ exports.huyDon = {
   body: z.object({
     lyDo: z.string({ error: 'Vui lòng nhập lý do huỷ đơn.' }).trim()
       .min(2, 'Vui lòng nhập lý do huỷ đơn.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
+
+// ----- Đơn chủ sân tự tạo: đánh dấu đã thu / huỷ (không hoàn tiền) -----
+const coTatCaBuoi = z.enum(['true', 'false']).transform((giaTri) => giaTri === 'true').optional();
+exports.daThuDon = {
+  params: z.object({ maDatSan: maSo }),
+  query: z.object({ tatCaBuoi: coTatCaBuoi }), // true: đánh dấu cả lịch cố định (cùng MaLichCoDinh)
+  body: z.object({}),
+};
+exports.huyDonOwner = {
+  params: z.object({ maDatSan: maSo }),
+  query: z.object({ tatCaBuoi: coTatCaBuoi }), // true: huỷ mọi buổi chưa chơi của lịch cố định
+  body: z.object({
+    lyDo: z.string().trim().min(2, 'Lý do phải từ 2 ký tự.').max(255, 'Lý do tối đa 255 ký tự.').optional(),
   }),
 };
 

@@ -55,3 +55,5 @@ exports.xoaKhoaSan = xuLy(async (yeuCau) => {
 exports.lietKeDanhGia = xuLy((yeuCau) => dichVuDanhGia.lietKeDanhGiaChuSan(layMaChuSan(yeuCau), yeuCau.query));
 exports.phanHoiDanhGia = xuLy((yeuCau) =>
   dichVuDanhGia.phanHoiDanhGia(layMaChuSan(yeuCau), yeuCau.params.maDanhGia, yeuCau.body.noiDung));
+exports.xoaPhanHoiDanhGia = xuLy((yeuCau) =>
+  dichVuDanhGia.xoaPhanHoiDanhGia(layMaChuSan(yeuCau), yeuCau.params.maDanhGia));

@@ -85,3 +85,29 @@ exports.anHienDanhGia = {
     path: ['lyDo'],
   }),
 };
+
+// Quản lý tài khoản khách / chủ sân: danh sách, khóa (bắt buộc lý do) và mở khóa.
+exports.danhSachNguoiDung = {
+  query: z.object({
+    vaiTro: z.enum(['customer', 'owner'], { error: 'vaiTro chỉ nhận customer hoặc owner.' }),
+    trangThai: z.enum(['active', 'locked', 'all'], { error: 'trangThai chỉ nhận active, locked hoặc all.' }).default('all'),
+    tuKhoa: z.string().trim().max(100).optional(),
+    trang: z.coerce.number({ error: 'Trang phải là số nguyên từ 1.' })
+      .int('Trang phải là số nguyên từ 1.').min(1, 'Trang phải là số nguyên từ 1.').default(1),
+    soLuong: z.coerce.number({ error: 'Số lượng phải từ 1 đến 50.' })
+      .int('Số lượng phải từ 1 đến 50.')
+      .min(1, 'Số lượng phải từ 1 đến 50.').max(50, 'Số lượng phải từ 1 đến 50.').default(20),
+  }),
+};
+exports.khoaTaiKhoan = {
+  params: z.object({ maNguoiDung: maSo }),
+  body: z.object({
+    lyDo: z.string({ error: 'Vui lòng nhập lý do khóa.' }).trim()
+      .min(3, 'Lý do tối thiểu 3 ký tự.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
+
+// Danh sách cơ sở kèm số đánh giá (chọn cơ sở để quản lý đánh giá).
+exports.danhSachCoSo = {
+  query: z.object({ tuKhoa: z.string().trim().max(100).optional() }),
+};

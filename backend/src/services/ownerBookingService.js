@@ -6,6 +6,7 @@ const { doiGioRaPhut } = require('../utils/time');
 const khach = require('./customerService');
 const { baoKhachDaHoanTien, guiThongBao, dinhDangTien, rutGonVanBan } = require('./notificationService');
 const { ganTrangThaiHienThi } = require('../utils/trangThaiDon');
+const { taoAnhQrUrl, taoNoiDungQr } = require('../utils/vietqr');
 
 const SO_DONG_MAC_DINH = 20;
 
@@ -15,7 +16,7 @@ const COT_DON = `
   d.Nguon AS nguon, d.LoaiKhach AS loaiKhach,
   d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc, d.SoPhut AS soPhut,
   d.TongTien AS tongTien, d.PhiNenTang AS phiNenTang, d.TienChuSan AS tienChuSan,
-  d.TrangThai AS trangThai, d.GhiChu AS ghiChu, d.NgayTao AS ngayTao,
+  d.TrangThai AS trangThai, d.TrangThaiThu AS trangThaiThu, d.GhiChu AS ghiChu, d.NgayTao AS ngayTao,
   d.TenKhach AS tenKhach, d.SoDienThoaiLienHe AS soDienThoaiLienHe,
   s.MaSan AS maSan, s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo`;
 
@@ -57,7 +58,9 @@ async function lietKeDon(maChuSan, boLoc) {
   const sapXep = boLoc.sapXep === 'cu-nhat' ? 'cu-nhat' : 'moi-nhat';
   const huong = sapXep === 'cu-nhat' ? 'ASC' : 'DESC';
   const [cacDon] = await pool.query(
-    `SELECT ${COT_DON}, t.TrangThai AS trangThaiThanhToan,
+    `SELECT ${COT_DON}, d.HetHanGiuCho AS hetHanGiuCho, t.MaThanhToan AS maThanhToan,
+       t.SoTien AS soTienThanhToan, t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
+       t.TrangThai AS trangThaiThanhToan,
        t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh,
        t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan, t.LyDoLoi AS lyDoLoi
      ${tuHang} WHERE ${loc}
@@ -79,6 +82,7 @@ async function layChiTietDon(maChuSan, maDatSan) {
        d.HetHanGiuCho AS hetHanGiuCho, d.NguoiHuy AS nguoiHuy, d.LyDoHuy AS lyDoHuy,
        d.NgayHuy AS ngayHuy, d.TrangThaiThu AS trangThaiThu,
        t.MaThanhToan AS maThanhToan, t.SoTien AS soTienThanhToan,
+       t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
        t.TrangThai AS trangThaiThanhToan, t.NgayThanhToan AS ngayThanhToan,
        t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh,
        t.LyDoLoi AS lyDoTuChoiThanhToan, t.VaiTroXacNhan AS vaiTroXacNhan,
@@ -119,7 +123,21 @@ async function lietKeHoanTien(maChuSan, trangThai = 'processing') {
      WHERE cs.MaChuSan = ? AND t.TrangThai = 'success' AND t.TrangThaiHoanTien = ?
      ORDER BY COALESCE(t.NgayHoan, d.NgayHuy) DESC, t.MaThanhToan DESC`,
     [maChuSan, trangThai]);
-  return cacYeuCau;
+  // Chờ hoàn + khách đã nhập tài khoản nhận hoàn → dựng sẵn QR để chủ sân quét chuyển đúng số tiền.
+  // Khách chưa nhập tài khoản (hoặc ngân hàng không nhận ra) → null, chủ sân gọi SĐT khách.
+  return cacYeuCau.map((yeuCau) => {
+    const taiKhoan = yeuCau.maNganHang && yeuCau.soTaiKhoan
+      ? { maNganHang: yeuCau.maNganHang, soTaiKhoan: yeuCau.soTaiKhoan, chuTaiKhoan: yeuCau.chuTaiKhoan || '' }
+      : null;
+    const soTien = Number(yeuCau.soTienHoan ?? yeuCau.soTienDaTra);
+    const noiDung = `HOAN ${yeuCau.maDon}`;
+    return {
+      ...yeuCau,
+      noiDungHoan: noiDung,
+      anhQrHoanUrl: trangThai === 'processing' ? taoAnhQrUrl(noiDung, soTien, taiKhoan) : null,
+      maQrHoan: trangThai === 'processing' ? taoNoiDungQr(noiDung, soTien, taiKhoan) : null,
+    };
+  });
 }
 
 async function hoanThanhHoanTien(maChuSan, maThanhToan, maGiaoDichHoan) {
@@ -317,5 +335,106 @@ async function huyDon(maChuSan, maDatSan, lyDo) {
   });
 }
 
+// ----- Đơn chủ sân tự tạo (Nguon='owner', thanh toán ngoài hệ thống) -----
+async function ghiNhatKyDon(ketNoi, maChuSan, hanhDong, maDatSan, chiTiet) {
+  await ketNoi.query(
+    `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
+     VALUES (?,?,?,?,?)`,
+    [maChuSan, hanhDong, 'DatSan', maDatSan, String(chiTiet).slice(0, 500)]);
+}
+
+// Khoá + đọc đơn thuộc cơ sở của chủ sân (404 nếu không phải của mình); 409 nếu không phải đơn owner.
+async function layDonOwnerDeSua(ketNoi, maChuSan, maDatSan) {
+  const [[don]] = await ketNoi.query(
+    `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.Nguon AS nguon, d.MaLichCoDinh AS maLichCoDinh,
+       d.NgayChoi AS ngay, d.GioKetThuc AS gioKetThuc, d.TongTien AS tongTien,
+       d.TrangThai AS trangThai, d.TrangThaiThu AS trangThaiThu
+     FROM DatSan d JOIN San s ON s.MaSan = d.MaSan
+       JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo
+     WHERE d.MaDatSan = ? AND cs.MaChuSan = ? FOR UPDATE`,
+    [maDatSan, maChuSan]);
+  if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
+  if (don.nguon !== 'owner') {
+    throw AppError.biTrung(
+      'Đây là đơn khách đặt qua app, không thao tác được tại đây (đơn app huỷ theo luồng hoàn tiền riêng).',
+      'NOT_OWNER_BOOKING');
+  }
+  return don;
+}
+
+const daChoiXong = (ngay, gio, bayGio) => new Date(`${ngay}T${String(gio).slice(0, 8)}+07:00`).getTime() <= bayGio;
+
+// Đánh dấu đã thu tiền ngoài hệ thống: unpaid → paid (mặc định 1 buổi; tatCaBuoi → mọi buổi chưa thu của lịch cố định).
+async function danhDauDaThu(maChuSan, maDatSan, tatCaBuoi = false) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const don = await layDonOwnerDeSua(ketNoi, maChuSan, maDatSan);
+    if (['cancelled', 'expired'].includes(don.trangThai)) throw AppError.biTrung('Đơn đã huỷ nên không thể đánh dấu đã thu', 'BOOKING_CANCELLED');
+    if (don.trangThaiThu === 'paid') throw AppError.biTrung('Đơn này đã được đánh dấu đã thu', 'ALREADY_PAID');
+
+    const hangLoat = tatCaBuoi && don.maLichCoDinh;
+    const [ketQua] = await ketNoi.query(
+      `UPDATE DatSan SET TrangThaiThu='paid', NgayThu=NOW()
+       WHERE Nguon='owner' AND TrangThaiThu='unpaid' AND TrangThai IN ('confirmed','completed')
+         AND ${hangLoat ? 'MaLichCoDinh = ?' : 'MaDatSan = ?'}`,
+      [hangLoat ? don.maLichCoDinh : don.maDatSan]);
+    await ghiNhatKyDon(ketNoi, maChuSan, 'thu_tien_don', don.maDatSan,
+      `Đánh dấu đã thu đơn ${don.maDon}${hangLoat ? ` (cả lịch cố định, ${ketQua.affectedRows} buổi)` : ''}`);
+    return {
+      maDatSan: Number(don.maDatSan),
+      maDon: don.maDon,
+      trangThaiThu: 'paid',
+      soBuoiDaThu: ketQua.affectedRows,
+    };
+  });
+}
+
+// Chủ sân huỷ đơn do chính mình tạo: không có thanh toán trong hệ thống nên KHÔNG hoàn tiền; giải phóng lịch.
+// Đơn đã thu → doanh thu tự giảm (báo cáo chỉ tính đơn owner chưa huỷ). 409: đơn app / đã huỷ / đã chơi xong.
+async function huyDonOwner(maChuSan, maDatSan, { lyDo, tatCaBuoi = false } = {}) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const don = await layDonOwnerDeSua(ketNoi, maChuSan, maDatSan);
+    if (['cancelled', 'expired'].includes(don.trangThai)) throw AppError.biTrung('Đơn đã được huỷ trước đó', 'ALREADY_CANCELLED');
+    const bayGio = Date.now();
+    if (don.trangThai === 'completed' || daChoiXong(don.ngay, don.gioKetThuc, bayGio)) {
+      throw AppError.biTrung('Đơn đã chơi xong, không thể huỷ', 'BOOKING_FINISHED');
+    }
+    const hangLoat = tatCaBuoi && don.maLichCoDinh;
+    const cacBuoi = hangLoat
+      ? (await ketNoi.query(
+        `SELECT MaDatSan AS maDatSan, NgayChoi AS ngay, GioKetThuc AS gioKetThuc, TongTien AS tongTien,
+           TrangThaiThu AS trangThaiThu
+         FROM DatSan WHERE MaLichCoDinh = ? AND TrangThai IN ('pending_payment','confirmed') ORDER BY NgayChoi FOR UPDATE`,
+        [don.maLichCoDinh]))[0].filter((buoi) => !daChoiXong(buoi.ngay, buoi.gioKetThuc, bayGio))
+      : [{ maDatSan: don.maDatSan, tongTien: don.tongTien, trangThaiThu: don.trangThaiThu }];
+    const cacMa = cacBuoi.map((buoi) => buoi.maDatSan);
+
+    await ketNoi.query(
+      `UPDATE DatSan SET TrangThai='cancelled', NguoiHuy='owner', LyDoHuy=?, NgayHuy=NOW()
+       WHERE Nguon='owner' AND MaDatSan IN (${cacMa.map(() => '?').join(',')})`,
+      [lyDo || 'Chủ sân huỷ đơn tự tạo', ...cacMa]);
+    if (don.maLichCoDinh) {
+      // Huỷ hết buổi còn hiệu lực → đóng luôn lịch cố định.
+      const [[{ conLai }]] = await ketNoi.query(
+        `SELECT COUNT(*) AS conLai FROM DatSan WHERE MaLichCoDinh = ? AND TrangThai IN ('pending_payment','confirmed')`,
+        [don.maLichCoDinh]);
+      if (!conLai) await ketNoi.query("UPDATE LichCoDinh SET TrangThai='cancelled' WHERE MaLichCoDinh = ?", [don.maLichCoDinh]);
+    }
+    const tienDaThuBiGo = cacBuoi
+      .filter((buoi) => buoi.trangThaiThu === 'paid')
+      .reduce((tong, buoi) => tong + Number(buoi.tongTien), 0);
+    await ghiNhatKyDon(ketNoi, maChuSan, 'huy_don_ngoai_he_thong', don.maDatSan,
+      `Chủ sân huỷ đơn ${don.maDon} (${cacMa.length} buổi), không hoàn tiền trong hệ thống`);
+    return {
+      daHuy: true,
+      maDatSan: Number(don.maDatSan),
+      maDon: don.maDon,
+      nguoiHuy: 'owner',
+      soBuoiHuy: cacMa.length,
+      // Tiền đã thu ngoài hệ thống của các buổi vừa huỷ: trừ khỏi doanh thu; chủ sân tự hoàn khách nếu cần.
+      soTienTruKhoiDoanhThu: tienDaThuBiGo,
+    };
+  });
+}
+
 module.exports = {
-  taoDon, huyDon, lietKeDon, layChiTietDon, lietKeHoanTien, hoanThanhHoanTien };
+  taoDon, huyDon, danhDauDaThu, huyDonOwner, lietKeDon, layChiTietDon, lietKeHoanTien, hoanThanhHoanTien };

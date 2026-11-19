@@ -33,6 +33,14 @@ exports.dongCoSo = xuLy((yeuCau) => dichVuSanCoSo.dongCoSo(nguoi(yeuCau), yeuCau
 exports.moCoSo = xuLy((yeuCau) => dichVuSanCoSo.moCoSo(nguoi(yeuCau), yeuCau.params.maCoSo));
 exports.xoaCoSo = xuLy((yeuCau) => dichVuSanCoSo.xoaCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
 exports.lietKeNhatKy = xuLy((yeuCau) => dichVu.lietKeNhatKy(yeuCau.query));
+
+// Quản lý tài khoản khách / chủ sân.
+exports.lietKeNguoiDung = xuLy((yeuCau) => dichVu.lietKeNguoiDung(yeuCau.query));
+exports.khoaTaiKhoan = xuLy((yeuCau) =>
+  dichVu.khoaTaiKhoan(layMaQuanTri(yeuCau), yeuCau.params.maNguoiDung, yeuCau.body));
+exports.moKhoaTaiKhoan = xuLy((yeuCau) =>
+  dichVu.moKhoaTaiKhoan(layMaQuanTri(yeuCau), yeuCau.params.maNguoiDung));
+exports.lietKeCoSo = xuLy((yeuCau) => dichVu.lietKeCoSo(yeuCau.query));
 exports.lietKeKhieuNai = xuLy((yeuCau) => dichVuKhieuNai.lietKeKhieuNai(yeuCau.query));
 exports.xuLyKhieuNai = xuLy((yeuCau) =>
   dichVuKhieuNai.xuLyKhieuNai(layMaQuanTri(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));

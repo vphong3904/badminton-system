@@ -110,6 +110,7 @@ exports.danhSachDanhGia = {
     maCoSo: maSo.optional(),
     soSao: z.coerce.number({ error: 'Số sao phải từ 1 đến 5.' })
       .int('Số sao phải từ 1 đến 5.').min(1, 'Số sao phải từ 1 đến 5.').max(5, 'Số sao phải từ 1 đến 5.').optional(),
+    sapXep: z.enum(['moi-nhat', 'sao-thap', 'sao-cao'], { error: 'sapXep chỉ nhận moi-nhat, sao-thap hoặc sao-cao.' }).optional(),
     chuaPhanHoi: z.enum(['true', 'false'], { error: 'chuaPhanHoi chỉ nhận true hoặc false.' })
       .transform((giaTri) => giaTri === 'true').optional(),
     trang: z.coerce.number({ error: 'Trang phải là số nguyên từ 1.' })
@@ -126,3 +127,4 @@ exports.phanHoiDanhGia = {
       .min(2, 'Phản hồi tối thiểu 2 ký tự.').max(1000, 'Phản hồi tối đa 1000 ký tự.'),
   }),
 };
+exports.xoaPhanHoiDanhGia = { params: z.object({ maDanhGia: maSo }) };

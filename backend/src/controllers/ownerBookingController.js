@@ -37,3 +37,14 @@ exports.huyDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.huyDon(
     yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo));
 });
+
+// Đơn chủ sân tự tạo: đánh dấu đã thu tiền ngoài hệ thống / huỷ (không hoàn tiền).
+exports.daThuDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.danhDauDaThu(
+    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.query.tatCaBuoi === true));
+});
+exports.huyDonOwner = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  thanhCong(phanHoi, await dichVu.huyDonOwner(
+    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan,
+    { lyDo: yeuCau.body.lyDo, tatCaBuoi: yeuCau.query.tatCaBuoi === true }));
+});

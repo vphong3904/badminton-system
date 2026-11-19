@@ -166,6 +166,48 @@ test('A1: chuaPhanHoi=false → chỉ đánh giá đã có phản hồi; không 
   assert.doesNotMatch(cacTruyVan.at(-1).cauTruyVan, /PhanHoiChuSan IS/);
 });
 
+test('A1: sắp xếp danh sách — mặc định mới nhất; sao-thap 1→5; sao-cao 5→1; giá trị lạ → mới nhất', async () => {
+  datLai();
+  let ketQua = await dichVu.lietKeDanhGiaChuSan(4, { sapXep: 'sao-thap' });
+  assert.match(cacTruyVan.at(-1).cauTruyVan, /ORDER BY dg\.SoSao ASC, dg\.NgayTao DESC/);
+  assert.equal(ketQua.sapXep, 'sao-thap');
+  datLai();
+  ketQua = await dichVu.lietKeDanhGiaChuSan(4, { sapXep: 'sao-cao' });
+  assert.match(cacTruyVan.at(-1).cauTruyVan, /ORDER BY dg\.SoSao DESC, dg\.NgayTao DESC/);
+  assert.equal(ketQua.sapXep, 'sao-cao');
+  datLai();
+  ketQua = await dichVu.lietKeDanhGiaChuSan(4, { sapXep: 'x; DROP TABLE DanhGia' });
+  assert.match(cacTruyVan.at(-1).cauTruyVan, /ORDER BY dg\.NgayTao DESC, dg\.MaDanhGia DESC/);
+  assert.equal(ketQua.sapXep, 'moi-nhat');
+});
+
+test('A1: validator danh sách — sapXep chỉ nhận moi-nhat | sao-thap | sao-cao', () => {
+  const kiemTra = kiemTraChuSan.danhSachDanhGia.query;
+  assert.equal(kiemTra.safeParse({ sapXep: 'sao-thap' }).success, true);
+  assert.equal(kiemTra.safeParse({ sapXep: 'sao-cao' }).success, true);
+  assert.equal(kiemTra.safeParse({ sapXep: 'abc' }).success, false);
+});
+
+test('A1: xoá phản hồi → đặt PhanHoiChuSan/NgayPhanHoi về NULL, không báo khách', async () => {
+  datLai();
+  du.mucDanhGia.phanHoiCu = 'Phản hồi lỡ sai';
+  const ketQua = await dichVu.xoaPhanHoiDanhGia(4, 3);
+  assert.deepEqual(ketQua, { maDanhGia: 3, daXoaPhanHoi: true });
+  assert.equal(daGhi(/UPDATE DanhGia SET PhanHoiChuSan=NULL, NgayPhanHoi=NULL/), true);
+  assert.equal(thongBao().length, 0);
+});
+
+test('A1: xoá phản hồi — cơ sở khác → 403; chưa có phản hồi → 409; không tìm thấy → 404; không ghi gì', async () => {
+  datLai();
+  du.mucDanhGia.phanHoiCu = 'Có phản hồi';
+  await assert.rejects(dichVu.xoaPhanHoiDanhGia(99, 3), (loi) => loi.maTrangThai === 403);
+  datLai();
+  await assert.rejects(dichVu.xoaPhanHoiDanhGia(4, 3), (loi) => loi.maTrangThai === 409);
+  datLai();
+  await assert.rejects(dichVu.xoaPhanHoiDanhGia(4, 555), (loi) => loi.maTrangThai === 404);
+  assert.equal(daGhi(/UPDATE DanhGia/), false);
+});
+
 // ---------------- A2: admin ẩn / hiện ----------------
 test('A2: ẩn đánh giá → tính lại điểm chỉ từ đánh giá BiAn=0, ghi nhật ký, báo khách + chủ sân', async () => {
   datLai();

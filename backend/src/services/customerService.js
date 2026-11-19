@@ -782,6 +782,13 @@ async function huyDatSan(maNguoiDung, maDatSan) {
     if (!['pending_payment', 'confirmed'].includes(donDatSan.trangThai)) {
       throw AppError.biTrung('Đơn đặt sân không thể hủy ở trạng thái hiện tại');
     }
+    // Đã gửi ảnh chuyển khoản mà chủ sân chưa duyệt: không cho huỷ, nếu không đơn thành `cancelled`
+    // còn thanh toán kẹt ở `confirming` (chủ sân không xử lý được, khách có thể đã chuyển tiền).
+    if (donDatSan.trangThaiThanhToan === 'confirming') {
+      throw AppError.biTrung(
+        'Bạn đã gửi ảnh chuyển khoản, đang chờ chủ sân xác nhận. Vui lòng chờ chủ sân xác nhận hoặc từ chối rồi mới huỷ đơn.',
+        'PAYMENT_CONFIRMING');
+    }
     const danhSachMaDon = donDatSan.maLichCoDinh
       ? (await ketNoi.query(
         `SELECT MaDatSan AS maDatSan, NgayChoi AS ngay, GioBatDau AS gioBatDau,

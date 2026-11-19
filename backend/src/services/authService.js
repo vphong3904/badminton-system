@@ -8,6 +8,7 @@ const { chuanHoaSoDienThoai, kiemTraSoDiDong } = require('../validators/quyTac')
 const { timNganHang } = require('../utils/nganHang');
 const { thongBaoTheoTrangThai } = require('../utils/hoSoChuSan');
 const { ANH_MAC_DINH, luuAnh, xoaAnh } = require('../middlewares/upload');
+const { thongBaoTaiKhoanBiKhoa, MA_LOI_BI_KHOA } = require('../utils/taiKhoanBiKhoa');
 
 function taoThongTinNguoiDung(nguoiDung) {
   const thongTin = {
@@ -84,14 +85,17 @@ async function dangNhap(email, matKhau, cacVaiTroDuocPhep) {
   const [[nguoiDung]] = await pool.query(
     `SELECT MaNguoiDung AS maNguoiDung,
        HoTen AS hoTen, SoDienThoai AS soDienThoai, Email AS email,
-       MatKhauMaHoa AS matKhauMaHoa, VaiTro AS vaiTro, TrangThai AS trangThai
+       MatKhauMaHoa AS matKhauMaHoa, VaiTro AS vaiTro, TrangThai AS trangThai, LyDoKhoa AS lyDoKhoa
      FROM NguoiDung WHERE Email = ? LIMIT 1`,
     [email]);
   const matKhauHopLe = await bcrypt.compare(
     matKhau,
     nguoiDung ? nguoiDung.matKhauMaHoa : '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
   if (!nguoiDung || !matKhauHopLe) throw AppError.chuaDangNhap('Sai email hoặc mật khẩu');
-  if (nguoiDung.trangThai === 'locked') throw AppError.khongDuQuyen('Tài khoản đã bị khóa');
+  // Chỉ báo khóa sau khi mật khẩu đúng (không lộ trạng thái tài khoản cho người đoán mật khẩu); kèm lý do admin đã nhập.
+  if (nguoiDung.trangThai === 'locked') {
+    throw new AppError(403, thongBaoTaiKhoanBiKhoa(nguoiDung.lyDoKhoa), MA_LOI_BI_KHOA);
+  }
   if (cacVaiTroDuocPhep && !cacVaiTroDuocPhep.includes(nguoiDung.vaiTro)) {
     throw AppError.khongDuQuyen('Tài khoản không dùng được ở nền tảng này');
   }

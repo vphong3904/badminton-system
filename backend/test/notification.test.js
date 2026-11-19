@@ -107,3 +107,11 @@ test('Huỷ đơn chưa thanh toán: chỉ báo khách đã huỷ', async () => 
   assert.equal(ketQua.daThanhToan, false);
   assert.deepEqual(thongBaoDaGhi(), [{ nguoiDung: 7, loai: 'booking_cancelled' }]);
 });
+
+test('Khách huỷ khi đã gửi ảnh chuyển khoản chưa duyệt (confirming) → 409 PAYMENT_CONFIRMING, không ghi gì', async () => {
+  cacTruyVan.length = 0;
+  kichBan = { ...ngayGio(30), trangThaiThanhToan: 'confirming' };
+  await assert.rejects(() => dichVu.huyDatSan(7, 5),
+    (loi) => loi.maTrangThai === 409 && loi.maLoi === 'PAYMENT_CONFIRMING');
+  assert.ok(!cacTruyVan.some((muc) => /^\s*UPDATE DatSan SET TrangThai='cancelled'/.test(muc.cauTruyVan)));
+});

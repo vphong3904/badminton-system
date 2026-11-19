@@ -51,13 +51,20 @@ async function lietKeDanhGiaChuSan(maChuSan, boLoc = {}) {
   const loc = dieuKien.join(' AND ');
   const trang = boLoc.trang || 1;
   const soDong = boLoc.soLuong || SO_DONG_MAC_DINH;
+  // sapXep (chuỗi cố định, không nhận từ client trực tiếp): moi-nhat (mặc định) · sao-thap (1→5 sao) · sao-cao (5→1 sao).
+  const THU_TU = {
+    'moi-nhat': 'dg.NgayTao DESC, dg.MaDanhGia DESC',
+    'sao-thap': 'dg.SoSao ASC, dg.NgayTao DESC, dg.MaDanhGia DESC',
+    'sao-cao': 'dg.SoSao DESC, dg.NgayTao DESC, dg.MaDanhGia DESC',
+  };
+  const sapXep = THU_TU[boLoc.sapXep] ? boLoc.sapXep : 'moi-nhat';
 
   const [[{ tong }]] = await pool.query(`SELECT COUNT(*) AS tong ${TU_BANG} WHERE ${loc}`, thamSo);
   const [cacDanhGia] = await pool.query(
     `SELECT ${COT_DANH_GIA} ${TU_BANG} WHERE ${loc}
-     ORDER BY dg.NgayTao DESC, dg.MaDanhGia DESC LIMIT ? OFFSET ?`,
+     ORDER BY ${THU_TU[sapXep]} LIMIT ? OFFSET ?`,
     [...thamSo, soDong, (trang - 1) * soDong]);
-  return { cacDanhGia: cacDanhGia.map(chuyenBoolean), tong: Number(tong), trang, soDongMoiTrang: soDong };
+  return { cacDanhGia: cacDanhGia.map(chuyenBoolean), tong: Number(tong), trang, soDongMoiTrang: soDong, sapXep };
 }
 
 // Chủ sân phản hồi (hoặc sửa phản hồi) đánh giá của cơ sở mình. Ghi đè phản hồi cũ; không giới hạn thời gian sửa.
@@ -96,6 +103,27 @@ async function phanHoiDanhGia(maChuSan, maDanhGia, noiDung) {
       });
     }
     return { maDanhGia: Number(maDanhGia), phanHoiChuSan: noiDung, ngayPhanHoi: moi.ngayPhanHoi };
+  });
+}
+
+// Chủ sân xoá phản hồi của mình (lỡ phản hồi sai). Đánh giá của khách giữ nguyên; xoá xong có thể phản hồi lại.
+// Không báo khách (khác với lúc phản hồi/sửa). Đánh giá đang bị ẩn vẫn xoá được phản hồi.
+async function xoaPhanHoiDanhGia(maChuSan, maDanhGia) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[danhGia]] = await ketNoi.query(
+      `SELECT dg.MaDanhGia AS maDanhGia, dg.PhanHoiChuSan AS phanHoiCu, cs.MaChuSan AS maChuSan
+       FROM DanhGia dg JOIN CoSo cs ON cs.MaCoSo=dg.MaCoSo
+       WHERE dg.MaDanhGia=? FOR UPDATE`, [maDanhGia]);
+    if (!danhGia) throw AppError.khongTimThay('Không tìm thấy đánh giá');
+    if (Number(danhGia.maChuSan) !== Number(maChuSan)) {
+      throw AppError.khongDuQuyen('Bạn không có quyền xoá phản hồi của cơ sở khác');
+    }
+    if (danhGia.phanHoiCu == null) {
+      throw AppError.biTrung('Đánh giá này chưa có phản hồi để xoá.', 'REVIEW_NO_REPLY');
+    }
+    await ketNoi.query(
+      'UPDATE DanhGia SET PhanHoiChuSan=NULL, NgayPhanHoi=NULL WHERE MaDanhGia=?', [maDanhGia]);
+    return { maDanhGia: Number(maDanhGia), daXoaPhanHoi: true };
   });
 }
 
@@ -174,5 +202,5 @@ async function anHienDanhGia(maQuanTri, maDanhGia, { an, lyDo }) {
 }
 
 module.exports = {
-  tinhLaiDiemCoSo, lietKeDanhGiaChuSan, phanHoiDanhGia, lietKeDanhGiaQuanTri, anHienDanhGia,
+  tinhLaiDiemCoSo, lietKeDanhGiaChuSan, phanHoiDanhGia, xoaPhanHoiDanhGia, lietKeDanhGiaQuanTri, anHienDanhGia,
 };

@@ -57,18 +57,22 @@ dinhTuyen.get('/dat-san/:maDatSan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan
 dinhTuyen.post('/dat-san/:maDatSan/xac-nhan-thanh-toan', kiemTraHopLe(kiemTraBaoCao.maDon), donDatSan.xacNhanThanhToan);
 dinhTuyen.post('/dat-san/:maDatSan/tu-choi-thanh-toan', kiemTraHopLe(kiemTraBaoCao.tuChoiThanhToan), donDatSan.tuChoiThanhToan);
 dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDon), donDatSan.huyDon);
+// Đơn chủ sân tự tạo (Nguon='owner', thanh toán ngoài hệ thống): đánh dấu đã thu / huỷ (không hoàn tiền).
+dinhTuyen.patch('/dat-san/:maDatSan/da-thu', kiemTraHopLe(kiemTraBaoCao.daThuDon), donDatSan.daThuDon);
+dinhTuyen.patch('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDonOwner), donDatSan.huyDonOwner);
 dinhTuyen.get('/hoan-tien', kiemTraHopLe(kiemTraBaoCao.danhSachHoanTien), donDatSan.lietKeHoanTien);
 dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien), donDatSan.hoanThanhHoanTien);
 dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);
 dinhTuyen.get('/bao-cao/top-khach', kiemTraHopLe(kiemTraBaoCao.topKhach), baoCao.layTopKhach);
 dinhTuyen.get('/bao-cao/top-san', kiemTraHopLe(kiemTraBaoCao.topSan), baoCao.layTopSan);
-dinhTuyen.get('/bao-cao/cong-no', baoCao.layCongNo);
+dinhTuyen.get('/bao-cao/cong-no', kiemTraHopLe(kiemTraBaoCao.congNo), baoCao.layCongNo);
 // Thống kê khách hàng đặt sân.
 dinhTuyen.get('/bao-cao/khach-hang/tong-quan', kiemTraHopLe(kiemTraBaoCao.thongKeKhach), baoCaoKhach.layTongQuanKhach);
 dinhTuyen.get('/bao-cao/khach-hang/chi-tiet', kiemTraHopLe(kiemTraBaoCao.chiTietKhach), baoCaoKhach.layChiTietKhach);
 dinhTuyen.get('/bao-cao/khach-hang', kiemTraHopLe(kiemTraBaoCao.danhSachKhach), baoCaoKhach.lietKeKhach);
-// Đánh giá của cơ sở: xem + phản hồi (ghi đè được phản hồi cũ).
+// Đánh giá của cơ sở: xem (lọc sao, sắp xếp) + phản hồi (ghi đè được phản hồi cũ) + xoá phản hồi.
 dinhTuyen.get('/danh-gia', kiemTraHopLe(kiemTraDuLieu.danhSachDanhGia), dieuKhien.lietKeDanhGia);
 dinhTuyen.patch('/danh-gia/:maDanhGia/phan-hoi', kiemTraHopLe(kiemTraDuLieu.phanHoiDanhGia), dieuKhien.phanHoiDanhGia);
+dinhTuyen.delete('/danh-gia/:maDanhGia/phan-hoi', kiemTraHopLe(kiemTraDuLieu.xoaPhanHoiDanhGia), dieuKhien.xoaPhanHoiDanhGia);
 
 module.exports = dinhTuyen;

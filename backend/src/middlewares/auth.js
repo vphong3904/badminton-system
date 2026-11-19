@@ -4,6 +4,7 @@ const { pool } = require('../config/db');
 const AppError = require('../utils/AppError');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thongBaoTheoTrangThai, MA_LOI_THEO_TRANG_THAI } = require('../utils/hoSoChuSan');
+const { thongBaoTaiKhoanBiKhoa, MA_LOI_BI_KHOA } = require('../utils/taiKhoanBiKhoa');
 
 const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
   const ketQuaUyQuyen = /^Bearer\s+(.+)$/i.exec(yeuCau.headers.authorization || '');
@@ -15,11 +16,13 @@ const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
     throw AppError.chuaDangNhap('Token không hợp lệ hoặc đã hết hạn');
   }
   const [[nguoiDung]] = await pool.query(
-    `SELECT MaNguoiDung AS maNguoiDung, VaiTro AS vaiTro, TrangThai AS trangThai
+    `SELECT MaNguoiDung AS maNguoiDung, VaiTro AS vaiTro, TrangThai AS trangThai, LyDoKhoa AS lyDoKhoa
      FROM NguoiDung WHERE MaNguoiDung = ?`,
     [thongTinToken.sub]);
   if (!nguoiDung) throw AppError.chuaDangNhap('Tài khoản không tồn tại');
-  if (nguoiDung.trangThai === 'locked') throw AppError.khongDuQuyen('Tài khoản đã bị khóa');
+  if (nguoiDung.trangThai === 'locked') {
+    throw new AppError(403, thongBaoTaiKhoanBiKhoa(nguoiDung.lyDoKhoa), MA_LOI_BI_KHOA);
+  }
   yeuCau.nguoiDung = nguoiDung;
   goiTiep();
 });
