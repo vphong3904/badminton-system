@@ -2101,6 +2101,7 @@ a.btn {
   background: #fff;
   border: 1px solid #b7c2bd;
   border-radius: 50%;
+  color:#000;
 }
 
 .day-circle.in-range {
@@ -3115,3 +3116,368 @@ a.btn {
 .table-refunds tbody td:nth-child(6) {
   width: 16%;
 }
+
+
+/* ===== Lịch hoạt động: nút Tạo đơn / Khoá khung giờ, cửa sổ khoá sân & tạo đơn ===== */
+.calendar-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: 16px;
+}
+.btn-lock {
+  color: #fff;
+  background: #14532d;
+  border: 1px solid #14532d;
+}
+.btn-lock:hover:not(:disabled) {
+  background: #0d3b20;
+}
+.btn-lock:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.legend-locked {
+  background: repeating-linear-gradient(45deg, #9aa5ab, #9aa5ab 4px, #c3cbd0 4px, #c3cbd0 8px);
+}
+.matrix-wide tbody td.slot-booked.slot-locked {
+  background: repeating-linear-gradient(45deg, #9aa5ab, #9aa5ab 6px, #c3cbd0 6px, #c3cbd0 12px);
+  color: #111;
+}
+.dlg-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 14px;
+}
+.dlg-textarea {
+  height: auto;
+  padding: 8px 12px;
+  resize: vertical;
+}
+.dlg-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dlg-check input {
+  margin-top: 3px;
+}
+.dlg-check small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dlg-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin: 6px 0 4px;
+  font-size: 14px;
+  background: #e8f5ee;
+  border-radius: 8px;
+}
+.dlg-total strong {
+  font-size: 16px;
+  color: #14532d;
+}
+.lock-info {
+  margin: 0 0 8px;
+}
+.conflict-box {
+  padding: 10px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+  background: #fff4e5;
+  border: 1px solid #f0b35a;
+  border-radius: 8px;
+}
+.conflict-box ul {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+.conflict-box p {
+  margin: 6px 0 0;
+}
+.lock-list-title {
+  margin: 18px 0 6px;
+  font-size: 14px;
+  text-align: center;
+}
+.lock-list {
+  max-height: 140px;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 13px;
+}
+.lock-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #e3e6e8;
+}
+
+/* Ô ngày luôn hiển thị ngày/tháng/năm */
+.vi-date {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+.vi-date-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  font: inherit;
+  font-weight: 400;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid #b9c4cc;
+  border-radius: 8px;
+}
+.field-inline .vi-date {
+  width: 170px;
+}
+.vi-date.is-disabled .vi-date-btn {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.vi-date-native {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* Đăng nhập: báo lỗi dưới ô nhập, nút hiện/ẩn mật khẩu */
+.field-error {
+  display: block;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #b3262b;
+}
+.auth-wrap .input[aria-invalid='true'] {
+  border-color: #b3262b;
+}
+.pw-wrap {
+  position: relative;
+  display: block;
+}
+.pw-wrap .input {
+  padding-right: 48px;
+}
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: #5b6b64;
+  cursor: pointer;
+  background: none;
+  border: none;
+  transform: translateY(-50%);
+}
+.pw-toggle:hover {
+  color: #14532d;
+}
+
+
+/* ===== Doanh thu: 5 thẻ, cột chồng chuyển khoản (đỏ) / tiền mặt (xanh dương) ===== */
+.stats.stats-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+@media (max-width: 1100px) {
+  .stats.stats-5 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.chart-legend {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 8px;
+  font-size: 13px;
+}
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.chart-legend-box {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+.seg-transfer {
+  background: #e5484d;
+}
+.seg-cash {
+  background: #2f6fdc;
+}
+.chart-bar.chart-bar-stack {
+  display: flex;
+  flex-direction: column-reverse; /* chuyển khoản (đỏ) ở dưới, tiền mặt (xanh dương) ở trên */
+  overflow: hidden;
+  background: transparent;
+}
+.chart-seg {
+  min-height: 0;
+  transition: filter 0.1s;
+}
+.chart-seg.is-hover {
+  filter: brightness(1.15);
+  outline: 2px solid rgba(0, 0, 0, 0.35);
+  outline-offset: -2px;
+}
+.chart-tip-part {
+  padding-top: 6px;
+  margin-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.chart-tip-part.seg-text-transfer b,
+.chart-tip-part.seg-text-transfer span {
+  color: #c1272d;
+}
+.chart-tip-part.seg-text-cash b,
+.chart-tip-part.seg-text-cash span {
+  color: #1f56b8;
+}
+
+/* ===== Quản lý đặt sân: nút thao tác xếp chồng ===== */
+.row-actions.row-actions-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  max-width: 130px;
+}
+.row-actions.row-actions-stack .btn {
+  width: 100%;
+}
+
+/* ===== Chọn khung giờ: ô chọn 30/60 phút ===== */
+.step-select {
+  min-width: 72px;
+  height: 34px;
+  padding: 0 10px;
+  font: inherit;
+  background: #fff;
+  border: 1px solid #b9c4cc;
+  border-radius: 8px;
+}
+
+/* ===== Đánh giá: phản hồi ===== */
+.reply-cell {
+  text-align: center;
+}
+.reply-text {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reply-actions {
+  display: inline-flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+.btn-reply {
+  color: #fff;
+  background: #1d9d78;
+  border: 1px solid #1d9d78;
+}
+.reply-quote {
+  padding: 8px 10px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #3c4a44;
+  background: #f3f6f4;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* ===== Menu bị khoá khi chủ sân chưa thiết lập xong ===== */
+.nav-item.is-disabled,
+.nav-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+  filter: brightness(0.6);
+}
+/* ===== Hộp tích chọn trong cửa sổ Tạo đơn ===== */
+.dlg-check {
+  text-align: left;
+}
+.dlg-check input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  accent-color: #1d9d78;
+}
+.dlg-check span {
+  display: block;
+  text-align: left;
+}
+
+/* ============================================================
+   Đăng ký: bố cục nằm ngang (2 cột), báo lỗi tức thì dưới từng ô
+   ============================================================ */
+.auth-card.auth-card-wide {
+  max-width: 880px;
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  align-items: start;
+}
+
+.auth-card-wide .auth-title {
+  margin-bottom: 18px;
+}
+
+@media (max-width: 720px) {
+  .auth-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Đăng ký (khung rộng): tranh sân cầu lông giữ đúng tỉ lệ, không bị phóng to */
+.auth-card-wide .auth-banner {
+  height: 130px;
+}
+
+
+/* ===== Chọn bước 30 / 60 phút: hai nút cùng hiển thị ===== */
+.step-toggle { display: inline-flex; gap: 6px; }
+.step-toggle-btn {
+  min-width: 56px;
+  height: 34px;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid #b9c4cc;
+  border-radius: 8px;
+  cursor: pointer;
+  color:#000;
+}
+.step-toggle-btn.is-active { background: var(--green); border-color: var(--green); color: #fff; }
