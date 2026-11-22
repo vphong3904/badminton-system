@@ -154,10 +154,8 @@ async function layDonDeCheckIn(ketNoi, maDatSan, maChuSan = null) {
        t.MaThanhToan AS maThanhToan, t.TrangThai AS trangThaiThanhToan,
        (SELECT COUNT(*) FROM CheckIn ci WHERE ci.MaDatSan=d.MaDatSan) AS daCheckIn
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-       LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
      WHERE d.MaDatSan=? ${maChuSan ? 'AND cs.MaChuSan=?' : ''}
      FOR UPDATE`,
     maChuSan ? [maDatSan, maChuSan] : [maDatSan]);

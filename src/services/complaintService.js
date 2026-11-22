@@ -103,10 +103,8 @@ async function lietKeKhieuNai({ trangThai = 'pending', gioiHan = 50 } = {}) {
        JOIN NguoiDung cu ON cu.MaNguoiDung=k.MaChuSan
        JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
        LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung=k.MaChuSan
-       LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
      WHERE (? = 'all' OR k.TrangThai = ?)
      ORDER BY k.NgayTao ASC LIMIT ?`,
     [trangThai, trangThai, Number(gioiHan)]);

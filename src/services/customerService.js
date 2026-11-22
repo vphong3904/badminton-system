@@ -194,10 +194,8 @@ async function kiemTraChongGiuSanAo(ketNoi, maNguoiDung) {
   const [cacLan] = await ketNoi.query(
     `SELECT DATE_ADD(x.thoiDiem, INTERVAL ? HOUR) AS chanDen FROM (
        SELECT MAX(CASE WHEN d.TrangThai='cancelled' THEN d.NgayHuy ELSE d.HetHanGiuCho END) AS thoiDiem
-       FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       FROM DatSan d LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
        WHERE d.MaKhachHang=? AND d.Nguon='app' AND t.TrangThai IN ('pending','expired')
          AND ( (d.TrangThai='cancelled' AND d.NguoiHuy='customer' AND d.NgayHuy>=DATE_SUB(NOW(), INTERVAL ? HOUR))
             OR (d.TrangThai IN ('expired','pending_payment') AND d.HetHanGiuCho<=NOW()
@@ -890,18 +888,20 @@ async function lietKeDatSan(maNguoiDung) {
      FROM DatSan d
      JOIN San s ON s.MaSan=d.MaSan
      JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-       ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-     END
+     LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
      -- Đánh giá của đơn; đơn thuộc lịch cố định thì dùng chung đánh giá của cả lịch (mỗi lịch 1 đánh giá).
-     LEFT JOIN DanhGia dg ON dg.MaDanhGia=(
-       SELECT x.MaDanhGia FROM DanhGia x JOIN DatSan dx ON dx.MaDatSan=x.MaDatSan
-       WHERE dx.MaDatSan=d.MaDatSan OR (d.MaLichCoDinh IS NOT NULL AND dx.MaLichCoDinh=d.MaLichCoDinh)
-       ORDER BY (dx.MaDatSan=d.MaDatSan) DESC, x.MaDanhGia LIMIT 1)
+     LEFT JOIN DanhGia dgRieng ON dgRieng.MaDatSan=d.MaDatSan
+     LEFT JOIN (SELECT dx.MaLichCoDinh AS maLichDanhGia, MIN(x.MaDanhGia) AS maDanhGiaLich
+                FROM DanhGia x JOIN DatSan dx ON dx.MaDatSan=x.MaDatSan
+                WHERE dx.MaLichCoDinh IS NOT NULL GROUP BY dx.MaLichCoDinh) dgLich
+       ON dgLich.maLichDanhGia=d.MaLichCoDinh
+     LEFT JOIN DanhGia dg ON dg.MaDanhGia=COALESCE(dgRieng.MaDanhGia, dgLich.maDanhGiaLich)
      LEFT JOIN KhieuNai kn ON kn.MaDatSan=d.MaDatSan
      LEFT JOIN CheckIn ci ON ci.MaDatSan=d.MaDatSan
-     LEFT JOIN HoanTien ht ON ht.MaHoanTien=(SELECT MAX(h2.MaHoanTien) FROM HoanTien h2 WHERE h2.MaThanhToan=t.MaThanhToan)
+     LEFT JOIN (SELECT MaThanhToan AS maThanhToanHT, MAX(MaHoanTien) AS maHoanTienMoi FROM HoanTien GROUP BY MaThanhToan) htMoi
+       ON htMoi.maThanhToanHT=t.MaThanhToan
+     LEFT JOIN HoanTien ht ON ht.MaHoanTien=htMoi.maHoanTienMoi
      WHERE d.MaKhachHang=? ORDER BY d.NgayChoi DESC, d.GioBatDau DESC`,
     [maNguoiDung]);
   return cacDon.map(({
@@ -946,10 +946,8 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
        t.NgayGuiAnh AS ngayGuiAnh, t.HanXacNhan AS hanXacNhan,
        TIMESTAMPDIFF(SECOND, NOW(), t.HanXacNhan) AS conLaiXacNhanGiay, t.LyDoLoi AS lyDoLoi,
        t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan
-     FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-       ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-     END
+     FROM DatSan d LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
      WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
     [maDatSan, maNguoiDung]);
   if (!hoaDon) throw AppError.khongTimThay('Không tìm thấy hóa đơn');
@@ -1042,10 +1040,8 @@ async function xemTruocHuy(maNguoiDung, maDatSan) {
     `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat, d.NgayChoi AS ngay,
        d.GioBatDau AS gioBatDau, d.TongTien AS tongTien, d.TrangThai AS trangThai,
        t.TrangThai AS trangThaiThanhToan
-     FROM DatSan d LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-       ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-     END
+     FROM DatSan d LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
      WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
     [maDatSan, maNguoiDung]);
   if (!donDatSan) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
@@ -1079,10 +1075,8 @@ async function huyDatSan(maNguoiDung, maDatSan) {
       `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat, d.NgayChoi AS ngay,
          d.GioBatDau AS gioBatDau, d.TongTien AS tongTien, d.TrangThai AS trangThai,
          t.MaThanhToan AS maThanhToan, t.TrangThai AS trangThaiThanhToan
-       FROM DatSan d LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       FROM DatSan d LEFT JOIN (SELECT MaLichCoDinh AS maLichDauLich, MIN(MaDatSan) AS maDonDauLich FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) dauLich ON dauLich.maLichDauLich=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE dauLich.maDonDauLich END
        WHERE d.MaDatSan=? AND d.MaKhachHang=? FOR UPDATE`,
       [maDatSan, maNguoiDung]);
     if (!donDatSan) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
