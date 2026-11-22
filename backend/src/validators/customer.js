@@ -96,6 +96,31 @@ exports.datCoDinh = {
 };
 exports.maDatSan = { params: z.object({ maDatSan: maSo }) };
 
+// Đặt nhiều sân / nhiều khung giờ trong MỘT cơ sở, MỘT ngày (DAT_NHIEU_SAN_NHIEU_KHUNG_GIO.md mục 4).
+// Không giới hạn số mục (quyết định C); kích thước body đã bị chặn bởi express.json.
+// Thông tin liên hệ kiểm giống đặt lẻ để FE dùng chung một bộ câu chữ lỗi (05-validation.md).
+const mucChon = z.object({
+  maSan: z.number({ error: 'Mã sân không hợp lệ.' }).int('Mã sân không hợp lệ.').positive('Mã sân không hợp lệ.'),
+  gioBatDau: gio,
+  gioKetThuc: gio,
+}).refine((duLieu) => duLieu.gioKetThuc > duLieu.gioBatDau, {
+  message: 'Giờ kết thúc phải sau giờ bắt đầu',
+  path: ['gioKetThuc'],
+});
+
+exports.datNhieu = {
+  body: z.object({
+    maCoSo: z.number({ error: 'Mã cơ sở không hợp lệ.' }).int('Mã cơ sở không hợp lệ.').positive('Mã cơ sở không hợp lệ.'),
+    ngay,
+    tenKhach: quyTac.tenKhachDat,
+    soDienThoai: quyTac.soDienThoaiLienHe,
+    ghiChu: quyTac.ghiChu.optional(),
+    cacMuc: z.array(mucChon, { error: 'Vui lòng chọn ít nhất một khung giờ.' })
+      .min(1, 'Vui lòng chọn ít nhất một khung giờ.'),
+  }),
+};
+
+
 // Xem đánh giá của cơ sở (công khai): phân trang `?trang&soLuong`.
 exports.danhSachDanhGia = {
   params: z.object({ maCoSo: maSo }),
@@ -118,6 +143,11 @@ exports.guiDanhGia = {
     noiDung: z.string({ error: 'Bình luận không hợp lệ.' }).trim()
       .max(1000, 'Bình luận tối đa 1000 ký tự.').optional(),
   }),
+};
+// G4: khách xác nhận đã nhận / báo chưa nhận khoản hoàn (theo maHoanTien).
+exports.hoanTienKhach = {
+  params: z.object({ maHoanTien: maSo }),
+  body: z.object({ ghiChu: z.string().trim().max(255, 'Ghi chú tối đa 255 ký tự.').optional() }).default({}),
 };
 exports.thongTinHoanTien = {
   params: z.object({ maDatSan: maSo }),

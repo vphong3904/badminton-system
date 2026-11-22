@@ -63,6 +63,10 @@ test('Chủ sân tạo đơn cố định nhiều ngày: tạo LichCoDinh + mỗ
   assert.equal(ketQua.tongTien, 360000);
   assert.equal(layInsertDon().length, 3);
   assert.equal(cacLenhGhi.filter((q) => /INSERT INTO LichCoDinh/.test(q.sql)).length, 1);
+  // Task 2.1: mỗi đơn mới là nhóm 1 dòng (MaNhomDat = MaDatSan), gán bằng 1 câu UPDATE cho cả 3 đơn.
+  const gan = cacLenhGhi.filter((q) => /SET MaNhomDat = MaDatSan/.test(q.sql));
+  assert.equal(gan.length, 1);
+  assert.deepEqual(gan[0].thamSo, ketQua.cacDon.map((don) => don.maDatSan));
 });
 
 test('Chủ sân không tạo được đơn cho sân của người khác → 404', async () => {

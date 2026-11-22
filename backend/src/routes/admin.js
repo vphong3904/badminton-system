@@ -3,13 +3,15 @@ const dieuKhien = require('../controllers/adminController');
 const kiemTraDuLieu = require('../validators/admin');
 const kiemTraHopLe = require('../middlewares/validate');
 const { xacThucNguoiDung, kiemTraVaiTro } = require('../middlewares/auth');
+const { taiTep } = require('../middlewares/upload');
 
 dinhTuyen.use(xacThucNguoiDung, kiemTraVaiTro('admin'));
 dinhTuyen.get('/chu-san/cho-duyet', dieuKhien.lietKeHoSoChoDuyet);
 dinhTuyen.patch('/chu-san/:maNguoiDung/duyet',
   kiemTraHopLe(kiemTraDuLieu.duyetChuSan), dieuKhien.duyetHoSo);
 // Admin cũng duyệt được đơn đã gửi ảnh chuyển khoản (như chủ sân).
-dinhTuyen.get('/dat-san/cho-xac-nhan', dieuKhien.lietKeThanhToanChoXacNhan);
+dinhTuyen.get('/dat-san/cho-xac-nhan',
+  kiemTraHopLe(kiemTraDuLieu.danhSachChoXacNhan), dieuKhien.lietKeThanhToanChoXacNhan);
 dinhTuyen.post('/dat-san/:maDatSan/xac-nhan-thanh-toan',
   kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.xacNhanThanhToan);
 dinhTuyen.post('/dat-san/:maDatSan/tu-choi-thanh-toan',
@@ -17,8 +19,9 @@ dinhTuyen.post('/dat-san/:maDatSan/tu-choi-thanh-toan',
 dinhTuyen.get('/hoan-tien', dieuKhien.lietKeHoanTien);
 dinhTuyen.patch('/hoan-tien/:maThanhToan/xu-ly',
   kiemTraHopLe(kiemTraDuLieu.maThanhToan), dieuKhien.xuLyHoanTien);
+// Kiểm mã thanh toán TRƯỚC khi nhận file; bắt buộc ảnh chứng từ (field `anhChungTu`).
 dinhTuyen.patch('/hoan-tien/:maThanhToan/hoan-tat',
-  kiemTraHopLe(kiemTraDuLieu.hoanTien), dieuKhien.hoanTatHoanTien);
+  kiemTraHopLe(kiemTraDuLieu.hoanTien), taiTep.single('anhChungTu'), dieuKhien.hoanTatHoanTien);
 // Khiếu nại chủ sân: admin đọc và quyết định (chấp nhận → cảnh cáo / cảnh cáo nghiêm trọng / khoá).
 dinhTuyen.get('/khieu-nai', kiemTraHopLe(kiemTraDuLieu.danhSachKhieuNai), dieuKhien.lietKeKhieuNai);
 dinhTuyen.patch('/khieu-nai/:maKhieuNai/xu-ly',

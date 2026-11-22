@@ -170,10 +170,10 @@ module.exports = {
       get: endpoint('Danh sách tất cả cơ sở đang hoạt động (cho trang chủ)', 'Khách hàng'),
     },
     '/api/khach/co-so/{maCoSo}': {
-      get: endpoint('Xem chi tiết cơ sở', 'Khách hàng', { params: maCoSo }),
+      get: endpoint('Xem chi tiết cơ sở (có `soPhutDatToiThieu` và `soPhutTreToiDa` để hiển thị trước khi đặt)', 'Khách hàng', { params: maCoSo }),
     },
     '/api/khach/co-so/{maCoSo}/lich-ngay': {
-      get: endpoint('Xem lịch các sân của cơ sở trong một ngày (khung đã đặt/bị khóa và bảng giá)', 'Khách hàng', {
+      get: endpoint('Xem lịch các sân của cơ sở trong một ngày (khung đã đặt/bị khóa, bảng giá, `soPhutDatToiThieu`, `soPhutTreToiDa`)', 'Khách hàng', {
         params: maCoSo,
         query: [thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD', true)],
       }),
@@ -189,7 +189,7 @@ module.exports = {
       }),
     },
     '/api/khach/san/{maSan}': {
-      get: endpoint('Xem chi tiết sân và bảng giá', 'Khách hàng', { params: maSan }),
+      get: endpoint('Xem chi tiết sân và bảng giá (có `soPhutDatToiThieu` và `soPhutTreToiDa` của cơ sở)', 'Khách hàng', { params: maSan }),
     },
     '/api/khach/san/{maSan}/lich-trong': {
       get: endpoint('Kiểm tra sân có trống trong khung giờ không', 'Khách hàng', {
@@ -202,7 +202,7 @@ module.exports = {
       }),
     },
     '/api/khach/dat-san': {
-      post: endpoint('Đặt sân một lần', 'Khách hàng', { auth: true, body: 'DatSan' }),
+      post: endpoint('Đặt sân một lần (429 ABUSE_HOLD_BLOCKED nếu bị chặn do giữ sân ảo)', 'Khách hàng', { auth: true, body: 'DatSan' }),
       get: endpoint('Xem lịch sử đặt sân', 'Khách hàng', { auth: true }),
     },
     '/api/khach/dat-san/co-dinh': {
@@ -211,8 +211,19 @@ module.exports = {
         body: 'DatSanCoDinh',
       }),
     },
+    '/api/khach/dat-san/nhieu': {
+      post: endpoint(
+        'Đặt nhiều sân / nhiều khung giờ trong MỘT cơ sở, MỘT ngày, thanh toán 1 QR. Tất cả hoặc không: '
+        + 'các mục liền kề cùng sân được gộp thành cụm, mỗi cụm là 1 đơn con (cùng maNhomDat, cùng hetHanGiuCho). '
+        + '400 cụm ngắn hơn tối thiểu (chiTiet.cacCumNgan[]: maSan/ngay/gioBatDau/gioKetThuc/soPhut/soPhutToiThieu); '
+        + '409 CONFLICT kèm chiTiet.cacCumTrung (đủ mọi cụm trùng, lyDo booked|locked) và không giữ cụm nào; '
+        + '429 ABUSE_HOLD_BLOCKED khi khách hủy/để hết hạn ≥ abuse_threshold đợt trong abuse_window_hours (chiTiet: soLan/nguong/gioCuaSo/chanDen)',
+        'Khách hàng',
+        { auth: true, body: 'DatNhieuSan', responses: { 404: response.Loi, 409: response.Loi, 429: response.Loi, 503: response.Loi } }),
+    },
     '/api/khach/dat-san/{maDatSan}/hoa-don-nhap': {
-      get: endpoint('Xem hóa đơn nháp và hướng dẫn thanh toán', 'Khách hàng', { auth: true, params: maDatSan }),
+      get: endpoint('Xem hóa đơn nháp và hướng dẫn thanh toán (đơn con bất kỳ của nhóm nhiều sân đều trả hóa đơn tổng của nhóm; có maNhomDat, conLaiGiay; '
+        + 'G2: đã gửi ảnh thì hetHanGiuCho/conLaiGiay = null, thêm hanXacNhan, conLaiXacNhanGiay, chungTu[] (các ảnh đã gửi, không có cảnh báo trùng ảnh), soAnhToiDa)', 'Khách hàng', { auth: true, params: maDatSan }),
     },
     '/api/khach/dat-san/{maDatSan}/huy-xem-truoc': {
       get: endpoint(
@@ -223,10 +234,20 @@ module.exports = {
     },
     '/api/khach/dat-san/{maDatSan}/huy': {
       post: endpoint(
-        'Hủy đơn đặt sân. Đơn đã thanh toán hoàn theo chính sách: còn ≥24h hoàn 100%, 12–24h hoàn 50%, '
+        'Hủy đơn đặt sân (đơn thuộc nhóm nhiều sân/khung giờ: hủy TẤT CẢ đơn con của nhóm). Đơn đã thanh toán hoàn theo chính sách: còn ≥24h hoàn 100%, 12–24h hoàn 50%, '
         + 'dưới 12h không hoàn; có hoàn thì tạo yêu cầu hoàn tiền cho chủ sân và gửi thông báo',
         'Khách hàng',
         { auth: true, params: maDatSan }),
+    },
+    '/api/khach/dat-san/{maDatSan}/check-in': {
+      post: endpoint(
+        'G3 – Khách quét QR check-in tại sân (mỗi đơn con check-in riêng). Body {maSan, token, phienBan} tách từ QR "bc1:<maSan>:<phienBan>:<token>", '
+        + 'quetLuc/viDo/kinhDo tuỳ chọn. Backend kiểm theo thứ tự: token → phiên bản → chủ đơn → đúng sân → trạng thái → cửa sổ giờ (giờ MÁY CHỦ, '
+        + 'từ checkin_open_minutes trước giờ chơi đến hết SoPhutTreToiDa) → chưa check-in. Mã lỗi: QR_INVALID(400), QR_OUTDATED(400), NOT_BOOKING_OWNER(403), '
+        + 'WRONG_COURT(409), BOOKING_NOT_PAID(409), BOOKING_NOT_ELIGIBLE(409), OUT_OF_WINDOW(409, chiTiet.viTri = qua_som|qua_tre), ALREADY_CHECKED_IN(409). '
+        + 'Thành công: đơn → checked_in; đơn đang chờ chủ sân duyệt được tự xác nhận (nhật ký xac_nhan_qua_check_in), trả daTuXacNhanDon.',
+        'Khách hàng',
+        { auth: true, params: maDatSan, body: 'CheckInQr', responses: { 403: response.Loi, 409: response.Loi } }),
     },
     '/api/khach/dat-san/{maDatSan}/khieu-nai': {
       post: endpoint(
@@ -286,12 +307,21 @@ module.exports = {
         body: 'TaiKhoanHoanTien',
       }),
     },
+    '/api/khach/hoan-tien/{maHoanTien}/da-nhan': {
+      post: endpoint('G4 – Khách xác nhận ĐÃ NHẬN lại tiền hoàn (refunded → received, đóng khoản hoàn). maHoanTien lấy từ GET /khach/dat-san. 409 REFUND_NOT_SENT nếu chủ sân chưa chuyển',
+        'Khách hàng', { auth: true, params: [thamSoDuongDan('maHoanTien')], responses: { 404: response.Loi, 409: response.Loi } }),
+    },
+    '/api/khach/hoan-tien/{maHoanTien}/chua-nhan': {
+      post: endpoint('G4 – Khách báo CHƯA nhận được tiền hoàn (refunded → not_received; vẫn tính HanHoan cũ, chủ sân được báo để chuyển lại). Body tuỳ chọn {ghiChu}',
+        'Khách hàng', { auth: true, params: [thamSoDuongDan('maHoanTien')], responses: { 404: response.Loi, 409: response.Loi } }),
+    },
     '/api/thanh-toan/{maDatSan}/qr': {
       get: endpoint('Lấy QR và nội dung chuyển khoản', 'Thanh toán', { auth: true, params: maDatSan }),
     },
     '/api/thanh-toan/{maDatSan}/anh-chuyen-khoan': {
       post: {
-        ...endpoint('Khách gửi ảnh chuyển khoản → thanh toán chuyển sang confirming (đợi chủ sân xác nhận)', 'Thanh toán', {
+        ...endpoint('Khách gửi ảnh chuyển khoản → confirming (đợi chủ sân xác nhận). G2: mỗi lần gửi thêm 1 chứng từ (không xoá ảnh cũ, tối đa 5 ảnh/đơn, 409 PROOF_LIMIT), '
+          + 'giữ chỗ vô thời hạn (HetHanGiuCho=NULL), hanXacNhan = +30 phút (+15 nếu đặt gấp). Trả maChungTu, soAnhDaGui, hanXacNhan, conLaiXacNhanGiay', 'Thanh toán', {
           auth: true,
           params: maDatSan,
           responses: { 404: response.Loi, 409: response.Loi },
@@ -303,7 +333,14 @@ module.exports = {
               schema: {
                 type: 'object',
                 required: ['anhChuyenKhoan'],
-                properties: { anhChuyenKhoan: { type: 'string', format: 'binary' } },
+                properties: {
+                  anhChuyenKhoan: { type: 'string', format: 'binary' },
+                  thoiDiemChuyen: {
+                    type: 'string',
+                    description: 'Tuỳ chọn: giờ chuyển khoản trên biên lai, ISO 8601 hoặc "YYYY-MM-DD HH:mm" (giờ VN); không được ở tương lai',
+                    example: '2026-11-21 14:30',
+                  },
+                },
               },
             },
           },
@@ -392,7 +429,7 @@ module.exports = {
           thamSoTruyVan('denNgay', 'Thời gian kết thúc lọc'),
         ],
       }),
-      post: endpoint('Khóa khung giờ sân', 'Chủ sân', { auth: true, body: 'KhoaSan' }),
+      post: endpoint('Khóa khung giờ sân (1 ngày hoặc khoảng ngày)', 'Chủ sân', { auth: true, body: 'KhoaSan' }),
     },
     '/api/chu-san/khoa-san/{maKhoa}': {
       delete: endpoint('Xóa khung giờ khóa sân', 'Chủ sân', {
@@ -434,7 +471,7 @@ module.exports = {
       get: endpoint('Danh sách đơn đặt sân của khách tại cơ sở của tôi', 'Chủ sân', {
         auth: true,
         query: [
-          thamSoTruyVan('trangThai', 'pending_payment | confirmed | completed | cancelled | expired'),
+          thamSoTruyVan('trangThai', 'pending_payment | confirmed | checked_in | completed | cancelled | expired'),
           thamSoTruyVan('trangThaiThanhToan', 'pending | confirming (đợi xác nhận) | success | failed | expired | late_payment'),
           thamSoTruyVan('maCoSo', 'Lọc theo cơ sở'),
           thamSoTruyVan('maSan', 'Lọc theo sân'),
@@ -444,7 +481,7 @@ module.exports = {
           thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
           thamSoTruyVan('tuKhoa', 'Tìm theo mã đơn / tên / SĐT khách'),
           thamSoTruyVan('trang', 'Trang (mặc định 1, 20 đơn/trang)'),
-          thamSoTruyVan('sapXep', 'moi-nhat (mặc định: ngày chơi mới nhất trước, cũ nhất cuối) | cu-nhat'),
+          thamSoTruyVan('sapXep', 'moi-nhat (mặc định: ngày chơi mới nhất trước, cũ nhất cuối) | cu-nhat | han-xac-nhan (G2: hàng đợi duyệt thanh toán, sắp hết hạn/quá hạn lên đầu)'),
         ],
       }),
       post: endpoint('Chủ sân tạo đơn cho khách tại chỗ (1 ngày) hoặc khách cố định (có ngayKetThuc) — xác nhận ngay', 'Chủ sân', {
@@ -454,7 +491,7 @@ module.exports = {
       }),
     },
     '/api/chu-san/dat-san/{maDatSan}': {
-      get: endpoint('Chi tiết đơn (hoá đơn) tại cơ sở của tôi', 'Chủ sân', { auth: true, params: maDatSan }),
+      get: endpoint('Chi tiết đơn (hoá đơn) tại cơ sở của tôi. G2: thêm hanXacNhan, conLaiXacNhanGiay, quaHanXacNhan, chungTu[] (nhiều ảnh) và canhBaoTrungAnh[] (ảnh đã dùng ở đơn khác — chỉ cảnh báo)', 'Chủ sân', { auth: true, params: maDatSan }),
     },
     '/api/chu-san/dat-san/{maDatSan}/xac-nhan-thanh-toan': {
       post: endpoint('Chủ sân xác nhận đã nhận tiền → đơn thành công (confirmed)', 'Chủ sân', {
@@ -464,7 +501,7 @@ module.exports = {
       }),
     },
     '/api/chu-san/dat-san/{maDatSan}/tu-choi-thanh-toan': {
-      post: endpoint('Chủ sân từ chối ảnh chuyển khoản (kèm lý do) → khách gửi lại', 'Chủ sân', {
+      post: endpoint('Chủ sân từ chối ảnh chuyển khoản (kèm lý do bắt buộc, ghi nhật ký) → thanh toán về pending, giữ chỗ hold_minutes, khách gửi lại; ảnh cũ chuyển rejected, không xoá', 'Chủ sân', {
         auth: true,
         params: maDatSan,
         body: 'TuChoiThanhToan',
@@ -493,18 +530,50 @@ module.exports = {
         responses: { 404: response.Loi, 409: response.Loi },
       }),
     },
+    '/api/chu-san/san/{maSan}/qr-check-in': {
+      get: endpoint('G3 – Xem QR check-in hiện tại của sân (tạo lười lần đầu): maSan, tenSan, tenCoSo, phienBan, noiDungQr, anhQr (data URL PNG), lichSu[]',
+        'Chủ sân', { auth: true, params: maSan, responses: { 404: response.Loi } }),
+    },
+    '/api/chu-san/san/{maSan}/qr-check-in/doi': {
+      post: endpoint('G3 – Đổi QR check-in: token mới, phiên bản + 1, QR cũ mất hiệu lực ngay; ghi LichSuQrSan + nhật ký',
+        'Chủ sân', { auth: true, params: maSan, responses: { 404: response.Loi } }),
+    },
+    '/api/chu-san/san/{maSan}/qr-check-in/anh.png': {
+      get: endpoint('G3 – Tải ảnh PNG QR độ phân giải cao (trả thẳng image/png, không bọc envelope)',
+        'Chủ sân', { auth: true, params: maSan, responses: { 404: response.Loi } }),
+    },
+    '/api/chu-san/san/{maSan}/qr-check-in/in': {
+      get: endpoint('G3 – Trang HTML để in (khoGiay=A4|A5, mặc định A4): tên cơ sở + tên sân + QR + hướng dẫn (trả thẳng text/html)',
+        'Chủ sân', { auth: true, params: maSan, query: [thamSoTruyVan('khoGiay', 'A4 | A5')], responses: { 404: response.Loi } }),
+    },
+    '/api/chu-san/dat-san/{maDatSan}/check-in-thu-cong': {
+      post: endpoint('G3 – Chủ sân check-in thủ công (QR lỗi/mất mạng/hết pin; tìm đơn bằng GET /chu-san/dat-san?tuKhoa=mã đơn hoặc SĐT). '
+        + 'Chỉ đơn thuộc cơ sở của mình; từ checkin_open_minutes trước giờ chơi đến hết giờ chơi; ghi người + lý do. Khách không gọi được.',
+        'Chủ sân', { auth: true, params: maDatSan, body: 'CheckInThuCong', responses: { 404: response.Loi, 409: response.Loi } }),
+    },
     '/api/chu-san/hoan-tien': {
       get: endpoint('Yêu cầu hoàn tiền của khách huỷ đơn (chủ sân tự chuyển khoản)', 'Chủ sân', {
         auth: true,
-        query: [thamSoTruyVan('trangThai', 'processing (chờ hoàn, mặc định) | refunded (đã hoàn)')],
+        query: [thamSoTruyVan('trangThai', 'processing (chờ hoàn, gồm not_received/escalated; mặc định) | refunded (đã hoàn, gồm received). Mỗi dòng có maHoanTien, trangThaiHoanTien chi tiết, hanHoan, quaHan, anhChungTuUrl')],
       }),
     },
     '/api/chu-san/hoan-tien/{maThanhToan}/hoan-thanh': {
-      post: endpoint('Chủ sân xác nhận đã chuyển khoản hoàn tiền cho khách', 'Chủ sân', {
-        auth: true,
-        params: maThanhToan,
-        body: 'HoanThanhHoanTien',
-      }),
+      post: {
+        ...endpoint('G4 – Chủ sân bấm đã hoàn: bắt buộc ẢNH chứng từ chuyển khoản (multipart field anhChungTu), không còn mã giao dịch. Khoản → refunded, khách được báo để xác nhận Đã nhận / Chưa nhận',
+          'Chủ sân', { auth: true, params: maThanhToan, responses: { 404: response.Loi, 409: response.Loi } }),
+        requestBody: {
+        required: true,
+        content: {
+          'multipart/form-data': {
+            schema: {
+              type: 'object',
+              required: ['anhChungTu'],
+              properties: { anhChungTu: { type: 'string', format: 'binary', description: 'Ảnh chuyển khoản hoàn (JPG/PNG/WEBP ≤5MB), BẮT BUỘC' } },
+            },
+          },
+        },
+      },
+      },
     },
     '/api/chu-san/bao-cao/doanh-thu': {
       get: endpoint('Báo cáo doanh thu theo ngày/tháng/năm hoặc khoảng ngày tự chọn (kèm tongCong)', 'Chủ sân', {
@@ -646,7 +715,11 @@ module.exports = {
       }),
     },
     '/api/quan-tri/dat-san/cho-xac-nhan': {
-      get: endpoint('Admin: đơn khách đã gửi ảnh chuyển khoản, đang đợi xác nhận (kèm anhChuyenKhoanUrl)', 'Quản trị', { auth: true }),
+      get: endpoint('Admin: đơn khách đã gửi ảnh chuyển khoản, đang đợi xác nhận. G2: kèm hanXacNhan, conLaiXacNhanGiay, quaHan, chungTu[] (nhiều ảnh), canhBaoTrungAnh[]; '
+        + 'query quaHan=true|false để lọc; quá hạn lên đầu, KHÔNG tự nhả slot', 'Quản trị', {
+        auth: true,
+        query: [thamSoTruyVan('quaHan', 'true = chỉ đơn quá hạn xác nhận | false = chỉ đơn còn trong hạn | bỏ trống = tất cả')],
+      }),
     },
     '/api/quan-tri/dat-san/{maDatSan}/xac-nhan-thanh-toan': {
       post: endpoint('Admin xác nhận thanh toán → đơn thành công (confirmed)', 'Quản trị', {
@@ -673,11 +746,22 @@ module.exports = {
       }),
     },
     '/api/quan-tri/hoan-tien/{maThanhToan}/hoan-tat': {
-      patch: endpoint('Ghi nhận đã chuyển khoản hoàn tiền', 'Quản trị', {
-        auth: true,
-        params: maThanhToan,
-        body: 'MaGiaoDichHoan',
-      }),
+      patch: {
+        ...endpoint('G4 – Admin ghi nhận đã hoàn: BẮT BUỘC ảnh chứng từ (multipart field anhChungTu); thiếu ảnh → 400', 'Quản trị',
+          { auth: true, params: maThanhToan, responses: { 404: response.Loi, 409: response.Loi } }),
+        requestBody: {
+        required: true,
+        content: {
+          'multipart/form-data': {
+            schema: {
+              type: 'object',
+              required: ['anhChungTu'],
+              properties: { anhChungTu: { type: 'string', format: 'binary', description: 'Ảnh chuyển khoản hoàn (JPG/PNG/WEBP ≤5MB), BẮT BUỘC' } },
+            },
+          },
+        },
+      },
+      },
     },
     '/api/quan-tri/khieu-nai': {
       get: endpoint('Admin đọc danh sách khiếu nại chủ sân (mặc định chờ xử lý, cũ nhất trước)', 'Quản trị', {
@@ -823,6 +907,31 @@ module.exports = {
           },
         ],
       },
+      DatNhieuSan: {
+        type: 'object',
+        required: ['maCoSo', 'ngay', 'tenKhach', 'soDienThoai', 'cacMuc'],
+        properties: {
+          maCoSo: { type: 'integer', example: 12 },
+          ngay: { type: 'string', format: 'date', example: '2026-11-28' },
+          tenKhach: { type: 'string', example: 'Nguyen Van A' },
+          soDienThoai: { type: 'string', example: '0901234567' },
+          ghiChu: { type: 'string' },
+          cacMuc: {
+            type: 'array',
+            minItems: 1,
+            description: 'Mỗi mục là một khoảng giờ của một sân (mốc 30 phút). Không giới hạn số mục.',
+            items: {
+              type: 'object',
+              required: ['maSan', 'gioBatDau', 'gioKetThuc'],
+              properties: {
+                maSan: { type: 'integer', example: 31 },
+                gioBatDau: { type: 'string', example: '18:00' },
+                gioKetThuc: { type: 'string', example: '20:00' },
+              },
+            },
+          },
+        },
+      },
       DatSanCoDinh: {
         allOf: [
           { $ref: '#/components/schemas/DatSan' },
@@ -936,6 +1045,10 @@ module.exports = {
           gioMoCua: { type: 'string', example: '06:00' },
           gioDongCua: { type: 'string', example: '22:00' },
           soPhutDatToiThieu: { type: 'integer', example: 60 },
+          soPhutTreToiDa: {
+            type: 'integer', enum: [15, 20, 30], example: 15,
+            description: 'Số phút khách được đến trễ tối đa (không bắt buộc; không gửi thì giữ giá trị hiện có, cơ sở mới mặc định 15).',
+          },
         },
       },
       BangGia: {
@@ -1018,11 +1131,15 @@ module.exports = {
       },
       KhoaSan: {
         type: 'object',
-        required: ['maSan', 'thoiGianBatDau', 'thoiGianKetThuc'],
+        required: ['maSan'],
         properties: {
           maSan: { type: 'integer' },
-          thoiGianBatDau: { type: 'string', example: '2026-11-15 12:00' },
-          thoiGianKetThuc: { type: 'string', example: '2026-11-15 14:00' },
+          thoiGianBatDau: { type: 'string', example: '2026-11-15 12:00', description: 'Dạng cũ (1 ngày): dùng cặp này HOẶC cặp tuNgay/gioBatDau' },
+          thoiGianKetThuc: { type: 'string', example: '2026-11-15 14:00', description: 'Dạng cũ (1 ngày), cùng ngày với thoiGianBatDau' },
+          tuNgay: { type: 'string', example: '2026-11-15', description: 'Dạng khoảng ngày: ngày bắt đầu (YYYY-MM-DD)' },
+          denNgay: { type: 'string', example: '2026-11-20', description: 'Ngày kết thúc (gồm cả ngày này); bỏ trống = chỉ tuNgay. Tối đa 90 ngày' },
+          gioBatDau: { type: 'string', example: '08:00', description: 'Giờ bắt đầu mỗi ngày (HH:MM)' },
+          gioKetThuc: { type: 'string', example: '10:00', description: 'Giờ kết thúc mỗi ngày (HH:MM)' },
           lyDo: { type: 'string' },
         },
       },
@@ -1039,19 +1156,27 @@ module.exports = {
         required: ['lyDo'],
         properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Chưa thấy tiền về tài khoản' } },
       },
+      CheckInQr: {
+        type: 'object',
+        required: ['maSan', 'token', 'phienBan'],
+        properties: {
+          maSan: { type: 'integer', example: 3 },
+          token: { type: 'string', description: 'token trong QR (64 ký tự hex)' },
+          phienBan: { type: 'integer', example: 1 },
+          quetLuc: { type: 'string', description: 'giờ thiết bị lúc quét (ISO) – backend bỏ qua khi quyết định' },
+          viDo: { type: 'number', description: 'tuỳ chọn' },
+          kinhDo: { type: 'number', description: 'tuỳ chọn' },
+        },
+      },
+      CheckInThuCong: {
+        type: 'object',
+        required: ['lyDo'],
+        properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Khách hết pin điện thoại' } },
+      },
       HuyDonChuSan: {
         type: 'object',
         required: ['lyDo'],
         properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Sân đóng để bảo trì sàn' } },
-      },
-      HoanThanhHoanTien: {
-        type: 'object',
-        properties: { maGiaoDichHoan: { type: 'string', maxLength: 100, description: 'Mã giao dịch chuyển khoản hoàn (không bắt buộc)' } },
-      },
-      MaGiaoDichHoan: {
-        type: 'object',
-        required: ['maGiaoDichHoan'],
-        properties: { maGiaoDichHoan: { type: 'string' } },
       },
       MaGiaoDich: {
         type: 'object',

@@ -6,8 +6,8 @@ exports.layQr = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.layQr(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 });
 
-// Khách gửi ảnh chuyển khoản (multipart, trường `anhChuyenKhoan`).
+// Khách gửi ảnh chuyển khoản (multipart, trường `anhChuyenKhoan` + `thoiDiemChuyen` tuỳ chọn).
 exports.guiAnhChuyenKhoan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.guiAnhChuyenKhoan(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.file));
+    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.file, yeuCau.body));
 });

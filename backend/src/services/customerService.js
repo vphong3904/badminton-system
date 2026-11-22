@@ -7,8 +7,13 @@ const { guiThongBao, dinhDangTien, baoDanhGiaMoi } = require('./notificationServ
 const { tinhLaiDiemCoSo } = require('./reviewService');
 const { ganTrangThaiHienThi, tinhTrangThaiHienThi } = require('../utils/trangThaiDon');
 const { tinhSoTienHoan, MAC_DINH: HOAN_MAC_DINH } = require('../utils/chinhSachHoanTien');
+const hoanTienService = require('./hoanTienService');
 
 const { ANH_MAC_DINH } = require('../middlewares/upload');
+const { SLOT_BAN } = require('../utils/slot');
+const { gopKhoiLienKe } = require('../utils/khoiLienKe');
+const { layCauHinhSo } = require('./cauHinhService');
+const chungTu = require('./chungTuService');
 
 const GIOI_HAN_DAT_CO_DINH_NGAY = 90;
 const SO_NGAY_SUA_DANH_GIA = 7;
@@ -68,7 +73,7 @@ async function hetHanDatSan(maNguoiDung, ketNoi = pool) {
   // Đơn đã xác nhận mà quá giờ kết thúc thì chuyển sang hoàn thành (ghi lười khi khách truy cập).
   await ketNoi.query(
     `UPDATE DatSan SET TrangThai='completed'
-     WHERE MaKhachHang=? AND TrangThai='confirmed'
+     WHERE MaKhachHang=? AND TrangThai IN ('confirmed','checked_in')
        AND TIMESTAMP(NgayChoi,GioKetThuc)<=NOW()`,
     [maNguoiDung]);
   await ketNoi.query(
@@ -81,6 +86,8 @@ async function hetHanDatSan(maNguoiDung, ketNoi = pool) {
        t.LyDoLoi='Het han giu cho khi chu san chua xac nhan'
      WHERE d.MaKhachHang=? AND d.TrangThai='expired' AND t.TrangThai='confirming'`,
     [maNguoiDung]);
+  // G4: khoản hoàn do quá hạn xác nhận → tạo dòng HoanTien (late_proof) cho các thanh toán vừa chuyển late_payment.
+  await hoanTienService.dongBoHoanTienQuaHan(ketNoi);
   await ketNoi.query(
     `UPDATE ThanhToan t JOIN DatSan d ON d.MaDatSan=t.MaDatSan
      SET t.TrangThai='expired'
@@ -91,7 +98,7 @@ async function hetHanDatSan(maNguoiDung, ketNoi = pool) {
      WHERE lc.MaKhachHang=? AND lc.TrangThai='active'
        AND NOT EXISTS (
          SELECT 1 FROM DatSan d WHERE d.MaLichCoDinh=lc.MaLichCoDinh
-           AND d.TrangThai IN ('pending_payment','confirmed')
+           AND d.TrangThai IN ('pending_payment','confirmed','checked_in')
        )`,
     [maNguoiDung]);
 }
@@ -136,7 +143,7 @@ async function kiemTraKhungDat(san, ngay, gioBatDau, gioKetThuc, ketNoi = pool) 
   const [[donTrung]] = await ketNoi.query(
     `SELECT MaDatSan FROM DatSan
      WHERE MaSan=? AND NgayChoi=?
-       AND (TrangThai='confirmed' OR (TrangThai='pending_payment' AND HetHanGiuCho>NOW()))
+       AND ${SLOT_BAN()}
        AND GioBatDau<? AND GioKetThuc>? LIMIT 1 FOR UPDATE`,
     [san.maSan, ngay, gioKetThuc, gioBatDau]);
   const [[khoaTrung]] = await ketNoi.query(
@@ -166,11 +173,6 @@ async function tinhTongTien(maCoSo, ngay, gioBatDau, gioKetThuc, loaiKhach, ketN
   return Math.round(tongTien);
 }
 
-async function layCauHinh(ketNoi, khoa) {
-  const [[muc]] = await ketNoi.query('SELECT GiaTri AS giaTri FROM CauHinhHeThong WHERE KhoaCauHinh=?', [khoa]);
-  return Number(muc?.giaTri || 0);
-}
-
 async function layThongTinLienHe(maNguoiDung, duLieu, ketNoi) {
   const [[nguoiDung]] = await ketNoi.query(
     'SELECT HoTen AS hoTen, SoDienThoai AS soDienThoai FROM NguoiDung WHERE MaNguoiDung=?',
@@ -182,6 +184,38 @@ async function layThongTinLienHe(maNguoiDung, duLieu, ketNoi) {
   };
 }
 
+// CHỐNG GIỮ SÂN ẢO (G1.2): đếm số ĐỢT đặt của khách bị hủy/hết hạn khi CHƯA thanh toán trong `abuse_window_hours`
+// (mặc định 24h). Đủ `abuse_threshold` (mặc định 5) thì chặn đặt mới tạm thời (429, `ABUSE_HOLD_BLOCKED`) tới khi
+// đợt cũ nhất rơi khỏi cửa sổ. Một nhóm nhiều đơn con / một lịch cố định chỉ tính 1 lần. Đợt đã gửi ảnh chuyển khoản
+// hoặc đã thanh toán (thanh toán ≠ pending/expired) KHÔNG tính. Gọi trong giao dịch, trước khi giữ chỗ.
+async function kiemTraChongGiuSanAo(ketNoi, maNguoiDung) {
+  const nguong = await layCauHinhSo(ketNoi, 'abuse_threshold', 5);
+  const gioCuaSo = await layCauHinhSo(ketNoi, 'abuse_window_hours', 24);
+  const [cacLan] = await ketNoi.query(
+    `SELECT DATE_ADD(x.thoiDiem, INTERVAL ? HOUR) AS chanDen FROM (
+       SELECT MAX(CASE WHEN d.TrangThai='cancelled' THEN d.NgayHuy ELSE d.HetHanGiuCho END) AS thoiDiem
+       FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
+         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
+         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
+       END
+       WHERE d.MaKhachHang=? AND d.Nguon='app' AND t.TrangThai IN ('pending','expired')
+         AND ( (d.TrangThai='cancelled' AND d.NguoiHuy='customer' AND d.NgayHuy>=DATE_SUB(NOW(), INTERVAL ? HOUR))
+            OR (d.TrangThai IN ('expired','pending_payment') AND d.HetHanGiuCho<=NOW()
+                AND d.HetHanGiuCho>=DATE_SUB(NOW(), INTERVAL ? HOUR)) )
+       GROUP BY CASE WHEN d.MaLichCoDinh IS NULL THEN CONCAT('n', COALESCE(d.MaNhomDat, d.MaDatSan))
+                     ELSE CONCAT('l', d.MaLichCoDinh) END
+     ) x ORDER BY x.thoiDiem ASC`,
+    [gioCuaSo, maNguoiDung, gioCuaSo, gioCuaSo]);
+  if (cacLan.length < nguong) return;
+  // Hết chặn khi đợt thứ (tổng − ngưỡng + 1) từ cũ nhất rơi khỏi cửa sổ.
+  const chanDen = dinhDangThoiDiemISO(cacLan[cacLan.length - nguong].chanDen);
+  throw new AppError(429,
+    `Bạn đã hủy hoặc để hết hạn giữ chỗ ${cacLan.length} lần trong ${gioCuaSo} giờ qua. `
+    + 'Vui lòng thử đặt lại sau ít phút hoặc hoàn tất thanh toán cho các đơn đang giữ.',
+    'ABUSE_HOLD_BLOCKED',
+    { soLan: cacLan.length, nguong, gioCuaSo, chanDen });
+}
+
 // ĐẶT SÂN (lẻ 1 ngày hoặc cố định nhiều ngày). Tất cả trong 1 giao dịch, lỗi giữa chừng thì không lưu gì:
 //  1) khoá sân, 2) kiểm tra từng ngày còn trống + tính tiền, 3) (cố định) tạo LichCoDinh,
 //  4) mỗi ngày tạo 1 DatSan ở trạng thái pending_payment, giữ chỗ 10 phút, chia hoa hồng nền tảng,
@@ -189,6 +223,7 @@ async function layThongTinLienHe(maNguoiDung, duLieu, ketNoi) {
 async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
   const cacNgay = taoDanhSachNgay(duLieu.ngay, ngayKetThuc);
   const ketQua = await thucHienGiaoDich(async (ketNoi) => {
+    await kiemTraChongGiuSanAo(ketNoi, maNguoiDung);
     const san = await layThongTinSan(duLieu.maSan, ketNoi, true);
     const lienHe = await layThongTinLienHe(maNguoiDung, duLieu, ketNoi);
     const cacMucGia = [];
@@ -220,7 +255,7 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
           cacMucGia[0], duLieu.ghiChu || null, maNguoiDung,
         ]);
     const maLichCoDinh = lich.insertId;
-    const phiLe = await layCauHinh(ketNoi, 'commission_rate');
+    const phiLe = await layCauHinhSo(ketNoi, 'commission_rate', 0);
     const soPhut = doiGioRaPhut(duLieu.gioKetThuc) - doiGioRaPhut(duLieu.gioBatDau);
     const cacDon = [];
     for (let viTri = 0; viTri < cacNgay.length; viTri += 1) {
@@ -238,10 +273,14 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
           maDon, maNguoiDung, lienHe.tenKhach, lienHe.soDienThoai, duLieu.ghiChu || null,
           ngayKetThuc === duLieu.ngay ? 'walk_in' : 'fixed', maLichCoDinh,
           san.maSan, cacNgay[viTri], duLieu.gioBatDau, duLieu.gioKetThuc, soPhut, tongTien,
-          phiNenTang, tongTien - phiNenTang, await layCauHinh(ketNoi, 'hold_minutes') || 10,
+          phiNenTang, tongTien - phiNenTang, await layCauHinhSo(ketNoi, 'hold_minutes', 10),
         ]);
       cacDon.push({ maDatSan: don.insertId, maDon, ngay: cacNgay[viTri], tongTien });
     }
+    // Task 2.1: đơn mới là nhóm 1 dòng (MaNhomDat = MaDatSan); đặt nhiều sân (2.3) sẽ gom nhiều dòng vào một nhóm.
+    await ketNoi.query(
+      `UPDATE DatSan SET MaNhomDat = MaDatSan WHERE MaDatSan IN (${cacDon.map(() => '?').join(',')})`,
+      cacDon.map((don) => don.maDatSan));
     const tongTien = cacMucGia.reduce((tong, gia) => tong + gia, 0);
     const taiKhoanNhan = await layTaiKhoanChuSan(ketNoi, san.maChuSan);
     const anhQrUrl = taoAnhQrUrl(cacDon[0].maDon, tongTien, taiKhoanNhan);
@@ -287,6 +326,230 @@ async function taoDatSan(maNguoiDung, duLieu, ngayKetThuc = duLieu.ngay) {
     };
   });
   return ketQua;
+}
+
+// 'YYYY-MM-DD HH:MM:SS' (giờ +07:00, do pool dùng dateStrings) → ISO 'YYYY-MM-DDTHH:MM:SS+07:00'.
+function dinhDangThoiDiemISO(thoiDiem) {
+  const khop = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(String(thoiDiem));
+  return khop ? `${khop[1]}T${khop[2]}+07:00` : String(thoiDiem);
+}
+
+// Khóa các hàng San theo maSan TĂNG DẦN (1 câu lệnh, ORDER BY khóa chính) rồi mới khóa CoSo.
+// Thứ tự San → CoSo trùng `layThongTinSan` (đặt lẻ khóa San rồi CoSo trong cùng câu JOIN), và thứ tự
+// tăng dần giúp hai yêu cầu chéo nhau (A: 31→32, B: 32→31) không deadlock (DAT_NHIEU… mục 5, bước 2).
+// Trả { coSo, cacSan: Map(maSan → { maSan, tenSan }) }.
+async function khoaSanVaCoSo(ketNoi, maCoSo, cacMuc) {
+  const cacMaSan = [...new Set(cacMuc.map((muc) => muc.maSan))].sort((a, b) => a - b);
+  const [cacHang] = await ketNoi.query(
+    `SELECT MaSan AS maSan, MaCoSo AS maCoSo, TenSan AS tenSan, TrangThai AS trangThaiSan
+     FROM San WHERE MaSan IN (${cacMaSan.map(() => '?').join(',')})
+     ORDER BY MaSan ASC FOR UPDATE`,
+    cacMaSan);
+  const cacSan = new Map(cacHang.map((hang) => [hang.maSan, hang]));
+  if (cacMaSan.some((maSan) => !cacSan.has(maSan) || cacSan.get(maSan).trangThaiSan !== 'active')) {
+    throw AppError.khongTimThay('Không tìm thấy sân đang hoạt động');
+  }
+  const cacLoiSan = [];
+  cacMuc.forEach((muc, chiSo) => {
+    if (cacSan.get(muc.maSan).maCoSo !== maCoSo) {
+      cacLoiSan.push({ truong: `cacMuc[${chiSo}].maSan`, thongBao: 'Sân không thuộc cơ sở đã chọn.' });
+    }
+  });
+  if (cacLoiSan.length > 0) throw AppError.duLieuKhongHopLe('Sân không thuộc cơ sở đã chọn.', cacLoiSan);
+
+  const [[coSo]] = await ketNoi.query(
+    `SELECT MaCoSo AS maCoSo, TenCoSo AS tenCoSo, GioMoCua AS gioMoCua, GioDongCua AS gioDongCua,
+       SoPhutDatToiThieu AS soPhutDatToiThieu, MaChuSan AS maChuSan
+     FROM CoSo WHERE MaCoSo=? AND TrangThai='active' FOR UPDATE`,
+    [maCoSo]);
+  if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở đang hoạt động');
+  return { coSo, cacSan };
+}
+
+// Lỗi 400 theo từng cụm: ngoài giờ mở cửa, bắt đầu không ở tương lai. Gom đủ để khách sửa một lượt.
+function timLoiCum(coSo, cacCum, cacSan) {
+  const cacLoi = [];
+  let daBaoNgayQuaKhu = false;
+  for (const cum of cacCum) {
+    const tenSan = cacSan.get(cum.maSan).tenSan;
+    const nhan = `${tenSan}, ${cum.gioBatDau}–${cum.gioKetThuc}`;
+    if (doiGioRaPhut(cum.gioBatDau) < doiGioRaPhut(coSo.gioMoCua)
+      || doiGioRaPhut(cum.gioKetThuc) > doiGioRaPhut(coSo.gioDongCua)) {
+      cacLoi.push({
+        truong: 'cacMuc',
+        thongBao: `${nhan}: ngoài giờ hoạt động (${String(coSo.gioMoCua).slice(0, 5)}–${String(coSo.gioDongCua).slice(0, 5)}).`,
+        maSan: cum.maSan, ngay: cum.ngay, gioBatDau: cum.gioBatDau, gioKetThuc: cum.gioKetThuc,
+      });
+    }
+    try {
+      kiemTraBatDauTuongLai(cum.ngay, cum.gioBatDau);
+    } catch (loi) {
+      if (!(loi instanceof AppError)) throw loi;
+      if (loi.chiTiet?.[0]?.truong === 'ngay') {
+        if (!daBaoNgayQuaKhu) cacLoi.push(loi.chiTiet[0]);
+        daBaoNgayQuaKhu = true;
+      } else {
+        cacLoi.push({
+          truong: 'cacMuc',
+          thongBao: `${nhan}: giờ bắt đầu phải sau giờ hiện tại.`,
+          maSan: cum.maSan, ngay: cum.ngay, gioBatDau: cum.gioBatDau, gioKetThuc: cum.gioKetThuc,
+        });
+      }
+    }
+  }
+  return cacLoi;
+}
+
+// ĐẶT NHIỀU SÂN / NHIỀU KHUNG GIỜ (1 cơ sở, 1 ngày, 1 QR) — DAT_NHIEU_SAN_NHIEU_KHUNG_GIO.md mục 5.
+// Một giao dịch, TẤT CẢ HOẶC KHÔNG: có cụm trùng thì ném 409 (rollback), không giữ cụm nào.
+//  1) khóa San tăng dần + CoSo, 2) gộp mục chọn thành cụm (gopKhoiLienKe), 3) kiểm cụm ngắn / giờ / quá khứ (400),
+//  4) gom MỌI cụm trùng đơn đang giữ hoặc bị khóa (409), 5) tính giá, 6) mỗi cụm = 1 đơn con (cùng MaNhomDat,
+//  cùng HetHanGiuCho), 7) 1 ThanhToan gắn đơn đầu nhóm, 8) 1 thông báo cho khách và 1 cho chủ sân.
+async function taoDatNhieuSan(maNguoiDung, duLieu) {
+  const { maCoSo, ngay, cacMuc } = duLieu;
+  kiemTraNgay(ngay);
+  return thucHienGiaoDich(async (ketNoi) => {
+    await kiemTraChongGiuSanAo(ketNoi, maNguoiDung);
+    const { coSo, cacSan } = await khoaSanVaCoSo(ketNoi, maCoSo, cacMuc);
+    const lienHe = await layThongTinLienHe(maNguoiDung, duLieu, ketNoi);
+
+    const { cacCum, cacCumNgan } = gopKhoiLienKe(
+      cacMuc.map((muc) => ({ maSan: muc.maSan, ngay, gioBatDau: muc.gioBatDau, gioKetThuc: muc.gioKetThuc })),
+      coSo.soPhutDatToiThieu);
+    if (cacCumNgan.length > 0) {
+      // Đặc tả mục 4: 400 kèm chiTiet = { cacCumNgan } (object, như 409 cacCumTrung). `thongBao` đọc được ngay
+      // vì app hiện message của server; số liệu từng cụm nằm trong chiTiet.cacCumNgan để tô đúng cụm.
+      const dau = cacCumNgan[0];
+      const them = cacCumNgan.length > 1 ? ` (và ${cacCumNgan.length - 1} khung khác)` : '';
+      throw AppError.duLieuKhongHopLe(
+        `${cacSan.get(dau.maSan).tenSan}, ${dau.gioBatDau}–${dau.gioKetThuc} chỉ ${dau.soPhut} phút, `
+        + `tối thiểu ${dau.soPhutToiThieu} phút${them}.`,
+        { cacCumNgan });
+    }
+    const cacLoiCum = timLoiCum(coSo, cacCum, cacSan);
+    if (cacLoiCum.length > 0) throw AppError.duLieuKhongHopLe(cacLoiCum[0].thongBao, cacLoiCum);
+
+    // Gom đủ mọi cụm trùng rồi mới trả (không dừng ở cụm đầu) để khách sửa riêng các cụm đó (quyết định H#2).
+    const cacCumTrung = [];
+    for (let chiSo = 0; chiSo < cacCum.length; chiSo += 1) {
+      const cum = cacCum[chiSo];
+      const [[donTrung]] = await ketNoi.query(
+        `SELECT MaDatSan FROM DatSan
+         WHERE MaSan=? AND NgayChoi=?
+           AND ${SLOT_BAN()}
+           AND GioBatDau<? AND GioKetThuc>? LIMIT 1 FOR UPDATE`,
+        [cum.maSan, cum.ngay, cum.gioKetThuc, cum.gioBatDau]);
+      let lyDo = donTrung ? 'booked' : null;
+      if (!lyDo) {
+        const [[khoaTrung]] = await ketNoi.query(
+          `SELECT MaKhoa FROM KhoaSan
+           WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? LIMIT 1 FOR UPDATE`,
+          [cum.maSan, cum.ngay, cum.gioKetThuc, cum.gioBatDau]);
+        if (khoaTrung) lyDo = 'locked';
+      }
+      if (lyDo) {
+        cacCumTrung.push({
+          chiSo, maSan: cum.maSan, tenSan: cacSan.get(cum.maSan).tenSan, ngay: cum.ngay,
+          gioBatDau: cum.gioBatDau, gioKetThuc: cum.gioKetThuc, lyDo,
+        });
+      }
+    }
+    if (cacCumTrung.length > 0) {
+      throw new AppError(409, 'Có khung giờ vừa được đặt hoặc bị khóa. Vui lòng chọn lại các khung giờ đó.',
+        'CONFLICT', { cacCumTrung });
+    }
+
+    const cacGia = [];
+    for (const cum of cacCum) {
+      cacGia.push(await tinhTongTien(coSo.maCoSo, cum.ngay, cum.gioBatDau, cum.gioKetThuc, 'walk_in', ketNoi));
+    }
+    const taiKhoanNhan = await layTaiKhoanChuSan(ketNoi, coSo.maChuSan);
+
+    await ketNoi.query(
+      `UPDATE DatSan SET TrangThai='expired'
+       WHERE MaSan IN (${[...cacSan.keys()].map(() => '?').join(',')}) AND NgayChoi=?
+         AND TrangThai='pending_payment' AND HetHanGiuCho<=NOW()`,
+      [...cacSan.keys(), ngay]);
+
+    const phiLe = await layCauHinhSo(ketNoi, 'commission_rate', 0);
+    const phutGiuCho = await layCauHinhSo(ketNoi, 'hold_minutes', 10);
+    // Tính 1 lần: mọi đơn con phải có CÙNG HetHanGiuCho (không để NOW() trượt qua giây khác giữa các câu INSERT).
+    const [[{ hetHan }]] = await ketNoi.query(
+      'SELECT DATE_ADD(NOW(), INTERVAL ? MINUTE) AS hetHan', [phutGiuCho]);
+
+    const cacDon = [];
+    let maNhomDat = null;
+    for (let viTri = 0; viTri < cacCum.length; viTri += 1) {
+      const cum = cacCum[viTri];
+      const tongTien = cacGia[viTri];
+      const phiNenTang = Math.round(tongTien * phiLe / 100);
+      const maDon = taoMaDon();
+      const [don] = await ketNoi.query(
+        `INSERT INTO DatSan
+         (MaDon, MaKhachHang, TenKhach, SoDienThoaiLienHe, GhiChu, Nguon, LoaiKhach,
+          MaLichCoDinh, MaNhomDat, MaSan, NgayChoi, GioBatDau, GioKetThuc, SoPhut, TongTien,
+          PhiNenTang, TienChuSan, TrangThai, HetHanGiuCho)
+         VALUES (?,?,?,?,?,'app','walk_in',NULL,?,?,?,?,?,?,?,?,?,'pending_payment',?)`,
+        [
+          maDon, maNguoiDung, lienHe.tenKhach, lienHe.soDienThoai, duLieu.ghiChu || null,
+          maNhomDat, cum.maSan, cum.ngay, cum.gioBatDau, cum.gioKetThuc, cum.soPhut, tongTien,
+          phiNenTang, tongTien - phiNenTang, hetHan,
+        ]);
+      if (viTri === 0) {
+        // Đơn đầu nhóm: MaNhomDat = chính MaDatSan; các đơn sau gán MaNhomDat này ngay lúc INSERT.
+        maNhomDat = don.insertId;
+        await ketNoi.query('UPDATE DatSan SET MaNhomDat = MaDatSan WHERE MaDatSan=?', [maNhomDat]);
+      }
+      cacDon.push({
+        maDatSan: don.insertId, maDon, maSan: cum.maSan, tenSan: cacSan.get(cum.maSan).tenSan,
+        ngay: cum.ngay, gioBatDau: cum.gioBatDau, gioKetThuc: cum.gioKetThuc, tongTien,
+      });
+    }
+
+    const tongTien = cacGia.reduce((tong, gia) => tong + gia, 0);
+    const anhQrUrl = taoAnhQrUrl(cacDon[0].maDon, tongTien, taiKhoanNhan);
+    const maQr = taoNoiDungQr(cacDon[0].maDon, tongTien, taiKhoanNhan);
+    const [thanhToan] = await ketNoi.query(
+      `INSERT INTO ThanhToan (MaDatSan, SoTien, NoiDungChuyenKhoan)
+       VALUES (?,?,?)`,
+      [cacDon[0].maDatSan, tongTien, cacDon[0].maDon]);
+
+    const cacKhung = cacDon.map((don) => `${don.tenSan} ${don.gioBatDau}–${don.gioKetThuc}`);
+    const moTaLich = `ngày ${dinhDangNgay(ngay)}: ${cacKhung.length <= 3
+      ? cacKhung.join(', ')
+      : `${cacKhung.slice(0, 3).join(', ')} và ${cacKhung.length - 3} khung khác`}`;
+    await guiThongBao(ketNoi, {
+      maNguoiDung,
+      loai: 'booking_created',
+      tieuDe: 'Đặt lịch thành công',
+      noiDung: `Bạn đã đặt ${coSo.tenCoSo} ${moTaLich} (mã ${cacDon[0].maDon}). `
+        + `Vui lòng chuyển khoản ${dinhDangTien(tongTien)} và gửi ảnh để chủ sân duyệt.`,
+      loaiThamChieu: 'booking',
+      maThamChieu: cacDon[0].maDatSan,
+      khoa: `booking_created:${maNhomDat}`,
+    });
+    await guiThongBao(ketNoi, {
+      maNguoiDung: coSo.maChuSan,
+      loai: 'new_booking_for_owner',
+      tieuDe: 'Có đơn đặt sân mới',
+      noiDung: `${lienHe.tenKhach} đặt ${coSo.tenCoSo} ${moTaLich} `
+        + `(${dinhDangTien(tongTien)}). Đơn đang chờ khách thanh toán.`,
+      loaiThamChieu: 'booking',
+      maThamChieu: cacDon[0].maDatSan,
+      khoa: `new_booking_for_owner:${maNhomDat}`,
+    });
+    return {
+      maNhomDat,
+      ngay,
+      cacDon,
+      tongTien,
+      maThanhToan: thanhToan.insertId,
+      maDonThanhToan: cacDon[0].maDon,
+      anhQrUrl,
+      maQr,
+      hetHanGiuCho: dinhDangThoiDiemISO(hetHan),
+    };
+  });
 }
 
 // Khoảng cách đường chim bay (mét) giữa 2 toạ độ.
@@ -365,7 +628,7 @@ async function timCoSo(boLoc) {
     }
     dieuKien.push(`NOT EXISTS (
          SELECT 1 FROM DatSan d WHERE d.MaSan=s.MaSan AND d.NgayChoi=?
-           AND (d.TrangThai='confirmed' OR (d.TrangThai='pending_payment' AND d.HetHanGiuCho>NOW()))
+           AND ${SLOT_BAN('d')}
            AND d.GioBatDau<? AND d.GioKetThuc>?
        )`, `NOT EXISTS (
          SELECT 1 FROM KhoaSan k WHERE k.MaSan=s.MaSan AND k.NgayKhoa=?
@@ -491,8 +754,8 @@ async function layChiTietCoSo(maCoSo) {
        SoDienThoai AS soDienThoai, LinkBanDo AS linkBanDo,
        TinhThanh AS tinhThanh, QuanHuyen AS quanHuyen, MoTa AS moTa,
        GioMoCua AS gioMoCua, GioDongCua AS gioDongCua,
-       SoPhutDatToiThieu AS soPhutDatToiThieu, GiaThapNhat AS giaThapNhat,
-       DiemTrungBinh AS diemTrungBinh, SoDanhGia AS soDanhGia
+       SoPhutDatToiThieu AS soPhutDatToiThieu, SoPhutTreToiDa AS soPhutTreToiDa,
+       GiaThapNhat AS giaThapNhat, DiemTrungBinh AS diemTrungBinh, SoDanhGia AS soDanhGia
      FROM CoSo WHERE MaCoSo=? AND TrangThai='active'`,
     [maCoSo]);
   if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở đang hoạt động');
@@ -514,6 +777,7 @@ async function layChiTietSan(maSan) {
        cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi, cs.TinhThanh AS tinhThanh,
        cs.QuanHuyen AS quanHuyen, cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua,
        cs.GioDongCua AS gioDongCua, cs.SoPhutDatToiThieu AS soPhutDatToiThieu,
+       cs.SoPhutTreToiDa AS soPhutTreToiDa,
        cs.DiemTrungBinh AS diemTrungBinh, cs.SoDanhGia AS soDanhGia
      FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
      WHERE s.MaSan=? AND s.TrangThai='active' AND cs.TrangThai='active'`,
@@ -537,7 +801,8 @@ async function layLichNgay(maCoSo, ngay) {
   kiemTraNgay(ngay);
   const [[coSo]] = await pool.query(
     `SELECT MaCoSo AS maCoSo, TenCoSo AS tenCoSo, DiaChi AS diaChi, SoDienThoai AS soDienThoai,
-       GioMoCua AS gioMoCua, GioDongCua AS gioDongCua, SoPhutDatToiThieu AS soPhutDatToiThieu
+       GioMoCua AS gioMoCua, GioDongCua AS gioDongCua, SoPhutDatToiThieu AS soPhutDatToiThieu,
+       SoPhutTreToiDa AS soPhutTreToiDa
      FROM CoSo WHERE MaCoSo=? AND TrangThai='active'`,
     [maCoSo]);
   if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở đang hoạt động');
@@ -549,7 +814,7 @@ async function layLichNgay(maCoSo, ngay) {
     `SELECT d.MaSan AS maSan, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan
      WHERE s.MaCoSo=? AND d.NgayChoi=?
-       AND (d.TrangThai='confirmed' OR (d.TrangThai='pending_payment' AND d.HetHanGiuCho>NOW()))`,
+       AND ${SLOT_BAN('d')}`,
     [maCoSo, ngay]);
   const [cacKhoa] = await pool.query(
     `SELECT k.MaSan AS maSan, k.GioBatDau AS gioBatDau, k.GioKetThuc AS gioKetThuc
@@ -575,6 +840,7 @@ async function layLichNgay(maCoSo, ngay) {
     gioMoCua: gioNgan(coSo.gioMoCua),
     gioDongCua: gioNgan(coSo.gioDongCua),
     soPhutDatToiThieu: coSo.soPhutDatToiThieu,
+    soPhutTreToiDa: coSo.soPhutTreToiDa,
     cacSan: cacSan.map((san) => ({
       maSan: san.maSan,
       tenSan: san.tenSan,
@@ -593,6 +859,7 @@ async function layLichNgay(maCoSo, ngay) {
 
 async function lietKeDatSan(maNguoiDung) {
   await hetHanDatSan(maNguoiDung);
+  const moSomPhut = await layCauHinhSo(pool, 'checkin_open_minutes', 30);
   const [cacDon] = await pool.query(
     `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaLichCoDinh AS maLichCoDinh,
        d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
@@ -606,12 +873,25 @@ async function lietKeDatSan(maNguoiDung) {
        cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.DiaChi AS diaChi, cs.LinkBanDo AS linkBanDo,
        dg.MaDanhGia AS maDanhGia, dg.SoSao AS soSaoDanhGia, dg.NoiDung AS noiDungDanhGia, dg.MaDatSan AS maDatSanDanhGia,
        dg.BiAn AS danhGiaBiAn, (dg.NgayTao + INTERVAL ${SO_NGAY_SUA_DANH_GIA} DAY >= NOW()) AS trongHanSuaDanhGia,
-       kn.MaKhieuNai AS maKhieuNai, kn.TrangThai AS trangThaiKhieuNai
+       kn.MaKhieuNai AS maKhieuNai, kn.TrangThai AS trangThaiKhieuNai,
+       ci.ThoiDiem AS thoiDiemCheckIn,
+       -- G4: khoản hoàn mới nhất của thanh toán (khách bấm Đã nhận / Chưa nhận theo maHoanTien)
+       ht.MaHoanTien AS maHoanTien, ht.TrangThai AS trangThaiHoanTienChiTiet, ht.AnhChungTu AS anhChungTuHoan,
+       ht.HanHoan AS hanHoan,
+       (ht.TrangThai='refunded') AS coTheXacNhanNhanHoan,
+       -- G3: nút "Quét QR check-in" hiện cả ngày chơi cho đơn hợp lệ chưa check-in; trongCuaSoCheckIn = đang trong cửa sổ
+       -- thật (server tính bằng NOW()); quét ngoài cửa sổ vẫn được hướng dẫn liên hệ chủ sân (OUT_OF_WINDOW).
+       (ci.MaCheckIn IS NULL AND d.Nguon='app'
+         AND (d.TrangThai='confirmed' OR (d.TrangThai='pending_payment' AND t.TrangThai IN ('confirming','overdue')))
+         AND d.NgayChoi=CURDATE() AND NOW() < TIMESTAMP(d.NgayChoi, d.GioKetThuc)) AS coTheCheckIn,
+       (ci.MaCheckIn IS NULL
+         AND NOW() >= TIMESTAMP(d.NgayChoi, d.GioBatDau) - INTERVAL ${Number(moSomPhut)} MINUTE
+         AND NOW() <= TIMESTAMP(d.NgayChoi, d.GioBatDau) + INTERVAL cs.SoPhutTreToiDa MINUTE) AS trongCuaSoCheckIn
      FROM DatSan d
      JOIN San s ON s.MaSan=d.MaSan
      JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
      LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
      END
      -- Đánh giá của đơn; đơn thuộc lịch cố định thì dùng chung đánh giá của cả lịch (mỗi lịch 1 đánh giá).
@@ -620,10 +900,13 @@ async function lietKeDatSan(maNguoiDung) {
        WHERE dx.MaDatSan=d.MaDatSan OR (d.MaLichCoDinh IS NOT NULL AND dx.MaLichCoDinh=d.MaLichCoDinh)
        ORDER BY (dx.MaDatSan=d.MaDatSan) DESC, x.MaDanhGia LIMIT 1)
      LEFT JOIN KhieuNai kn ON kn.MaDatSan=d.MaDatSan
+     LEFT JOIN CheckIn ci ON ci.MaDatSan=d.MaDatSan
+     LEFT JOIN HoanTien ht ON ht.MaHoanTien=(SELECT MAX(h2.MaHoanTien) FROM HoanTien h2 WHERE h2.MaThanhToan=t.MaThanhToan)
      WHERE d.MaKhachHang=? ORDER BY d.NgayChoi DESC, d.GioBatDau DESC`,
     [maNguoiDung]);
   return cacDon.map(({
-    maDanhGia, maKhieuNai, lyDoLoi, danhGiaBiAn, trongHanSuaDanhGia, ...don
+    maDanhGia, maKhieuNai, lyDoLoi, danhGiaBiAn, trongHanSuaDanhGia, coTheCheckIn, trongCuaSoCheckIn,
+    anhChungTuHoan, coTheXacNhanNhanHoan, ...don
   }) => {
     const daDanhGia = maDanhGia != null;
     const daKhieuNai = maKhieuNai != null;
@@ -631,6 +914,10 @@ async function lietKeDatSan(maNguoiDung) {
     const lyDoTuChoi = don.trangThaiThanhToan === 'pending' && lyDoLoi ? lyDoLoi : null;
     return ganTrangThaiHienThi({
       ...don,
+      anhChungTuHoanUrl: anhChungTuHoan || null,
+      coTheXacNhanNhanHoan: !!Number(coTheXacNhanNhanHoan),
+      coTheCheckIn: !!Number(coTheCheckIn),
+      trongCuaSoCheckIn: !!Number(trongCuaSoCheckIn),
       lyDoTuChoi,
       // Nút "Khiếu nại chủ sân": luôn có với đơn đặt qua app, miễn chưa khiếu nại lần nào.
       daKhieuNai,
@@ -639,7 +926,7 @@ async function lietKeDatSan(maNguoiDung) {
       soSaoDanhGia: daDanhGia ? Number(don.soSaoDanhGia) : null,
       // Buổi đang giữ đánh giá (chính đơn này, hoặc buổi khác cùng lịch cố định): FE sửa/xoá theo mã này.
       maDatSanDanhGia: daDanhGia ? Number(don.maDatSanDanhGia) : null,
-      // Đã chơi xong (completed) + đã thanh toán + chưa đánh giá (kể cả theo lịch cố định) → nút "Đánh giá sân".
+      // Đã check-in hoặc chơi xong (checked_in/completed) + đã thanh toán + chưa đánh giá (kể cả theo lịch cố định) → nút "Đánh giá sân".
       coTheDanhGia: !daDanhGia && coTheDanhGiaDon(don.trangThai, don.trangThaiThanhToan),
       // Sửa được trong 7 ngày kể từ lúc đánh giá và khi chưa bị admin ẩn (server tính, FE chỉ hiển thị).
       coTheSuaDanhGia: daDanhGia && !Number(danhGiaBiAn) && !!Number(trongHanSuaDanhGia),
@@ -650,22 +937,30 @@ async function lietKeDatSan(maNguoiDung) {
 async function layHoaDonNhap(maNguoiDung, maDatSan) {
   await hetHanDatSan(maNguoiDung);
   const [[hoaDon]] = await pool.query(
-    `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.NgayChoi AS ngay,
+    `SELECT d.MaDatSan AS maDatSan, d.MaNhomDat AS maNhomDat, d.MaDon AS maDon, d.NgayChoi AS ngay,
        d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc, d.TongTien AS tongTien,
        d.TrangThai AS trangThaiDatSan, d.HetHanGiuCho AS hetHanGiuCho,
        TIMESTAMPDIFF(SECOND, NOW(), d.HetHanGiuCho) AS conLaiGiay,
        t.MaThanhToan AS maThanhToan, t.SoTien AS soTien, t.TrangThai AS trangThaiThanhToan,
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan, t.AnhChuyenKhoan AS anhChuyenKhoanUrl,
-       t.NgayGuiAnh AS ngayGuiAnh, t.LyDoLoi AS lyDoLoi,
+       t.NgayGuiAnh AS ngayGuiAnh, t.HanXacNhan AS hanXacNhan,
+       TIMESTAMPDIFF(SECOND, NOW(), t.HanXacNhan) AS conLaiXacNhanGiay, t.LyDoLoi AS lyDoLoi,
        t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan
      FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
      END
      WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
     [maDatSan, maNguoiDung]);
   if (!hoaDon) throw AppError.khongTimThay('Không tìm thấy hóa đơn');
   const { lyDoLoi, trangThaiHoanTien, soTienHoan, ...phanConLai } = hoaDon;
+  // G2: đã gửi ảnh (confirming) thì giữ chỗ vô thời hạn → hetHanGiuCho/conLaiGiay = null; app đếm ngược theo
+  // hanXacNhan/conLaiXacNhanGiay (chỉ để khách biết chủ sân còn bao lâu để xem). Chứng từ = các ảnh khách đã gửi
+  // (không có cảnh báo trùng ảnh: chỉ chủ sân/Admin thấy).
+  phanConLai.conLaiGiay = phanConLai.conLaiGiay === null ? null : Number(phanConLai.conLaiGiay);
+  phanConLai.conLaiXacNhanGiay = phanConLai.conLaiXacNhanGiay === null ? null : Number(phanConLai.conLaiXacNhanGiay);
+  phanConLai.chungTu = await chungTu.layChungTu(pool, hoaDon.maThanhToan, { goc: 'khach' });
+  phanConLai.soAnhToiDa = chungTu.TOI_DA_CHUNG_TU_MOI_DON;
   // Thêm trangThaiHienThi/nhanTrangThai/nhomTrangThai (backend tính, app chỉ hiển thị).
   const kemTrangThai = (duLieu) => {
     const { ma, nhan, nhom } = tinhTrangThaiHienThi({
@@ -703,9 +998,9 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
 // Cấu hình chính sách hoàn tiền (bảng cấu hình; thiếu thì dùng mặc định 24h/12h/50%).
 async function layCauHinhHoan(ketNoi) {
   return {
-    gioMienPhi: await layCauHinh(ketNoi, 'cancel_free_hours') || HOAN_MAC_DINH.gioMienPhi,
-    gioNuaTien: await layCauHinh(ketNoi, 'cancel_half_hours') || HOAN_MAC_DINH.gioNuaTien,
-    tiLeNuaTien: await layCauHinh(ketNoi, 'late_cancel_refund_percent') || HOAN_MAC_DINH.tiLeNuaTien,
+    gioMienPhi: await layCauHinhSo(ketNoi, 'cancel_free_hours', HOAN_MAC_DINH.gioMienPhi),
+    gioNuaTien: await layCauHinhSo(ketNoi, 'cancel_half_hours', HOAN_MAC_DINH.gioNuaTien),
+    tiLeNuaTien: await layCauHinhSo(ketNoi, 'late_cancel_refund_percent', HOAN_MAC_DINH.tiLeNuaTien),
   };
 }
 
@@ -724,14 +1019,31 @@ function tinhHoanTheoBuoi(danhSachBuoi, cauHinhHoan, bayGio = Date.now()) {
   return { soTienHoan, tongDaTra, conGioNhoNhat };
 }
 
+// Các đơn con CÒN HIỆU LỰC của cùng một đợt đặt: lịch cố định → các buổi từ hôm nay; còn lại → mọi đơn con cùng
+// MaNhomDat (đặt nhiều sân/khung giờ, G1.3; đơn lẻ = nhóm 1 dòng). Hủy phải giải phóng TẤT CẢ các đơn này.
+async function layCacBuoiCuaDot(ketNoi, don, khoa = false) {
+  const hauTo = khoa ? 'FOR UPDATE' : '';
+  if (don.maLichCoDinh) {
+    return (await ketNoi.query(
+      `SELECT MaDatSan AS maDatSan, NgayChoi AS ngay, GioBatDau AS gioBatDau, TongTien AS tongTien FROM DatSan
+       WHERE MaLichCoDinh=? AND NgayChoi>=CURDATE() AND TrangThai IN ('pending_payment','confirmed') ${hauTo}`,
+      [don.maLichCoDinh]))[0];
+  }
+  return (await ketNoi.query(
+    `SELECT MaDatSan AS maDatSan, NgayChoi AS ngay, GioBatDau AS gioBatDau, TongTien AS tongTien FROM DatSan
+     WHERE COALESCE(MaNhomDat, MaDatSan)=? AND MaLichCoDinh IS NULL
+       AND TrangThai IN ('pending_payment','confirmed') ${hauTo}`,
+    [don.maNhomDat ?? don.maDatSan]))[0];
+}
+
 // Xem trước kết quả huỷ (KHÔNG ghi DB): FE hiện cảnh báo đúng trường hợp 100% / 50% / không hoàn trước khi khách xác nhận.
 async function xemTruocHuy(maNguoiDung, maDatSan) {
   const [[donDatSan]] = await pool.query(
-    `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.NgayChoi AS ngay,
+    `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat, d.NgayChoi AS ngay,
        d.GioBatDau AS gioBatDau, d.TongTien AS tongTien, d.TrangThai AS trangThai,
        t.TrangThai AS trangThaiThanhToan
      FROM DatSan d LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
      END
      WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
@@ -740,12 +1052,7 @@ async function xemTruocHuy(maNguoiDung, maDatSan) {
   if (!['pending_payment', 'confirmed'].includes(donDatSan.trangThai)) {
     throw AppError.biTrung('Đơn đặt sân không thể hủy ở trạng thái hiện tại');
   }
-  const danhSachBuoi = donDatSan.maLichCoDinh
-    ? (await pool.query(
-      `SELECT NgayChoi AS ngay, GioBatDau AS gioBatDau, TongTien AS tongTien FROM DatSan
-       WHERE MaLichCoDinh=? AND NgayChoi>=CURDATE() AND TrangThai IN ('pending_payment','confirmed')`,
-      [donDatSan.maLichCoDinh]))[0]
-    : [{ ngay: donDatSan.ngay, gioBatDau: donDatSan.gioBatDau, tongTien: donDatSan.tongTien }];
+  const danhSachBuoi = await layCacBuoiCuaDot(pool, donDatSan);
   if (!danhSachBuoi.length) throw AppError.biTrung('Không còn buổi nào có thể hủy');
 
   const daThanhToan = donDatSan.trangThaiThanhToan === 'success';
@@ -769,11 +1076,11 @@ async function huyDatSan(maNguoiDung, maDatSan) {
   return thucHienGiaoDich(async (ketNoi) => {
     await hetHanDatSan(maNguoiDung, ketNoi);
     const [[donDatSan]] = await ketNoi.query(
-      `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.NgayChoi AS ngay,
+      `SELECT d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat, d.NgayChoi AS ngay,
          d.GioBatDau AS gioBatDau, d.TongTien AS tongTien, d.TrangThai AS trangThai,
          t.MaThanhToan AS maThanhToan, t.TrangThai AS trangThaiThanhToan
        FROM DatSan d LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
          ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
        END
        WHERE d.MaDatSan=? AND d.MaKhachHang=? FOR UPDATE`,
@@ -789,14 +1096,7 @@ async function huyDatSan(maNguoiDung, maDatSan) {
         'Bạn đã gửi ảnh chuyển khoản, đang chờ chủ sân xác nhận. Vui lòng chờ chủ sân xác nhận hoặc từ chối rồi mới huỷ đơn.',
         'PAYMENT_CONFIRMING');
     }
-    const danhSachMaDon = donDatSan.maLichCoDinh
-      ? (await ketNoi.query(
-        `SELECT MaDatSan AS maDatSan, NgayChoi AS ngay, GioBatDau AS gioBatDau,
-           TongTien AS tongTien FROM DatSan
-         WHERE MaLichCoDinh=? AND NgayChoi>=CURDATE()
-           AND TrangThai IN ('pending_payment','confirmed') FOR UPDATE`,
-        [donDatSan.maLichCoDinh]))[0]
-      : [{ maDatSan, ngay: donDatSan.ngay, gioBatDau: donDatSan.gioBatDau, tongTien: donDatSan.tongTien }];
+    const danhSachMaDon = await layCacBuoiCuaDot(ketNoi, donDatSan, true);
     if (!danhSachMaDon.length) throw AppError.biTrung('Không còn buổi nào có thể hủy');
 
     // Chính sách hoàn tiền (đơn đã thanh toán): còn ≥24h → 100%; 12–24h → 50%; <12h → không hoàn.
@@ -810,18 +1110,19 @@ async function huyDatSan(maNguoiDung, maDatSan) {
     await ketNoi.query(
       `UPDATE DatSan SET TrangThai='cancelled', NguoiHuy='customer',
          LyDoHuy='Khach hang huy don', NgayHuy=NOW()
-       WHERE MaDatSan IN (${danhSachMaDon.map(() => '?').join(',')})`,
+       WHERE TrangThai IN ('pending_payment','confirmed') AND MaDatSan IN (${danhSachMaDon.map(() => '?').join(',')})`,
       danhSachMaDon.map((muc) => muc.maDatSan));
     if (donDatSan.maLichCoDinh) {
       await ketNoi.query("UPDATE LichCoDinh SET TrangThai='cancelled' WHERE MaLichCoDinh=?", [donDatSan.maLichCoDinh]);
     }
     if (donDatSan.maThanhToan) {
       if (soTienHoan > 0) {
-        await ketNoi.query(
-          // Chủ sân tự chuyển khoản hoàn cho khách rồi bấm hoàn thành (ownerBookingService).
-          `UPDATE ThanhToan SET SoTienHoan=?, TrangThaiHoanTien='processing'
-           WHERE MaThanhToan=? AND TrangThai='success'`,
-          [soTienHoan, donDatSan.maThanhToan]);
+        // Chủ sân tự chuyển khoản hoàn cho khách rồi tải ảnh chứng từ (hoanTienService, G4).
+        await hoanTienService.taoYeuCauHoan(ketNoi, {
+          maThanhToan: donDatSan.maThanhToan, maDatSan, loai: 'cancel', soTien: soTienHoan,
+          tyLe: tongDaTra > 0 ? Math.round(soTienHoan * 100 / tongDaTra) : null,
+          lyDo: 'Khach hang huy don',
+        });
       } else {
         await ketNoi.query(
           `UPDATE ThanhToan SET TrangThai='expired' WHERE MaThanhToan=? AND TrangThai='pending'`,
@@ -913,6 +1214,11 @@ async function capNhatTaiKhoanHoan(maNguoiDung, maDatSan, thongTin) {
      WHERE d.MaDatSan=? AND d.MaKhachHang=? AND t.TrangThaiHoanTien IN ('waiting_info','processing')`,
     [thongTin.tenNganHang, thongTin.maNganHang, thongTin.soTaiKhoan, thongTin.chuTaiKhoan, maDatSan, maNguoiDung]);
   if (!ketQua.affectedRows) throw AppError.khongTimThay('Không tìm thấy yêu cầu hoàn tiền cần bổ sung tài khoản');
+  // G4: cập nhật cả dòng HoanTien đang chờ (khách sửa TK sai → chủ sân chuyển lại).
+  const [[thanhToan]] = await pool.query(
+    `SELECT t.MaThanhToan AS maThanhToan FROM ThanhToan t JOIN DatSan d ON d.MaDatSan=t.MaDatSan
+     WHERE d.MaDatSan=? AND d.MaKhachHang=?`, [maDatSan, maNguoiDung]);
+  if (thanhToan) await hoanTienService.capNhatTaiKhoanNhan(pool, thanhToan.maThanhToan, thongTin);
   return { daCapNhat: true };
 }
 
@@ -940,17 +1246,19 @@ async function boYeuThich(maNguoiDung, maCoSo) {
   return { maCoSo: Number(maCoSo), yeuThich: false };
 }
 
-// Đơn được đánh giá khi: đã chơi xong (completed) và thanh toán đã hoàn tất. Đơn app chỉ lên
-// confirmed khi thanh toán 'success', nên completed ⇒ đã trả tiền; vẫn chặn thêm nếu có dòng
-// ThanhToan mà chưa 'success' (vd. dữ liệu lệch). Đơn không có dòng ThanhToan (dữ liệu mẫu) coi như hợp lệ.
+// Đơn được đánh giá khi: khách đã check-in (checked_in) hoặc đã chơi xong (completed), và thanh toán đã
+// hoàn tất. Đơn app chỉ lên confirmed khi thanh toán 'success', nên checked_in/completed ⇒ đã trả tiền;
+// vẫn chặn thêm nếu có dòng ThanhToan mà chưa 'success' (vd. dữ liệu lệch). Đơn không có dòng ThanhToan
+// (dữ liệu mẫu) coi như hợp lệ.
+const TRANG_THAI_DUOC_DANH_GIA = ['checked_in', 'completed'];
 function coTheDanhGiaDon(trangThaiDon, trangThaiThanhToan) {
-  return trangThaiDon === 'completed'
+  return TRANG_THAI_DUOC_DANH_GIA.includes(trangThaiDon)
     && (trangThaiThanhToan == null || trangThaiThanhToan === 'success');
 }
 
 const THONG_BAO_CHUA_DANH_GIA = {
   pending_payment: 'Đơn chưa thanh toán nên chưa thể đánh giá.',
-  confirmed: 'Bạn chỉ có thể đánh giá sau khi chơi xong.',
+  confirmed: 'Bạn chỉ có thể đánh giá sau khi check-in hoặc chơi xong.',
   cancelled: 'Đơn đã huỷ nên không thể đánh giá.',
   expired: 'Đơn đã hết hạn giữ chỗ nên không thể đánh giá.',
 };
@@ -974,7 +1282,7 @@ async function layDanhSachDanhGia(maCoSo, { trang = 1, soLuong = 20 } = {}) {
   return { danhSach, trang, soLuong, tongSo: Number(tong.tongSo) };
 }
 
-// Khách đánh giá cơ sở sau khi chơi xong và đã thanh toán. Mỗi đơn 1 đánh giá (UNIQUE MaDatSan);
+// Khách đánh giá cơ sở sau khi check-in (hoặc chơi xong) và đã thanh toán. Mỗi đơn 1 đánh giá (UNIQUE MaDatSan);
 // đơn thuộc lịch cố định thì cả lịch chỉ 1 đánh giá (buổi đầu tiên được đánh giá).
 // Ghi đánh giá + tính lại CoSo.DiemTrungBinh/SoDanhGia + thông báo, tất cả trong một giao dịch.
 async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
@@ -984,12 +1292,12 @@ async function guiDanhGia(maNguoiDung, maDatSan, { soSao, noiDung }) {
       `SELECT d.MaDatSan AS maDatSan, d.TrangThai AS trangThai, s.MaCoSo AS maCoSo,
          d.MaLichCoDinh AS maLichCoDinh,
          COALESCE((SELECT MIN(d2.MaDatSan) FROM DatSan d2
-                   WHERE d2.MaLichCoDinh=d.MaLichCoDinh), d.MaDatSan) AS maDatSanThanhToan
+                   WHERE d2.MaLichCoDinh=d.MaLichCoDinh), d.MaNhomDat, d.MaDatSan) AS maDatSanThanhToan
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan
        WHERE d.MaDatSan=? AND d.MaKhachHang=? FOR UPDATE`,
       [maDatSan, maNguoiDung]);
     if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
-    if (don.trangThai !== 'completed') {
+    if (!TRANG_THAI_DUOC_DANH_GIA.includes(don.trangThai)) {
       throw AppError.biTrung(
         THONG_BAO_CHUA_DANH_GIA[don.trangThai] || 'Đơn này chưa thể đánh giá.',
         'BOOKING_NOT_COMPLETED');
@@ -1118,6 +1426,7 @@ module.exports = {
   kiemTraTrong,
   layLichNgay,
   taoDatSan,
+  taoDatNhieuSan,
   lietKeDatSan,
   layHoaDonNhap,
   huyDatSan,

@@ -2,6 +2,9 @@ const dinhTuyen = require('express').Router();
 const dieuKhien = require('../controllers/customerController');
 const kiemTraDuLieu = require('../validators/customer');
 const kiemTraHopLe = require('../middlewares/validate');
+const checkIn = require('../controllers/checkInController');
+const kiemTraCheckIn = require('../validators/checkIn');
+const hoanTien = require('../controllers/hoanTienController');
 const { xacThucNguoiDung, kiemTraVaiTro } = require('../middlewares/auth');
 
 dinhTuyen.get('/co-so', kiemTraHopLe(kiemTraDuLieu.timCoSo), dieuKhien.timCoSo);
@@ -21,9 +24,12 @@ dinhTuyen.post('/yeu-thich', kiemTraHopLe(kiemTraDuLieu.themYeuThich), dieuKhien
 dinhTuyen.delete('/yeu-thich/:maCoSo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.boYeuThich);
 dinhTuyen.post('/dat-san', kiemTraHopLe(kiemTraDuLieu.datLe), dieuKhien.datLe);
 dinhTuyen.post('/dat-san/co-dinh', kiemTraHopLe(kiemTraDuLieu.datCoDinh), dieuKhien.datCoDinh);
+dinhTuyen.post('/dat-san/nhieu', kiemTraHopLe(kiemTraDuLieu.datNhieu), dieuKhien.datNhieu);
 dinhTuyen.get('/dat-san', dieuKhien.lietKeDatSan);
 dinhTuyen.get('/dat-san/:maDatSan/hoa-don-nhap', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.layHoaDonNhap);
 dinhTuyen.get('/dat-san/:maDatSan/huy-xem-truoc', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.xemTruocHuy);
+// G3: khách quét QR check-in tại sân (mỗi đơn con check-in riêng).
+dinhTuyen.post('/dat-san/:maDatSan/check-in', kiemTraHopLe(kiemTraCheckIn.checkIn), checkIn.checkInKhach);
 dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.huyDatSan);
 dinhTuyen.post('/dat-san/:maDatSan/danh-gia',
   kiemTraHopLe(kiemTraDuLieu.guiDanhGia), dieuKhien.guiDanhGia);
@@ -33,6 +39,10 @@ dinhTuyen.delete('/dat-san/:maDatSan/danh-gia',
   kiemTraHopLe(kiemTraDuLieu.xoaDanhGia), dieuKhien.xoaDanhGia);
 dinhTuyen.put('/dat-san/:maDatSan/tai-khoan-hoan-tien',
   kiemTraHopLe(kiemTraDuLieu.thongTinHoanTien), dieuKhien.capNhatTaiKhoanHoan);
+
+// G4: khách xác nhận đã nhận lại tiền / báo chưa nhận được (theo maHoanTien trong danh sách đơn).
+dinhTuyen.post('/hoan-tien/:maHoanTien/da-nhan', kiemTraHopLe(kiemTraDuLieu.hoanTienKhach), hoanTien.daNhan);
+dinhTuyen.post('/hoan-tien/:maHoanTien/chua-nhan', kiemTraHopLe(kiemTraDuLieu.hoanTienKhach), hoanTien.chuaNhan);
 
 dinhTuyen.post('/dat-san/:maDatSan/khieu-nai',
   kiemTraHopLe(kiemTraDuLieu.guiKhieuNai), dieuKhien.guiKhieuNai);

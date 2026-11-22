@@ -1,6 +1,7 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { guiThongBao, rutGonVanBan } = require('./notificationService');
+const nhatKy = require('./nhatKyService');
 
 // Đánh giá cơ sở: phần của CHỦ SÂN (xem, phản hồi) và ADMIN (xem, ẩn/hiện), cùng hàm tính lại điểm dùng chung.
 // Phần KHÁCH (gửi, sửa, xoá) nằm ở customerService.
@@ -165,10 +166,10 @@ async function anHienDanhGia(maQuanTri, maDanhGia, { an, lyDo }) {
     await ketNoi.query('SELECT MaCoSo FROM CoSo WHERE MaCoSo=? FOR UPDATE', [danhGia.maCoSo]);
     await ketNoi.query('UPDATE DanhGia SET BiAn=? WHERE MaDanhGia=?', [an ? 1 : 0, maDanhGia]);
     const diem = await tinhLaiDiemCoSo(ketNoi, danhGia.maCoSo);
-    await ketNoi.query(
-      `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
-       VALUES (?,?,?,?,?)`,
-      [maQuanTri, an ? 'an_danh_gia' : 'hien_danh_gia', 'DanhGia', maDanhGia, an ? lyDo : (lyDo || null)]);
+    await nhatKy.ghiNhatKy(ketNoi, {
+      maNguoiThucHien: maQuanTri, hanhDong: an ? 'an_danh_gia' : 'hien_danh_gia', doiTuong: 'DanhGia', maDoiTuong: maDanhGia,
+      chiTiet: lyDo,
+    });
 
     if (an) {
       await guiThongBao(ketNoi, {

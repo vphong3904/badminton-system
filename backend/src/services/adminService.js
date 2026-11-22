@@ -1,14 +1,14 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
-const { baoKhachDaHoanTien, guiThongBao } = require('./notificationService');
+const { guiThongBao } = require('./notificationService');
+const hoanTienService = require('./hoanTienService');
+const fs = require('fs/promises');
 const { layMucConThieuHoSo } = require('../utils/hoSoChuSan');
+const nhatKy = require('./nhatKyService');
+const chungTu = require('./chungTuService');
 
-async function ghiNhatKy(ketNoi, maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet) {
-  await ketNoi.query(
-    `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
-     VALUES (?,?,?,?,?)`,
-    [maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet || null]);
-}
+const ghiNhatKy = (ketNoi, maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet) =>
+  nhatKy.ghiNhatKy(ketNoi, { maNguoiThucHien: maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet });
 
 async function lietKeHoSoChoDuyet() {
   const [hoSo] = await pool.query(
@@ -59,84 +59,112 @@ async function duyetHoSo(maQuanTri, maNguoiDung, duLieu) {
   });
 }
 
-// Đơn khách đã gửi ảnh chuyển khoản, đang đợi xác nhận (admin xem mọi cơ sở; có đường dẫn ảnh).
-async function lietKeThanhToanChoXacNhan() {
+// Đơn khách đã gửi ảnh chuyển khoản, đang đợi xác nhận (admin xem mọi cơ sở). G2.6: kèm hạn xác nhận, cờ quá hạn,
+// toàn bộ chứng từ (nhiều ảnh) và cảnh báo "ảnh đã dùng ở đơn khác". Quá hạn KHÔNG tự nhả slot → Admin xử lý tay.
+// boLoc.quaHan: true = chỉ đơn đã quá HanXacNhan; false = chỉ đơn còn trong hạn; bỏ trống = tất cả (quá hạn lên đầu).
+async function lietKeThanhToanChoXacNhan(boLoc = {}) {
+  const dieuKien = ["t.TrangThai='confirming'", "d.TrangThai='pending_payment'"];
+  if (boLoc.quaHan === true) dieuKien.push('t.HanXacNhan IS NOT NULL AND t.HanXacNhan<NOW()');
+  if (boLoc.quaHan === false) dieuKien.push('(t.HanXacNhan IS NULL OR t.HanXacNhan>=NOW())');
   const [cacDon] = await pool.query(
-    `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.TenKhach AS tenKhach,
+    `SELECT d.MaDatSan AS maDatSan, d.MaNhomDat AS maNhomDat, d.MaDon AS maDon, d.TenKhach AS tenKhach,
        d.SoDienThoaiLienHe AS soDienThoaiLienHe, d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau,
        d.GioKetThuc AS gioKetThuc, d.HetHanGiuCho AS hetHanGiuCho,
+       (SELECT COUNT(*) FROM DatSan x WHERE COALESCE(x.MaNhomDat, x.MaDatSan)=COALESCE(d.MaNhomDat, d.MaDatSan)
+          AND x.MaLichCoDinh IS NULL) AS soDonCon,
        t.MaThanhToan AS maThanhToan, t.SoTien AS soTien, t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
-       t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh,
+       t.AnhChuyenKhoan AS anhChuyenKhoanUrl, t.NgayGuiAnh AS ngayGuiAnh, t.HanXacNhan AS hanXacNhan,
+       TIMESTAMPDIFF(SECOND, NOW(), t.HanXacNhan) AS conLaiXacNhanGiay,
+       (t.HanXacNhan IS NOT NULL AND t.HanXacNhan<NOW()) AS quaHan,
        s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo,
        nd.HoTen AS tenChuSan, nd.SoDienThoai AS soDienThoaiChuSan
      FROM ThanhToan t JOIN DatSan d ON d.MaDatSan=t.MaDatSan
        JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        JOIN NguoiDung nd ON nd.MaNguoiDung=cs.MaChuSan
-     WHERE t.TrangThai='confirming' AND d.TrangThai='pending_payment'
-     ORDER BY t.NgayGuiAnh`);
-  return cacDon;
+     WHERE ${dieuKien.join(' AND ')}
+     ORDER BY quaHan DESC, t.HanXacNhan IS NULL, t.HanXacNhan, t.NgayGuiAnh`);
+  const ketQua = [];
+  for (const don of cacDon) {
+    const cacChungTu = await chungTu.layChungTu(pool, don.maThanhToan, { goc: 'admin' });
+    ketQua.push({
+      ...don,
+      quaHan: !!Number(don.quaHan),
+      soDonCon: Number(don.soDonCon) || 1,
+      conLaiXacNhanGiay: don.conLaiXacNhanGiay === null ? null : Number(don.conLaiXacNhanGiay),
+      chungTu: cacChungTu,
+      canhBaoTrungAnh: chungTu.gomCanhBaoTrungAnh(cacChungTu),
+    });
+  }
+  return ketQua;
 }
 
+// Việc của Admin (G4): (1) khoản quá hạn xác nhận `late_proof` — chờ khách nhập TK rồi Admin duyệt / đánh dấu đã hoàn;
+// (2) khoản chủ sân bỏ quá hạn đã `escalated`. Admin KHÔNG đánh dấu "đã hoàn" nếu không có ảnh chứng từ.
 async function lietKeHoanTien() {
   const [cacThanhToan] = await pool.query(
-    `SELECT t.MaThanhToan AS maThanhToan, t.MaDatSan AS maDatSan, d.MaDon AS maDon,
+    `SELECT h.MaHoanTien AS maHoanTien, t.MaThanhToan AS maThanhToan, t.MaDatSan AS maDatSan, d.MaDon AS maDon,
        d.MaKhachHang AS maKhachHang, d.TenKhach AS tenKhach, d.SoDienThoaiLienHe AS soDienThoai,
-       t.SoTien AS soTien, t.SoTienHoan AS soTienHoan, t.TrangThai AS trangThai,
-       t.TrangThaiHoanTien AS trangThaiHoanTien, t.LyDoLoi AS lyDo,
-       t.TenNganHangHoan AS tenNganHang, t.MaNganHangHoan AS maNganHang,
-       t.SoTaiKhoanHoan AS soTaiKhoan, t.ChuTaiKhoanHoan AS chuTaiKhoan,
-       t.NgayCapNhat AS ngayCapNhat
-     FROM ThanhToan t JOIN DatSan d ON d.MaDatSan=t.MaDatSan
-     WHERE (t.TrangThai='late_payment' AND t.TrangThaiHoanTien IN ('none','waiting_info'))
-        OR t.TrangThaiHoanTien='waiting_info'
-        OR (t.TrangThaiHoanTien='processing' AND t.TrangThai<>'success')
-     ORDER BY t.NgayCapNhat`);
+       t.SoTien AS soTien, h.SoTien AS soTienHoan, t.TrangThai AS trangThai, h.Loai AS loai,
+       h.TrangThai AS trangThaiHoanTien, h.LyDo AS lyDo, h.HanHoan AS hanHoan, h.AnhChungTu AS anhChungTuUrl,
+       h.TenNganHang AS tenNganHang, h.MaNganHang AS maNganHang,
+       h.SoTaiKhoan AS soTaiKhoan, h.ChuTaiKhoan AS chuTaiKhoan,
+       h.NgayCapNhat AS ngayCapNhat
+     FROM HoanTien h JOIN ThanhToan t ON t.MaThanhToan=h.MaThanhToan JOIN DatSan d ON d.MaDatSan=h.MaDatSan
+     WHERE (h.Loai='late_proof' AND h.TrangThai IN ('waiting_info','processing','not_received','escalated'))
+        OR h.TrangThai='escalated'
+     ORDER BY h.NgayCapNhat`);
   return cacThanhToan;
 }
 
 async function xuLyHoanTien(maQuanTri, maThanhToan) {
   return thucHienGiaoDich(async (ketNoi) => {
     const [[thanhToan]] = await ketNoi.query(
-      `SELECT TrangThaiHoanTien AS trangThaiHoanTien, SoTienHoan AS soTienHoan,
-         TenNganHangHoan AS tenNganHang, MaNganHangHoan AS maNganHang,
-         SoTaiKhoanHoan AS soTaiKhoan, ChuTaiKhoanHoan AS chuTaiKhoan
-       FROM ThanhToan WHERE MaThanhToan=? FOR UPDATE`,
-      [maThanhToan]);
+      `SELECT TrangThai AS trangThai, TrangThaiHoanTien AS trangThaiHoanTien, SoTien AS soTien
+       FROM ThanhToan WHERE MaThanhToan=? FOR UPDATE`, [maThanhToan]);
     if (!thanhToan) throw AppError.khongTimThay('Không tìm thấy thanh toán');
-    if (thanhToan.trangThaiHoanTien === 'none') {
-      await ketNoi.query(
-        `UPDATE ThanhToan SET SoTienHoan=SoTien, TrangThaiHoanTien='waiting_info',
-           MaQuanTriDuyetHoan=? WHERE MaThanhToan=?`,
-        [maQuanTri, maThanhToan]);
-      await ghiNhatKy(ketNoi, maQuanTri, 'cho_khach_cap_nhat_tai_khoan_hoan', 'ThanhToan', maThanhToan);
+    let yeuCau = await hoanTienService.layYeuCauDangMo(ketNoi, maThanhToan, true);
+    if (!yeuCau) {
+      // Thanh toán quá hạn (late_payment) chưa có khoản hoàn → mở khoản hoàn, chờ khách nhập tài khoản.
+      if (thanhToan.trangThai !== 'late_payment') throw AppError.khongTimThay('Không có khoản hoàn tiền cần xử lý');
+      const [[dat]] = await ketNoi.query('SELECT MaDatSan AS maDatSan FROM ThanhToan WHERE MaThanhToan=?', [maThanhToan]);
+      yeuCau = await hoanTienService.taoYeuCauHoan(ketNoi, {
+        maThanhToan, maDatSan: dat.maDatSan, loai: 'late_proof', soTien: thanhToan.soTien, tyLe: 100,
+        lyDo: 'Quá hạn giữ chỗ khi chủ sân chưa xác nhận', trangThai: 'waiting_info',
+      });
+      await ghiNhatKy(ketNoi, maQuanTri, 'cho_khach_cap_nhat_tai_khoan_hoan', 'HoanTien', yeuCau.maHoanTien);
       return { maThanhToan, trangThaiHoanTien: 'waiting_info', canCapNhatTaiKhoanHoan: true };
     }
-    if (thanhToan.trangThaiHoanTien !== 'waiting_info'
-      || !thanhToan.tenNganHang || !thanhToan.maNganHang
-      || !thanhToan.soTaiKhoan || !thanhToan.chuTaiKhoan
-      || Number(thanhToan.soTienHoan) <= 0) {
+    if (yeuCau.trangThai !== 'waiting_info'
+      || !yeuCau.tenNganHang || !yeuCau.maNganHang || !yeuCau.soTaiKhoan || !yeuCau.chuTaiKhoan
+      || Number(yeuCau.soTien) <= 0) {
       throw AppError.duLieuKhongHopLe('Yêu cầu chưa có đủ thông tin hoàn tiền');
     }
-    await ketNoi.query(
-      `UPDATE ThanhToan SET TrangThaiHoanTien='processing', MaQuanTriDuyetHoan=?
-       WHERE MaThanhToan=?`,
+    await ketNoi.query("UPDATE HoanTien SET TrangThai='processing' WHERE MaHoanTien=?", [yeuCau.maHoanTien]);
+    await ketNoi.query("UPDATE ThanhToan SET TrangThaiHoanTien='processing', MaQuanTriDuyetHoan=? WHERE MaThanhToan=?",
       [maQuanTri, maThanhToan]);
-    await ghiNhatKy(ketNoi, maQuanTri, 'xu_ly_hoan_tien', 'ThanhToan', maThanhToan);
-    return { maThanhToan, trangThaiHoanTien: 'processing', soTienHoan: Number(thanhToan.soTienHoan) };
+    await ghiNhatKy(ketNoi, maQuanTri, 'xu_ly_hoan_tien', 'HoanTien', yeuCau.maHoanTien);
+    return { maThanhToan, trangThaiHoanTien: 'processing', soTienHoan: Number(yeuCau.soTien) };
   });
 }
 
-async function hoanTatHoanTien(maQuanTri, maThanhToan, maGiaoDichHoan) {
-  return thucHienGiaoDich(async (ketNoi) => {
-    const [ketQua] = await ketNoi.query(
-      `UPDATE ThanhToan SET TrangThaiHoanTien='refunded', MaGiaoDichHoan=?, NgayHoan=NOW()
-       WHERE MaThanhToan=? AND TrangThaiHoanTien='processing'`,
-      [maGiaoDichHoan, maThanhToan]);
-    if (!ketQua.affectedRows) throw AppError.biTrung('Thanh toán không ở trạng thái chờ hoàn tất hoàn tiền');
-    await ghiNhatKy(ketNoi, maQuanTri, 'hoan_tat_hoan_tien', 'ThanhToan', maThanhToan, maGiaoDichHoan);
-    await baoKhachDaHoanTien(ketNoi, maThanhToan, maGiaoDichHoan);
-    return { maThanhToan, trangThaiHoanTien: 'refunded' };
-  });
+// Admin đánh dấu đã hoàn: BẮT BUỘC có ảnh chứng từ (field `anhChungTu`), giống chủ sân.
+async function hoanTatHoanTien(maQuanTri, maThanhToan, tep) {
+  const duongDanAnh = await hoanTienService.kiemTraAnhChungTu(tep);
+  try {
+    return await thucHienGiaoDich(async (ketNoi) => {
+      const yeuCau = await hoanTienService.layYeuCauDangMo(ketNoi, maThanhToan, true);
+      if (!yeuCau) throw AppError.khongTimThay('Không tìm thấy yêu cầu hoàn tiền');
+      if (!hoanTienService.TRANG_THAI_CHO_HOAN.includes(yeuCau.trangThai)) {
+        throw AppError.biTrung('Thanh toán không ở trạng thái chờ hoàn tất hoàn tiền');
+      }
+      return hoanTienService.danhDauDaHoan(ketNoi, {
+        maHoanTien: yeuCau.maHoanTien, nguoi: { maNguoiDung: maQuanTri, vaiTro: 'admin' }, duongDanAnh,
+      });
+    });
+  } catch (loi) {
+    await fs.unlink(tep.path).catch(() => {});
+    throw loi;
+  }
 }
 
 async function lietKeNhatKy(boLoc) {

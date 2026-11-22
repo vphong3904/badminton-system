@@ -15,7 +15,7 @@ exports.lietKeHoanTien = xuLyBatDongBo(async (yeuCau, phanHoi) => {
 });
 exports.hoanThanhHoanTien = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.hoanThanhHoanTien(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maThanhToan, yeuCau.body.maGiaoDichHoan));
+    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maThanhToan, yeuCau.file)); // ảnh chứng từ (field anhChungTu)
 });
 // Khách gửi ảnh chuyển khoản → chủ sân xem ảnh ở chi tiết đơn rồi xác nhận hoặc từ chối.
 exports.xacNhanThanhToan = xuLyBatDongBo(async (yeuCau, phanHoi) => {

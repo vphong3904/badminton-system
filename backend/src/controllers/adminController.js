@@ -12,7 +12,7 @@ const layMaQuanTri = (yeuCau) => yeuCau.nguoiDung.maNguoiDung;
 exports.lietKeHoSoChoDuyet = xuLy(() => dichVu.lietKeHoSoChoDuyet());
 exports.duyetHoSo = xuLy((yeuCau) =>
   dichVu.duyetHoSo(layMaQuanTri(yeuCau), yeuCau.params.maNguoiDung, yeuCau.body));
-exports.lietKeThanhToanChoXacNhan = xuLy(() => dichVu.lietKeThanhToanChoXacNhan());
+exports.lietKeThanhToanChoXacNhan = xuLy((yeuCau) => dichVu.lietKeThanhToanChoXacNhan(yeuCau.query));
 exports.xacNhanThanhToan = xuLy((yeuCau) =>
   dichVuThanhToan.xacNhanThanhToan(layMaQuanTri(yeuCau), yeuCau.params.maDatSan, 'admin'));
 exports.tuChoiThanhToan = xuLy((yeuCau) =>
@@ -22,8 +22,7 @@ exports.lietKeHoanTien = xuLy(() => dichVu.lietKeHoanTien());
 exports.xuLyHoanTien = xuLy((yeuCau) =>
   dichVu.xuLyHoanTien(layMaQuanTri(yeuCau), yeuCau.params.maThanhToan));
 exports.hoanTatHoanTien = xuLy((yeuCau) =>
-  dichVu.hoanTatHoanTien(
-    layMaQuanTri(yeuCau), yeuCau.params.maThanhToan, yeuCau.body.maGiaoDichHoan));
+  dichVu.hoanTatHoanTien(layMaQuanTri(yeuCau), yeuCau.params.maThanhToan, yeuCau.file));
 const dichVuSanCoSo = require('../services/sanCoSoService');
 const nguoi = (yeuCau) => ({ maNguoiDung: layMaQuanTri(yeuCau), vaiTro: 'admin' });
 exports.dongSan = xuLy((yeuCau) => dichVuSanCoSo.dongSan(nguoi(yeuCau), yeuCau.params.maSan, yeuCau.body.lyDo));

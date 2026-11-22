@@ -1,6 +1,7 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { guiThongBao, guiChoQuanTri } = require('./notificationService');
+const nhatKy = require('./nhatKyService');
 
 // Khiếu nại chủ sân.
 //  - Khách luôn có nút "Khiếu nại chủ sân" ở mọi đơn đặt qua app: đang chờ chủ sân duyệt ảnh chuyển khoản,
@@ -103,7 +104,7 @@ async function lietKeKhieuNai({ trangThai = 'pending', gioiHan = 50 } = {}) {
        JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
        LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung=k.MaChuSan
        LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
          ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
        END
      WHERE (? = 'all' OR k.TrangThai = ?)
@@ -144,22 +145,20 @@ async function xuLyKhieuNai(maQuanTri, maKhieuNai, { quyetDinh, ghiChu }) {
       `UPDATE KhieuNai SET TrangThai=?, GhiChuQuanTri=?, MucXuLy=?, MaQuanTri=?, NgayXuLy=NOW()
        WHERE MaKhieuNai=?`,
       [quyetDinh, ghiChu || null, mucXuLy, maQuanTri, maKhieuNai]);
-    await ketNoi.query(
-      `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
-       VALUES (?,?,?,?,?)`,
-      [maQuanTri, quyetDinh === 'upheld' ? 'chap_nhan_khieu_nai' : 'bac_bo_khieu_nai',
-        'KhieuNai', maKhieuNai, ghiChu || null]);
+    await nhatKy.ghiNhatKy(ketNoi, {
+      maNguoiThucHien: maQuanTri, hanhDong: quyetDinh === 'upheld' ? 'chap_nhan_khieu_nai' : 'bac_bo_khieu_nai',
+      doiTuong: 'KhieuNai', maDoiTuong: maKhieuNai, chiTiet: ghiChu,
+    });
 
     if (mucXuLy === 'banned') {
       await ketNoi.query(
         "UPDATE NguoiDung SET TrangThai='locked', LyDoKhoa=? WHERE MaNguoiDung=?",
         [`Bị khoá do ${SO_LAN_KHOA} lần khiếu nại được xác nhận`, khieuNai.maChuSan]);
       await ketNoi.query("UPDATE CoSo SET TrangThai='hidden' WHERE MaChuSan=? AND TrangThai='active'", [khieuNai.maChuSan]);
-      await ketNoi.query(
-        `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
-         VALUES (?,?,?,?,?)`,
-        [maQuanTri, 'khoa_tai_khoan', 'NguoiDung', khieuNai.maChuSan,
-          `Đủ ${SO_LAN_KHOA} khiếu nại hợp lệ`]);
+      await nhatKy.ghiNhatKy(ketNoi, {
+        maNguoiThucHien: maQuanTri, hanhDong: 'khoa_tai_khoan', doiTuong: 'NguoiDung', maDoiTuong: khieuNai.maChuSan,
+        chiTiet: `Đủ ${SO_LAN_KHOA} khiếu nại hợp lệ`,
+      });
     }
 
     // Báo khách kết quả.

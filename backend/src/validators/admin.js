@@ -19,6 +19,12 @@ exports.duyetChuSan = {
   }),
 };
 exports.maDatSan = { params: z.object({ maDatSan: maSo }) };
+// G2.6: lọc đơn chờ xác nhận; quaHan=true chỉ đơn quá hạn xác nhận, quaHan=false chỉ đơn còn trong hạn.
+exports.danhSachChoXacNhan = {
+  query: z.object({
+    quaHan: z.enum(['true', 'false']).transform((giaTri) => giaTri === 'true').optional(),
+  }),
+};
 exports.tuChoiThanhToan = {
   params: z.object({ maDatSan: maSo }),
   body: z.object({
@@ -26,10 +32,8 @@ exports.tuChoiThanhToan = {
   }),
 };
 exports.maThanhToan = { params: z.object({ maThanhToan: maSo }) };
-exports.hoanTien = {
-  params: z.object({ maThanhToan: maSo }),
-  body: z.object({ maGiaoDichHoan: z.string().trim().min(3).max(100) }),
-};
+// G4: chứng từ hoàn = ảnh (multipart, field `anhChungTu`), không còn mã giao dịch → chỉ kiểm mã thanh toán.
+exports.hoanTien = { params: z.object({ maThanhToan: maSo }) };
 const lyDoTuyChon = z.object({ lyDo: z.string().trim().min(2).max(255).optional() }).default({});
 exports.dongXoaSan = { params: z.object({ maSan: maSo }), body: lyDoTuyChon };
 exports.dongXoaCoSo = { params: z.object({ maCoSo: maSo }), body: lyDoTuyChon };

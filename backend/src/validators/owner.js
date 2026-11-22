@@ -2,6 +2,7 @@ const { z } = require('zod');
 
 const gioPhut = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải dạng HH:MM');
 const maSo = z.coerce.number().int().positive();
+const SO_PHUT_TRE_CHO_PHEP = [15, 20, 30];
 
 const quyTac = require('./quyTac');
 const { laLinkGoogleMaps } = require('../utils/toaDoBanDo');
@@ -20,6 +21,8 @@ const coSo = z.object({
   gioMoCua: gioPhut,
   gioDongCua: gioPhut,
   soPhutDatToiThieu: z.number().int().refine((giaTri) => giaTri % 30 === 0 && giaTri >= 30, 'Phải là bội số của 30 phút'),
+  // Giờ trễ tối đa (Task 1.1). Không gửi thì giữ giá trị hiện có (cơ sở mới: mặc định 15 ở DB).
+  soPhutTreToiDa: z.number().int().refine((giaTri) => SO_PHUT_TRE_CHO_PHEP.includes(giaTri), 'Chỉ được chọn 15, 20 hoặc 30 phút').optional(),
 }).refine((duLieu) => duLieu.gioMoCua < duLieu.gioDongCua, {
   message: 'Giờ đóng cửa phải sau giờ mở cửa',
   path: ['gioDongCua'],
@@ -84,15 +87,39 @@ exports.capNhatSan = {
     trangThai: z.enum(['active', 'maintenance']).optional(),
   }),
 };
+const thoiGianKhoa = z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/, 'Dạng YYYY-MM-DD HH:MM');
+const ngayKhoa = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Dạng YYYY-MM-DD');
+// Hai dạng body (Task 1.3): cũ = thoiGianBatDau/thoiGianKetThuc cùng 1 ngày; mới = tuNgay[/denNgay] + gioBatDau/gioKetThuc.
+// Không gửi lẫn hai dạng. Kiểm ngày thật + tối đa 90 ngày nằm ở utils/khoaSan.js (trả 422).
 exports.khoaSan = {
   body: z.object({
     maSan: z.number().int().positive(),
-    thoiGianBatDau: z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/, 'Dạng YYYY-MM-DD HH:MM'),
-    thoiGianKetThuc: z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/, 'Dạng YYYY-MM-DD HH:MM'),
+    thoiGianBatDau: thoiGianKhoa.optional(),
+    thoiGianKetThuc: thoiGianKhoa.optional(),
+    tuNgay: ngayKhoa.optional(),
+    denNgay: ngayKhoa.optional(),
+    gioBatDau: gioPhut.optional(),
+    gioKetThuc: gioPhut.optional(),
     lyDo: z.string().max(255).optional(),
-  }).refine((duLieu) => duLieu.thoiGianBatDau < duLieu.thoiGianKetThuc, {
-    message: 'Thời gian kết thúc phải sau bắt đầu',
-    path: ['thoiGianKetThuc'],
+  }).superRefine((duLieu, ngCanh) => {
+    const dangCu = duLieu.thoiGianBatDau !== undefined || duLieu.thoiGianKetThuc !== undefined;
+    const dangMoi = duLieu.tuNgay !== undefined || duLieu.denNgay !== undefined
+      || duLieu.gioBatDau !== undefined || duLieu.gioKetThuc !== undefined;
+    const loi = (path, message) => ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+    if (dangCu && dangMoi) return loi('tuNgay', 'Chỉ dùng một dạng: thoiGianBatDau/KetThuc hoặc tuNgay/denNgay + gioBatDau/gioKetThuc');
+    if (dangCu) {
+      if (!duLieu.thoiGianBatDau) return loi('thoiGianBatDau', 'Thiếu thời gian bắt đầu');
+      if (!duLieu.thoiGianKetThuc) return loi('thoiGianKetThuc', 'Thiếu thời gian kết thúc');
+      if (duLieu.thoiGianBatDau >= duLieu.thoiGianKetThuc) return loi('thoiGianKetThuc', 'Thời gian kết thúc phải sau bắt đầu');
+      return undefined;
+    }
+    if (!dangMoi) return loi('tuNgay', 'Cần tuNgay + gioBatDau + gioKetThuc (hoặc thoiGianBatDau + thoiGianKetThuc)');
+    if (!duLieu.tuNgay) return loi('tuNgay', 'Thiếu ngày bắt đầu');
+    if (!duLieu.gioBatDau) return loi('gioBatDau', 'Thiếu giờ bắt đầu');
+    if (!duLieu.gioKetThuc) return loi('gioKetThuc', 'Thiếu giờ kết thúc');
+    if (duLieu.gioBatDau >= duLieu.gioKetThuc) return loi('gioKetThuc', 'Giờ kết thúc phải sau giờ bắt đầu');
+    if (duLieu.denNgay && duLieu.denNgay < duLieu.tuNgay) return loi('denNgay', 'Ngày kết thúc phải từ ngày bắt đầu trở đi');
+    return undefined;
   }),
 };
 exports.danhSachKhoaSan = {

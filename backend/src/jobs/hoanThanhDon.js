@@ -2,14 +2,14 @@ const { thucHienGiaoDich } = require('../config/db');
 const cauHinh = require('../config/env');
 const { guiThongBao } = require('../services/notificationService');
 
-// Job nền: đơn đã xác nhận (confirmed) mà qua giờ kết thúc của khung đã đặt → completed, rồi nhắc khách đánh giá.
+// Job nền: đơn đã xác nhận (confirmed) hoặc đã check-in mà qua giờ kết thúc của khung đã đặt → completed, rồi nhắc khách đánh giá.
 // Các lệnh cập nhật "lười" trong customerService.hetHanDatSan vẫn giữ làm phương án dự phòng.
 const SO_DON_TOI_DA_MOI_LAN = 200;
 
 let dangChay = false;
 
 // Một lần quét, trong MỘT giao dịch. `FOR UPDATE` (chỉ khoá dòng DatSan; không dùng `OF`/`SKIP LOCKED` vì MariaDB không hỗ trợ)
-// để hai tiến trình không giẫm lên nhau; câu UPDATE bên dưới còn kiểm lại `TrangThai='confirmed'`.
+// để hai tiến trình không giẫm lên nhau; câu UPDATE bên dưới còn kiểm lại `TrangThai IN ('confirmed','checked_in')`.
 async function chayMotLan() {
   return thucHienGiaoDich(async (ketNoi) => {
     const [cacDon] = await ketNoi.query(
@@ -17,7 +17,7 @@ async function chayMotLan() {
          d.MaLichCoDinh AS maLichCoDinh,
          (SELECT cs.TenCoSo FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo WHERE s.MaSan=d.MaSan) AS tenCoSo
        FROM DatSan d
-       WHERE d.TrangThai='confirmed' AND TIMESTAMP(d.NgayChoi, d.GioKetThuc)<=NOW()
+       WHERE d.TrangThai IN ('confirmed','checked_in') AND TIMESTAMP(d.NgayChoi, d.GioKetThuc)<=NOW()
        ORDER BY d.MaDatSan LIMIT ?
        FOR UPDATE`,
       [SO_DON_TOI_DA_MOI_LAN]);
@@ -25,7 +25,7 @@ async function chayMotLan() {
 
     await ketNoi.query(
       `UPDATE DatSan SET TrangThai='completed'
-       WHERE TrangThai='confirmed' AND MaDatSan IN (${cacDon.map(() => '?').join(',')})`,
+       WHERE TrangThai IN ('confirmed','checked_in') AND MaDatSan IN (${cacDon.map(() => '?').join(',')})`,
       cacDon.map((don) => don.maDatSan));
 
     // Nhắc đánh giá: chỉ đơn đặt qua app có khách. Lịch cố định chỉ nhắc 1 lần mỗi lịch (khớp quy tắc

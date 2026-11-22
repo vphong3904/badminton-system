@@ -27,6 +27,8 @@ test('OpenAPI JSON liệt kê API khách, thanh toán, chủ sân và quản tr�
   const taiLieu = await phanHoi.json();
   assert.equal(taiLieu.openapi, '3.0.3');
   assert.ok(taiLieu.paths['/api/khach/dat-san/co-dinh'].post);
+  assert.ok(taiLieu.paths['/api/khach/dat-san/nhieu'].post);
+  assert.ok(taiLieu.components.schemas.DatNhieuSan);
   assert.ok(taiLieu.paths['/api/khach/co-so/{maCoSo}/danh-gia'].get);
   assert.ok(taiLieu.paths['/api/khach/dat-san/{maDatSan}/danh-gia'].post);
   assert.ok(taiLieu.paths['/api/thanh-toan/{maDatSan}/anh-chuyen-khoan'].post);

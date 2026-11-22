@@ -1,3 +1,4 @@
+
 const mysql = require('mysql2/promise');
 const cauHinh = require('./env');
 
@@ -7,6 +8,12 @@ const pool = mysql.createPool({
   user: cauHinh.coSoDuLieu.nguoiDung,
   password: cauHinh.coSoDuLieu.matKhau,
   database: cauHinh.coSoDuLieu.ten,
+
+  // SSL/TLS cho TiDB Cloud
+  ssl: {
+    minVersion: 'TLSv1.2',
+  },
+
   waitForConnections: true,
   connectionLimit: 10,
   timezone: '+07:00',
@@ -17,9 +24,12 @@ const pool = mysql.createPool({
 
 async function thucHienGiaoDich(hamThucThi) {
   const ketNoi = await pool.getConnection();
+
   try {
     await ketNoi.beginTransaction();
+
     const ketQua = await hamThucThi(ketNoi);
+
     await ketNoi.commit();
     return ketQua;
   } catch (loi) {

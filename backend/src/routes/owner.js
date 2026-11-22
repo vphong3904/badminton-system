@@ -3,11 +3,13 @@ const dieuKhien = require('../controllers/ownerController');
 const kiemTraDuLieu = require('../validators/owner');
 const kiemTraHopLe = require('../middlewares/validate');
 const { xacThucNguoiDung, kiemTraVaiTro, kiemTraChuSanDaDuyet } = require('../middlewares/auth');
-const { taiAnhCoSo } = require('../middlewares/upload');
+const { taiAnhCoSo, taiTep } = require('../middlewares/upload');
 const baoCao = require('../controllers/ownerReportController');
 const kiemTraBaoCao = require('../validators/ownerReport');
 const donDatSan = require('../controllers/ownerBookingController');
 const baoCaoKhach = require('../controllers/ownerCustomerReportController');
+const checkIn = require('../controllers/checkInController');
+const kiemTraCheckIn = require('../validators/checkIn');
 
 dinhTuyen.use(xacThucNguoiDung, kiemTraVaiTro('owner'));
 
@@ -48,6 +50,13 @@ dinhTuyen.patch('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.capNhatSan), dieuKhien
 dinhTuyen.patch('/san/:maSan/dong', kiemTraHopLe(kiemTraDuLieu.dongXoaSan), dieuKhien.dongSan);
 dinhTuyen.patch('/san/:maSan/mo', kiemTraHopLe(kiemTraDuLieu.maSan), dieuKhien.moSan);
 dinhTuyen.delete('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.dongXoaSan), dieuKhien.xoaSan);
+// G3: QR check-in của sân (xem / đổi / tải PNG / trang in) + check-in thủ công cho đơn.
+dinhTuyen.get('/san/:maSan/qr-check-in', kiemTraHopLe(kiemTraCheckIn.maSan), checkIn.xemQr);
+dinhTuyen.post('/san/:maSan/qr-check-in/doi', kiemTraHopLe(kiemTraCheckIn.maSan), checkIn.doiQr);
+dinhTuyen.get('/san/:maSan/qr-check-in/anh.png', kiemTraHopLe(kiemTraCheckIn.maSan), checkIn.anhQr);
+dinhTuyen.get('/san/:maSan/qr-check-in/in', kiemTraHopLe(kiemTraCheckIn.trangIn), checkIn.trangInQr);
+dinhTuyen.post('/dat-san/:maDatSan/check-in-thu-cong',
+  kiemTraHopLe(kiemTraCheckIn.checkInThuCong), checkIn.checkInThuCong);
 dinhTuyen.get('/khoa-san', kiemTraHopLe(kiemTraDuLieu.danhSachKhoaSan), dieuKhien.lietKeKhoaSan);
 dinhTuyen.post('/khoa-san', kiemTraHopLe(kiemTraDuLieu.khoaSan), dieuKhien.taoKhoaSan);
 dinhTuyen.delete('/khoa-san/:maKhoa', kiemTraHopLe(kiemTraDuLieu.maKhoaSan), dieuKhien.xoaKhoaSan);
@@ -61,7 +70,9 @@ dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDon), don
 dinhTuyen.patch('/dat-san/:maDatSan/da-thu', kiemTraHopLe(kiemTraBaoCao.daThuDon), donDatSan.daThuDon);
 dinhTuyen.patch('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDonOwner), donDatSan.huyDonOwner);
 dinhTuyen.get('/hoan-tien', kiemTraHopLe(kiemTraBaoCao.danhSachHoanTien), donDatSan.lietKeHoanTien);
-dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien), donDatSan.hoanThanhHoanTien);
+// G4: kèm ảnh chứng từ chuyển khoản hoàn (multipart, field `anhChungTu`, bắt buộc).
+dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien),
+  taiTep.single('anhChungTu'), donDatSan.hoanThanhHoanTien);
 dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);
 dinhTuyen.get('/bao-cao/top-khach', kiemTraHopLe(kiemTraBaoCao.topKhach), baoCao.layTopKhach);
 dinhTuyen.get('/bao-cao/top-san', kiemTraHopLe(kiemTraBaoCao.topSan), baoCao.layTopSan);

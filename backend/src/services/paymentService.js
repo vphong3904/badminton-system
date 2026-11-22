@@ -1,44 +1,45 @@
 const fs = require('fs/promises');
-const path = require('path');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { taoAnhQrUrl, taoNoiDungQr, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
-const { thuMucTepTaiLen, layDuongDanTep, laAnhThat } = require('../middlewares/upload');
+const { layDuongDanTep, laAnhThat } = require('../middlewares/upload');
+const hoanTienService = require('./hoanTienService');
 const { guiThongBao, dinhDangTien } = require('./notificationService');
+const { layCauHinhSo } = require('./cauHinhService');
+const nhatKy = require('./nhatKyService');
+const chungTu = require('./chungTuService');
 
 // Luồng thanh toán (không dùng cổng thanh toán tự động):
 //  1) khách đặt sân → ThanhToan 'pending', giữ chỗ hold_minutes
-//  2) khách quét QR chuyển khoản, chụp màn hình, gửi ảnh → ThanhToan 'confirming' (đợi xác nhận),
-//     thời hạn giữ chỗ được kéo dài confirm_minutes để chủ sân kịp xem
+//  2) khách quét QR chuyển khoản, chụp màn hình, gửi ảnh → ThanhToan 'confirming' (đợi xác nhận) + thêm 1 dòng
+//     ChungTuThanhToan (G2: KHÔNG xoá ảnh cũ, có SHA-256 + giờ chuyển tuỳ chọn). Đơn gửi ảnh được giữ chỗ vô thời hạn
+//     (DatSan.HetHanGiuCho=NULL, slot.js coi là đang bận); ThanhToan.HanXacNhan = +confirm_minutes (+confirm_urgent_minutes
+//     nếu đặt gấp) chỉ là hạn để Admin theo dõi, quá hạn KHÔNG tự nhả slot.
 //  3) chủ sân HOẶC admin xác nhận → ThanhToan 'success' + đơn 'confirmed';
-//     hoặc từ chối (kèm lý do) → quay về 'pending', khách gửi lại ảnh
-//  4) hết hạn mà chủ sân chưa xác nhận → 'late_payment' (khách có thể đã chuyển tiền → admin xử lý hoàn)
+//     hoặc từ chối (kèm lý do) → quay về 'pending', giữ chỗ lại hold_minutes, khách gửi lại ảnh (ảnh cũ vẫn lưu ở chứng từ)
+//  4) quá HanXacNhan mà chưa ai xử lý → hiện ở tab Admin "Chờ xác nhận / quá hạn" để xử lý tay (đối soát tự động: hoãn, 4a)
 
-const PHUT_CHO_XAC_NHAN_MAC_DINH = 60;
+const PHUT_CHO_XAC_NHAN_MAC_DINH = 30;
 const PHUT_GIU_CHO_MAC_DINH = 10;
 
-async function layCauHinhSo(ketNoi, khoa, macDinh) {
-  const [[muc]] = await ketNoi.query('SELECT GiaTri AS giaTri FROM CauHinhHeThong WHERE KhoaCauHinh=?', [khoa]);
-  const giaTri = Number(muc?.giaTri);
-  return Number.isFinite(giaTri) && giaTri > 0 ? giaTri : macDinh;
-}
-
-// Điều kiện chọn mọi DatSan cùng một đợt thanh toán (lịch cố định có nhiều buổi dùng chung 1 thanh toán).
+// Điều kiện chọn mọi DatSan cùng một đợt thanh toán: lịch cố định có nhiều buổi dùng chung 1 thanh toán;
+// đặt nhiều sân/khung giờ (G1) gom các đơn con theo MaNhomDat (đơn lẻ = nhóm 1 dòng).
 function dieuKienCungDot(thanhToan) {
   return thanhToan.maLichCoDinh
     ? { sql: 'MaLichCoDinh=?', thamSo: [thanhToan.maLichCoDinh] }
-    : { sql: 'MaDatSan=?', thamSo: [thanhToan.maDatSan] };
+    : { sql: 'COALESCE(MaNhomDat, MaDatSan)=?', thamSo: [thanhToan.maNhomDat ?? thanhToan.maDatSan] };
 }
 
 async function layThanhToanCuaKhach(maNguoiDung, maDatSan, ketNoi = pool, khoa = false) {
   const [[thanhToan]] = await ketNoi.query(
     `SELECT t.MaThanhToan AS maThanhToan,
        t.SoTien AS soTien, t.TrangThai AS trangThai, t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
-       d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh,
+       t.HanXacNhan AS hanXacNhan,
+       d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat,
        d.MaKhachHang AS maKhachHang, d.TrangThai AS trangThaiDatSan,
        d.HetHanGiuCho AS hetHanGiuCho
      FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
        ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
      END
      WHERE d.MaDatSan=? AND d.MaKhachHang=? ${khoa ? 'FOR UPDATE' : ''}`,
@@ -64,11 +65,22 @@ async function chotHetHan(ketNoi, thanhToan) {
          SoTienHoan=SoTien, LyDoLoi='Het han giu cho khi chu san chua xac nhan'
        WHERE MaThanhToan=? AND TrangThai='confirming'`,
       [thanhToan.maThanhToan]);
+    await hoanTienService.dongBoHoanTienQuaHan(ketNoi, thanhToan.maThanhToan); // G4
   } else {
     await ketNoi.query(
       "UPDATE ThanhToan SET TrangThai='expired' WHERE MaThanhToan=? AND TrangThai='pending'",
       [thanhToan.maThanhToan]);
   }
+}
+
+// Còn hạn giữ chỗ không? HetHanGiuCho=NULL = giữ vô thời hạn (khách đã gửi ảnh, đang chờ chủ sân/Admin — G2):
+// không bao giờ coi là hết hạn. Chỉ đơn `pending` (chưa gửi ảnh) mới có hạn thật và so với NOW() của DB.
+async function conHanGiuCho(ketNoi, thanhToan) {
+  if (thanhToan.hetHanGiuCho === null || thanhToan.hetHanGiuCho === undefined) {
+    return thanhToan.trangThai === 'confirming';
+  }
+  const [[hanGiu]] = await ketNoi.query('SELECT ? > NOW() AS conHan', [thanhToan.hetHanGiuCho]);
+  return !!Number(hanGiu.conHan);
 }
 
 // Kiểm tra đơn còn chờ thanh toán và còn hạn. Hết hạn thì chốt rồi trả cờ (ném lỗi SAU khi commit).
@@ -80,8 +92,7 @@ async function kiemTraConHan(ketNoi, thanhToan) {
     || thanhToan.trangThaiDatSan !== 'pending_payment') {
     throw AppError.biTrung('Đơn không còn trong thời hạn chờ thanh toán');
   }
-  const [[hanGiu]] = await ketNoi.query('SELECT ? > NOW() AS conHan', [thanhToan.hetHanGiuCho]);
-  if (!hanGiu.conHan) {
+  if (!await conHanGiuCho(ketNoi, thanhToan)) {
     await chotHetHan(ketNoi, thanhToan);
     return false;
   }
@@ -94,8 +105,7 @@ async function layQr(maNguoiDung, maDatSan) {
     || thanhToan.trangThaiDatSan !== 'pending_payment') {
     throw AppError.biTrung('Đơn không còn trong thời hạn chờ thanh toán');
   }
-  const [[hanGiu]] = await pool.query('SELECT ? > NOW() AS conHan', [thanhToan.hetHanGiuCho]);
-  if (!hanGiu.conHan) {
+  if (!await conHanGiuCho(pool, thanhToan)) {
     await thucHienGiaoDich((ketNoi) => chotHetHan(ketNoi, thanhToan));
     throw AppError.biTrung('Thời gian giữ chỗ đã hết hạn');
   }
@@ -111,15 +121,11 @@ async function layQr(maNguoiDung, maDatSan) {
   };
 }
 
-async function xoaTepNeuCo(duongDanTuongDoi) {
-  if (!duongDanTuongDoi) return;
-  const ten = path.basename(duongDanTuongDoi);
-  await fs.unlink(path.join(thuMucTepTaiLen, ten)).catch(() => {});
-}
-
 // Khách gửi ảnh chuyển khoản. Mã đơn, tên, SĐT, số tiền đã nằm sẵn trong đơn nên chủ sân xem được
-// cùng ảnh; không nhận từ client để khỏi bị sửa.
-async function guiAnhChuyenKhoan(maNguoiDung, maDatSan, tep) {
+// cùng ảnh; không nhận từ client để khỏi bị sửa. Chỉ nhận thêm `thoiDiemChuyen` (giờ trên biên lai, tuỳ chọn).
+// G2: mỗi lần gửi thêm 1 dòng ChungTuThanhToan (KHÔNG xoá ảnh cũ); trùng hash với đơn khác KHÔNG bị từ chối
+// (cảnh báo chỉ hiện cho chủ sân/Admin, khách không biết).
+async function guiAnhChuyenKhoan(maNguoiDung, maDatSan, tep, duLieu = {}) {
   if (!tep) {
     throw AppError.duLieuKhongHopLe('Vui lòng tải ảnh chuyển khoản.', [
       { truong: 'anhChuyenKhoan', thongBao: 'Vui lòng tải ảnh chuyển khoản.' }]);
@@ -129,24 +135,49 @@ async function guiAnhChuyenKhoan(maNguoiDung, maDatSan, tep) {
       throw AppError.duLieuKhongHopLe('Chỉ nhận ảnh JPG, PNG, WEBP.', [
         { truong: 'anhChuyenKhoan', thongBao: 'Chỉ nhận ảnh JPG, PNG, WEBP.' }]);
     }
+    const thoiDiemChuyen = chungTu.docThoiDiemChuyen(duLieu?.thoiDiemChuyen);
+    const maBamAnh = await chungTu.bamTep(tep.path);
     const duongDanMoi = layDuongDanTep(tep);
     const ketQua = await thucHienGiaoDich(async (ketNoi) => {
       const thanhToan = await layThanhToanCuaKhach(maNguoiDung, maDatSan, ketNoi, true);
       if (!await kiemTraConHan(ketNoi, thanhToan)) return { hetHan: true };
-      const [[cu]] = await ketNoi.query(
-        'SELECT AnhChuyenKhoan AS anh FROM ThanhToan WHERE MaThanhToan=?', [thanhToan.maThanhToan]);
-      await ketNoi.query(
-        `UPDATE ThanhToan SET TrangThai='confirming', AnhChuyenKhoan=?, NgayGuiAnh=NOW(),
-           LyDoLoi=NULL, MaNguoiXacNhan=NULL, VaiTroXacNhan=NULL
-         WHERE MaThanhToan=?`,
-        [duongDanMoi, thanhToan.maThanhToan]);
-      // Kéo dài giữ chỗ để chủ sân kịp xác nhận.
-      const phut = await layCauHinhSo(ketNoi, 'confirm_minutes', PHUT_CHO_XAC_NHAN_MAC_DINH);
+      await chungTu.kiemTraThoiDiemChuyen(ketNoi, thoiDiemChuyen);
+      const soAnhTruoc = await chungTu.demChungTu(ketNoi, thanhToan.maThanhToan);
+      if (soAnhTruoc >= chungTu.TOI_DA_CHUNG_TU_MOI_DON) {
+        throw AppError.biTrung(
+          `Bạn đã gửi tối đa ${chungTu.TOI_DA_CHUNG_TU_MOI_DON} ảnh cho đơn này. Vui lòng liên hệ chủ sân.`,
+          'PROOF_LIMIT');
+      }
+      const maChungTu = await chungTu.themChungTu(ketNoi, {
+        maThanhToan: thanhToan.maThanhToan,
+        soTien: thanhToan.soTien,
+        thoiDiemChuyen,
+        anh: duongDanMoi,
+        maBamAnh,
+      });
       const cungDot = dieuKienCungDot(thanhToan);
+      const dangCho = thanhToan.trangThai === 'confirming';
+      const { phut } = await chungTu.tinhPhutXacNhan(ketNoi, cungDot);
+      // Gửi lần đầu (pending → confirming): đặt HanXacNhan. Gửi THÊM khi đã confirming: giữ hạn cũ để không kéo dài
+      // bằng cách gửi ảnh liên tục (chỉ đặt lại nếu dữ liệu cũ chưa có hạn).
+      if (dangCho) {
+        await ketNoi.query(
+          `UPDATE ThanhToan SET AnhChuyenKhoan=?, NgayGuiAnh=NOW(),
+             HanXacNhan=COALESCE(HanXacNhan, DATE_ADD(NOW(), INTERVAL ? MINUTE))
+           WHERE MaThanhToan=?`,
+          [duongDanMoi, phut, thanhToan.maThanhToan]);
+      } else {
+        await ketNoi.query(
+          `UPDATE ThanhToan SET TrangThai='confirming', AnhChuyenKhoan=?, NgayGuiAnh=NOW(),
+             HanXacNhan=DATE_ADD(NOW(), INTERVAL ? MINUTE),
+             LyDoLoi=NULL, MaNguoiXacNhan=NULL, VaiTroXacNhan=NULL
+           WHERE MaThanhToan=?`,
+          [duongDanMoi, phut, thanhToan.maThanhToan]);
+      }
+      // Đã gửi ảnh → giữ chỗ vô thời hạn (NULL): không bao giờ tự nhả slot chỉ vì chủ sân chậm (slot.js).
       await ketNoi.query(
-        `UPDATE DatSan SET HetHanGiuCho=DATE_ADD(NOW(), INTERVAL ? MINUTE)
-         WHERE ${cungDot.sql} AND TrangThai='pending_payment'`,
-        [phut, ...cungDot.thamSo]);
+        `UPDATE DatSan SET HetHanGiuCho=NULL WHERE ${cungDot.sql} AND TrangThai='pending_payment'`,
+        cungDot.thamSo);
       // Báo chủ sân có ảnh chuyển khoản cần duyệt (không để lỗi thông báo làm hỏng việc gửi ảnh).
       try {
         const [[don]] = await ketNoi.query(
@@ -158,28 +189,41 @@ async function guiAnhChuyenKhoan(maNguoiDung, maDatSan, tep) {
           await guiThongBao(ketNoi, {
             maNguoiDung: don.maChuSan,
             loai: 'new_booking_for_owner',
-            tieuDe: 'Khách đã gửi ảnh chuyển khoản',
+            tieuDe: dangCho ? 'Khách gửi thêm ảnh chuyển khoản' : 'Khách đã gửi ảnh chuyển khoản',
             noiDung: `${don.tenKhach} đã chuyển khoản ${dinhDangTien(thanhToan.soTien)} cho ${don.tenSan} - `
               + `${don.tenCoSo} (mã ${don.maDon}). Vui lòng kiểm tra và duyệt đơn.`,
             loaiThamChieu: 'booking',
             maThamChieu: thanhToan.maDatSan,
+            khoa: `anh_chuyen_khoan:${maChungTu}`,
           });
         }
       } catch (loi) {
         console.error('[thong-bao] Không báo được cho chủ sân:', loi.message);
       }
-      return { maThanhToan: thanhToan.maThanhToan, anhCu: cu?.anh || null, phut };
+      const [[han]] = await ketNoi.query(
+        `SELECT HanXacNhan AS hanXacNhan, TIMESTAMPDIFF(SECOND, NOW(), HanXacNhan) AS conLaiXacNhanGiay
+         FROM ThanhToan WHERE MaThanhToan=?`, [thanhToan.maThanhToan]);
+      return {
+        maThanhToan: thanhToan.maThanhToan,
+        maChungTu,
+        soAnhDaGui: soAnhTruoc + 1,
+        hanXacNhan: han.hanXacNhan,
+        conLaiXacNhanGiay: han.conLaiXacNhanGiay === null ? null : Number(han.conLaiXacNhanGiay),
+      };
     });
     if (ketQua.hetHan) throw AppError.biTrung('Thời gian giữ chỗ đã hết hạn');
-    if (ketQua.anhCu) await xoaTepNeuCo(ketQua.anhCu);
     return {
       maThanhToan: ketQua.maThanhToan,
       trangThaiThanhToan: 'confirming',
       anhChuyenKhoanUrl: duongDanMoi,
+      maChungTu: ketQua.maChungTu,
+      soAnhDaGui: ketQua.soAnhDaGui,
+      hanXacNhan: ketQua.hanXacNhan,
+      conLaiXacNhanGiay: ketQua.conLaiXacNhanGiay,
       thongBao: 'Đã gửi ảnh chuyển khoản. Vui lòng chờ chủ sân xác nhận.',
     };
   } catch (loi) {
-    await fs.unlink(tep.path).catch(() => {}); // không giữ file mồ côi khi gửi thất bại
+    await fs.unlink(tep.path).catch(() => {}); // gửi thất bại (chưa có dòng chứng từ nào trỏ tới file) → không giữ file mồ côi
     throw loi;
   }
 }
@@ -191,13 +235,14 @@ async function layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan) {
   const [[thanhToan]] = await ketNoi.query(
     `SELECT t.MaThanhToan AS maThanhToan, t.MaDatSan AS maDatSanThanhToan, t.TrangThai AS trangThai,
        t.AnhChuyenKhoan AS anhChuyenKhoan, t.SoTien AS soTien,
-       d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.TrangThai AS trangThaiDatSan,
+       d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat,
+       d.TrangThai AS trangThaiDatSan,
        d.MaKhachHang AS maKhachHang, d.MaDon AS maDon, d.NgayChoi AS ngay,
        d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
        s.TenSan AS tenSan, cs.TenCoSo AS tenCoSo
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN d.MaDatSan
+         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
          ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
        END
      WHERE d.MaDatSan=? AND d.Nguon='app' ${laAdmin ? '' : 'AND cs.MaChuSan=?'}
@@ -212,7 +257,7 @@ async function layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan) {
     throw AppError.biTrung(thongBao);
   }
   const cungDot = dieuKienCungDot({
-    maLichCoDinh: thanhToan.maLichCoDinh, maDatSan: thanhToan.maDatSan });
+    maLichCoDinh: thanhToan.maLichCoDinh, maNhomDat: thanhToan.maNhomDat, maDatSan: thanhToan.maDatSan });
   const [cacDon] = await ketNoi.query(
     `SELECT TrangThai AS trangThai FROM DatSan WHERE ${cungDot.sql} FOR UPDATE`, cungDot.thamSo);
   if (!cacDon.length || cacDon.some((don) => don.trangThai !== 'pending_payment')) {
@@ -221,12 +266,15 @@ async function layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan) {
   return { ...thanhToan, cungDot };
 }
 
-async function ghiNhatKyAdmin(ketNoi, vaiTro, maNguoiDung, hanhDong, maThanhToan, chiTiet) {
-  if (vaiTro !== 'admin') return;
-  await ketNoi.query(
-    `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
-     VALUES (?,?,?,?,?)`,
-    [maNguoiDung, hanhDong, 'ThanhToan', maThanhToan, chiTiet || null]);
+// Mọi quyết định duyệt/từ chối của chủ sân HOẶC Admin đều ghi nhật ký (người + vai trò + lý do + thời điểm do DB đặt).
+async function ghiNhatKyDuyet(ketNoi, vaiTro, maNguoiDung, hanhDong, maThanhToan, lyDo = null) {
+  await nhatKy.ghiNhatKy(ketNoi, {
+    maNguoiThucHien: maNguoiDung,
+    hanhDong,
+    doiTuong: 'ThanhToan',
+    maDoiTuong: maThanhToan,
+    chiTiet: `[${vaiTro}]${lyDo ? ` ${lyDo}` : ''}`,
+  });
 }
 
 // Chủ sân/admin xác nhận đã nhận đủ tiền → đơn thành công, khách giữ được sân.
@@ -242,7 +290,8 @@ async function xacNhanThanhToan(maNguoiDung, maDatSan, vaiTro = 'owner') {
       `UPDATE DatSan SET TrangThai='confirmed', HetHanGiuCho=NULL
        WHERE ${thanhToan.cungDot.sql} AND TrangThai='pending_payment'`,
       thanhToan.cungDot.thamSo);
-    await ghiNhatKyAdmin(ketNoi, vaiTro, maNguoiDung, 'xac_nhan_thanh_toan', thanhToan.maThanhToan);
+    await chungTu.chotKetQuaChungTu(ketNoi, thanhToan.maThanhToan, 'accepted', { maNguoiDuyet: maNguoiDung, vaiTro });
+    await ghiNhatKyDuyet(ketNoi, vaiTro, maNguoiDung, 'xac_nhan_thanh_toan', thanhToan.maThanhToan);
     // Đơn được duyệt → báo khách giữ sân thành công.
     await guiThongBao(ketNoi, {
       maNguoiDung: thanhToan.maKhachHang,
@@ -264,27 +313,29 @@ async function xacNhanThanhToan(maNguoiDung, maDatSan, vaiTro = 'owner') {
   });
 }
 
-// Không thấy tiền / ảnh sai → từ chối kèm lý do; khách gửi lại ảnh trong thời gian giữ chỗ mới.
+// Không thấy tiền / ảnh sai → từ chối kèm lý do (bắt buộc); ThanhToan quay về `pending`, giữ chỗ lại hold_minutes để khách
+// gửi lại ảnh. Các ảnh đã gửi KHÔNG bị xoá: chuyển `rejected` (kèm lý do, người từ chối) trong ChungTuThanhToan.
 async function tuChoiThanhToan(maNguoiDung, maDatSan, lyDo, vaiTro = 'owner') {
   return thucHienGiaoDich(async (ketNoi) => {
     const thanhToan = await layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan);
     await ketNoi.query(
-      `UPDATE ThanhToan SET TrangThai='pending', LyDoLoi=?, AnhChuyenKhoan=NULL, NgayGuiAnh=NULL,
+      `UPDATE ThanhToan SET TrangThai='pending', LyDoLoi=?, AnhChuyenKhoan=NULL, NgayGuiAnh=NULL, HanXacNhan=NULL,
          MaNguoiXacNhan=NULL, VaiTroXacNhan=NULL
        WHERE MaThanhToan=?`,
       [lyDo, thanhToan.maThanhToan]);
+    await chungTu.chotKetQuaChungTu(ketNoi, thanhToan.maThanhToan, 'rejected', { maNguoiDuyet: maNguoiDung, vaiTro, lyDo });
     const phut = await layCauHinhSo(ketNoi, 'hold_minutes', PHUT_GIU_CHO_MAC_DINH);
     await ketNoi.query(
       `UPDATE DatSan SET HetHanGiuCho=DATE_ADD(NOW(), INTERVAL ? MINUTE)
        WHERE ${thanhToan.cungDot.sql} AND TrangThai='pending_payment'`,
       [phut, ...thanhToan.cungDot.thamSo]);
-    await ghiNhatKyAdmin(ketNoi, vaiTro, maNguoiDung, 'tu_choi_thanh_toan', thanhToan.maThanhToan, lyDo);
+    await ghiNhatKyDuyet(ketNoi, vaiTro, maNguoiDung, 'tu_choi_thanh_toan', thanhToan.maThanhToan, lyDo);
     await guiThongBao(ketNoi, {
       maNguoiDung: thanhToan.maKhachHang,
       loai: 'payment_failed',
       tieuDe: 'Thanh toán chưa được xác nhận',
       noiDung: `Chủ sân chưa xác nhận thanh toán đơn ${thanhToan.maDon}. Lý do: ${lyDo}. `
-        + 'Vui lòng gửi lại ảnh chuyển khoản trong thời gian giữ chỗ.',
+        + `Vui lòng gửi lại ảnh chuyển khoản trong ${phut} phút để giữ sân.`,
       loaiThamChieu: 'booking',
       maThamChieu: thanhToan.maDatSan,
     });
@@ -293,6 +344,7 @@ async function tuChoiThanhToan(maNguoiDung, maDatSan, lyDo, vaiTro = 'owner') {
       maThanhToan: thanhToan.maThanhToan,
       trangThaiThanhToan: 'pending',
       lyDo,
+      giuChoPhut: phut,
     };
   });
 }

@@ -41,10 +41,13 @@ for (const [dauVao, ma, nhan, nhom] of BANG_CA) {
   });
 }
 
-test('trạng thái hiển thị: bảng đủ 13 mã và mỗi mã đều có ca kiểm thử', () => {
-  assert.equal(Object.keys(BANG_TRANG_THAI).length, 13);
+// 13 mã gốc ở đây; 7 mã mới của Task 0.6 được kiểm ở trangThaiDonMoi.test.js (có kiểm tổng 20 mã).
+const MA_MOI = ['awaiting_admin_overdue', 'awaiting_reconcile', 'awaiting_topup', 'paid_overpay_refund_pending',
+  'checked_in', 'no_show', 'cancelled_refund_received'];
+test('trạng thái hiển thị: 13 mã gốc đều có ca kiểm thử (7 mã mới ở trangThaiDonMoi.test.js)', () => {
+  assert.equal(Object.keys(BANG_TRANG_THAI).length, 13 + MA_MOI.length);
   const maDaKiemThu = new Set(BANG_CA.map((ca) => ca[1]));
-  for (const ma of Object.keys(BANG_TRANG_THAI)) assert.ok(maDaKiemThu.has(ma), `thiếu ca cho ${ma}`);
+  for (const ma of Object.keys(BANG_TRANG_THAI)) if (!MA_MOI.includes(ma)) assert.ok(maDaKiemThu.has(ma), `thiếu ca cho ${ma}`);
 });
 
 test('trạng thái hiển thị: dữ liệu thiếu (null/undefined/rỗng/enum lạ) → nhãn mặc định, không ném lỗi', () => {

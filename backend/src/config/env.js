@@ -14,6 +14,9 @@ const cauHinh = {
   },
   // Job nền chuyển đơn confirmed đã qua giờ chơi → completed + nhắc đánh giá (chu kỳ, phút; tối thiểu 1).
   jobHoanThanhPhut: Math.max(Number(process.env.JOB_HOAN_THANH_PHUT) || 5, 1),
+  // Job nhả slot đơn quá hạn giữ chỗ (chu kỳ, phút; tối thiểu 1).
+  jobHetHanGiuChoPhut: Math.max(Number(process.env.JOB_HET_HAN_GIU_CHO_PHUT) || 1, 1),
+  jobHanHoanPhut: Math.max(Number(process.env.JOB_HAN_HOAN_PHUT) || 10, 1),
   khoaBiMat: process.env.JWT_SECRET || 'dev_secret',
   thoiHanMaTruyCap: process.env.JWT_EXPIRES_IN || '7d',
   nguonTruyCap: process.env.CORS_ORIGIN || '*',

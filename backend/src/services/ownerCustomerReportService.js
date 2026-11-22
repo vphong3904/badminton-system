@@ -5,7 +5,7 @@ const { pool } = require('../config/db');
 const AppError = require('../utils/AppError');
 
 const KHOA = "COALESCE(CONCAT('kh', d.MaKhachHang), CONCAT('sdt', d.SoDienThoaiLienHe))";
-const HOP_LE = "t.trangThai IN ('confirmed','completed')";
+const HOP_LE = "t.trangThai IN ('confirmed','checked_in','completed')";
 const SO_DONG_MAC_DINH = 20;
 
 // Bảng "mỗi dòng = 1 đơn" kèm: ngày đặt đầu tiên của khách (toàn thời gian) và đơn có nằm trong khoảng lọc không.
@@ -22,11 +22,11 @@ function taoBangDon(maChuSan, boLoc) {
   const sql = `SELECT ${KHOA} AS khoa, d.MaKhachHang AS maKhachHang, d.TenKhach AS tenKhach,
       d.SoDienThoaiLienHe AS soDienThoai, d.NgayChoi AS ngayChoi, d.TongTien AS tongTien,
       d.TrangThai AS trangThai, d.Nguon AS nguon, d.TrangThaiThu AS trangThaiThu,
-      MIN(CASE WHEN d.TrangThai IN ('confirmed','completed') THEN d.NgayChoi END)
+      MIN(CASE WHEN d.TrangThai IN ('confirmed','checked_in','completed') THEN d.NgayChoi END)
         OVER (PARTITION BY ${KHOA}) AS ngayDauTien,
       ${trongKhoang} AS trongKhoang
     FROM DatSan d JOIN San s ON s.MaSan = d.MaSan JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo
-    WHERE cs.MaChuSan = ? AND d.TrangThai IN ('confirmed','completed','cancelled')${locCoSo}`;
+    WHERE cs.MaChuSan = ? AND d.TrangThai IN ('confirmed','checked_in','completed','cancelled')${locCoSo}`;
   return { sql, thamSo };
 }
 
@@ -78,7 +78,7 @@ async function layTongQuanKhach(maChuSan, boLoc = {}) {
     `SELECT d.Nguon AS nguon, d.LoaiKhach AS loaiKhach, COUNT(DISTINCT ${KHOA}) AS soKhach,
        COUNT(*) AS soLuotDat, SUM(d.TongTien) AS tongChiTieu
      FROM DatSan d JOIN San s ON s.MaSan = d.MaSan JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo
-     WHERE cs.MaChuSan = ? AND d.TrangThai IN ('confirmed','completed')${locNguon}
+     WHERE cs.MaChuSan = ? AND d.TrangThai IN ('confirmed','checked_in','completed')${locNguon}
      GROUP BY d.Nguon, d.LoaiKhach ORDER BY soLuotDat DESC`,
     thamSoNguon);
 
@@ -183,7 +183,7 @@ async function layChiTietKhach(maChuSan, boLoc = {}) {
   if (boLoc.denNgay) { dieuKien.push('d.NgayChoi <= ?'); thamSo.push(boLoc.denNgay); }
   const loc = dieuKien.join(' AND ');
   const tu = `FROM DatSan d JOIN San s ON s.MaSan = d.MaSan JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo`;
-  const hopLe = "d.TrangThai IN ('confirmed','completed')";
+  const hopLe = "d.TrangThai IN ('confirmed','checked_in','completed')";
 
   const [[tongHop]] = await pool.query(
     `SELECT COUNT(*) AS soDon, COALESCE(SUM(${hopLe}), 0) AS soLuotDat,
@@ -196,7 +196,7 @@ async function layChiTietKhach(maChuSan, boLoc = {}) {
        MAX(CASE WHEN ${hopLe} THEN d.NgayChoi END) AS lanDatGanNhat,
        MAX(d.TenKhach) AS tenKhach, MAX(d.SoDienThoaiLienHe) AS soDienThoai,
        MAX(d.MaKhachHang) AS maKhachHang
-     ${tu} WHERE ${loc} AND d.TrangThai IN ('confirmed','completed','cancelled')`,
+     ${tu} WHERE ${loc} AND d.TrangThai IN ('confirmed','checked_in','completed','cancelled')`,
     thamSo);
   if (!Number(tongHop.soDon)) throw AppError.khongTimThay('Không tìm thấy khách hàng này tại cơ sở của bạn');
 

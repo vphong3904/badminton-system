@@ -138,6 +138,10 @@ test('Tạo đơn cố định hằng ngày theo khoảng ngày và một hóa �
   assert.equal(ketQua.cacDon.length, 2);
   assert.equal(ketQua.tongTien, 200000);
   assert.ok(ketQua.maLichCoDinh);
+  // Task 2.1: mỗi buổi là nhóm 1 dòng (MaNhomDat = MaDatSan), gán bằng 1 câu UPDATE cho cả 2 đơn.
+  const gan = cacTruyVan.filter((muc) => /SET MaNhomDat = MaDatSan/.test(muc.cauTruyVan)).at(-1);
+  assert.ok(gan, 'phải gán MaNhomDat cho đơn mới');
+  assert.deepEqual(gan.thamSo, ketQua.cacDon.map((don) => don.maDatSan));
 });
 
 test('Lịch ngày trả khung đã đặt, khung bị khóa theo từng sân và bảng giá', async () => {

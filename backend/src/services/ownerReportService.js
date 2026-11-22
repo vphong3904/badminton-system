@@ -6,7 +6,7 @@ async function capNhatDonDaHoanTat(maChuSan, ketNoi = pool) {
     `UPDATE DatSan d JOIN San s ON s.MaSan=d.MaSan
        JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
      SET d.TrangThai='completed'
-     WHERE cs.MaChuSan=? AND d.Nguon='app' AND d.TrangThai='confirmed'
+     WHERE cs.MaChuSan=? AND d.Nguon='app' AND d.TrangThai IN ('confirmed','checked_in')
        AND TIMESTAMP(d.NgayChoi,d.GioKetThuc)<=NOW()`,
     [maChuSan]);
 }
@@ -46,22 +46,22 @@ async function layDoanhThu(maChuSan, boLoc = {}) {
   // Nhánh 1: đơn app. Nhánh 2: đơn chủ sân tạo đã thu ngoài hệ thống (không hoa hồng, không hoàn qua hệ thống).
   const x = `(
     SELECT d.NgayChoi AS ngay, d.TongTien AS gross, d.PhiNenTang AS phi, d.TienChuSan AS chu,
-      CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien='refunded'
+      CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien IN ('refunded','received')
            THEN LEAST(d.TongTien, COALESCE(t.SoTienHoan,0)) ELSE 0 END AS daHoan,
       CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien='processing'
            THEN LEAST(d.TongTien, COALESCE(t.SoTienHoan,0)) ELSE 0 END AS choHoan,
-      CASE WHEN d.TrangThai IN ('confirmed','completed') THEN 1 ELSE 0 END AS luot,
+      CASE WHEN d.TrangThai IN ('confirmed','checked_in','completed') THEN 1 ELSE 0 END AS luot,
       0 AS ngoai, 0 AS luotNgoai
     FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
       LEFT JOIN ThanhToan t ON t.MaDatSan=d.MaDatSan
     WHERE cs.MaChuSan=? AND d.Nguon='app'
-      AND (d.TrangThai IN ('confirmed','completed') OR (d.TrangThai='cancelled' AND t.TrangThai='success'))${loc}
+      AND (d.TrangThai IN ('confirmed','checked_in','completed') OR (d.TrangThai='cancelled' AND t.TrangThai='success'))${loc}
     UNION ALL
     SELECT d.NgayChoi AS ngay, d.TongTien AS gross, 0 AS phi, d.TongTien AS chu,
       0 AS daHoan, 0 AS choHoan, 1 AS luot, d.TongTien AS ngoai, 1 AS luotNgoai
     FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
     WHERE cs.MaChuSan=? AND d.Nguon='owner' AND d.TrangThaiThu='paid'
-      AND d.TrangThai IN ('confirmed','completed')${loc}
+      AND d.TrangThai IN ('confirmed','checked_in','completed')${loc}
   ) x`;
   // Tỉ lệ phần tiền được giữ lại (gross − daHoan)/gross; gross=0 → 0.
   const giu = '(CASE WHEN x.gross>0 THEN (x.gross - x.daHoan)/x.gross ELSE 0 END)';
@@ -120,7 +120,7 @@ async function layTopKhach(maChuSan, boLoc) {
        d.SoDienThoaiLienHe AS soDienThoai, COUNT(*) AS soLuotDat,
        SUM(d.TongTien) AS tongChiTieu
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     WHERE cs.MaChuSan=? AND d.Nguon='app' AND d.TrangThai IN ('confirmed','completed')${locNgay}
+     WHERE cs.MaChuSan=? AND d.Nguon='app' AND d.TrangThai IN ('confirmed','checked_in','completed')${locNgay}
      GROUP BY d.MaKhachHang, d.TenKhach, d.SoDienThoaiLienHe
      ORDER BY soLuotDat DESC, tongChiTieu DESC LIMIT 20`,
     thamSo);
@@ -142,7 +142,7 @@ async function layTopSan(maChuSan, boLoc) {
     `SELECT s.MaSan AS maSan, s.TenSan AS tenSan, cs.TenCoSo AS tenCoSo,
        COUNT(*) AS soLuotDat, SUM(d.TongTien) AS tongDoanhThu
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     WHERE cs.MaChuSan=? AND d.Nguon='app' AND d.TrangThai IN ('confirmed','completed')${locNgay}
+     WHERE cs.MaChuSan=? AND d.Nguon='app' AND d.TrangThai IN ('confirmed','checked_in','completed')${locNgay}
      GROUP BY s.MaSan, s.TenSan, cs.TenCoSo
      ORDER BY tongDoanhThu DESC, soLuotDat DESC LIMIT 20`,
     thamSo);

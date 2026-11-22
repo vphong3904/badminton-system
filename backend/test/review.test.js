@@ -67,6 +67,8 @@ const ketNoiGia = {
     if (/FROM DanhGia dg JOIN NguoiDung nd/.test(cauTruyVan)) {
       return [[{ maDanhGia: 3, tenKhach: 'Le Hoang Phuc', soSao: 5, noiDung: 'Tot', ngayTao: '2026-10-24 19:30:00', phanHoiChuSan: null, ngayPhanHoi: null }]];
     }
+    // hetHanDatSan quét thêm các khoản thanh toán cần hoàn: test này không có dòng nào.
+    if (/SELECT t\.MaThanhToan AS maThanhToan[\s\S]*SoTienHoan/.test(cauTruyVan)) return [[]];
     throw new Error(`Chưa giả lập truy vấn: ${cauTruyVan}`);
   },
 };
@@ -110,6 +112,13 @@ test('Gửi đánh giá: đơn đã hoàn thành + đã thanh toán → ghi và 
   assert.deepEqual(capNhat.thamSo, [12, 12, 12]);
 });
 
+test('Gửi đánh giá: đơn đã check-in (chưa hết giờ chơi) đánh giá được', async () => {
+  datLai();
+  trangThaiGia.don.trangThai = 'checked_in';
+  const ketQua = await dichVu.guiDanhGia(7, 5, { soSao: 5, noiDung: 'Vừa check-in xong' });
+  assert.equal(ketQua.maDanhGia, 77);
+});
+
 test('Gửi đánh giá: bình luận để trống được lưu NULL', async () => {
   datLai();
   const ketQua = await dichVu.guiDanhGia(7, 5, { soSao: 5, noiDung: '' });
@@ -120,7 +129,7 @@ test('Gửi đánh giá: bình luận để trống được lưu NULL', async (
 
 test('Gửi đánh giá: đơn chưa chơi xong hoặc chưa thanh toán bị từ chối (409)', async () => {
   for (const [trangThai, thongBao] of [
-    ['confirmed', /sau khi chơi xong/],
+    ['confirmed', /sau khi check-in hoặc chơi xong/],
     ['pending_payment', /chưa thanh toán/],
     ['cancelled', /đã huỷ/],
     ['expired', /hết hạn/],

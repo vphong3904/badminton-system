@@ -38,7 +38,7 @@ exports.topSan = { query: boLocNgay };
 const maSo = z.coerce.number().int().positive();
 exports.danhSachDon = {
   query: z.object({
-    trangThai: z.enum(['pending_payment', 'confirmed', 'completed', 'cancelled', 'expired']).optional(),
+    trangThai: z.enum(['pending_payment', 'confirmed', 'checked_in', 'completed', 'cancelled', 'expired']).optional(),
     trangThaiThanhToan: z.enum(['pending', 'confirming', 'success', 'failed', 'expired', 'late_payment']).optional(),
     maCoSo: maSo.optional(),
     maSan: maSo.optional(),
@@ -48,7 +48,7 @@ exports.danhSachDon = {
     soDong: z.coerce.number().int().min(1).max(200).optional(),
     tuKhoa: z.string().trim().min(1).max(50).optional(),
     trang: maSo.optional(),
-    sapXep: z.enum(['moi-nhat', 'cu-nhat']).optional(), // mặc định moi-nhat: ngày chơi mới nhất trước, cũ nhất cuối
+    sapXep: z.enum(['moi-nhat', 'cu-nhat', 'han-xac-nhan']).optional(), // mặc định moi-nhat: ngày chơi mới nhất trước; han-xac-nhan: hàng đợi duyệt thanh toán (G2)
   }).refine((duLieu) => !duLieu.tuNgay || !duLieu.denNgay || duLieu.tuNgay <= duLieu.denNgay, {
     message: 'Ngày bắt đầu phải trước hoặc bằng ngày kết thúc',
     path: ['denNgay'],
@@ -86,12 +86,10 @@ exports.huyDonOwner = {
 
 // ----- Hoàn tiền (chủ sân) -----
 exports.danhSachHoanTien = {
-  query: z.object({ trangThai: z.enum(['processing', 'refunded']).optional() }),
+  query: z.object({ trangThai: z.enum(['processing', 'refunded']).optional() }), // processing = chờ hoàn (gồm not_received/escalated); refunded = đã hoàn (gồm received)
 };
-exports.hoanThanhHoanTien = {
-  params: z.object({ maThanhToan: maSo }),
-  body: z.object({ maGiaoDichHoan: z.string().trim().min(1).max(100).optional() }),
-};
+// G4: chứng từ hoàn = ảnh (multipart, field `anhChungTu`), bắt buộc; không còn mã giao dịch.
+exports.hoanThanhHoanTien = { params: z.object({ maThanhToan: maSo }) };
 
 // ----- Chủ sân tạo đơn (khách tại chỗ / cố định) -----
 const gio = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải dạng HH:MM')

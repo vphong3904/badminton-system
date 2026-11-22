@@ -1,6 +1,8 @@
 const { thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { guiThongBao } = require('./notificationService');
+const { SLOT_BAN } = require('../utils/slot');
+const nhatKy = require('./nhatKyService');
 
 // Đóng / mở / xoá SÂN và CƠ SỞ — dùng chung cho chủ sân và admin.
 //   Đóng sân  : San.TrangThai = 'maintenance'       Đóng cơ sở : CoSo.TrangThai = 'closed'
@@ -17,10 +19,7 @@ const MA_LOI_CO_LICH_SU = 'HAS_BOOKING_HISTORY';
 const laAdmin = (nguoi) => nguoi.vaiTro === 'admin';
 
 async function ghiNhatKy(ketNoi, nguoi, hanhDong, doiTuong, maDoiTuong, chiTiet) {
-  await ketNoi.query(
-    `INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet)
-     VALUES (?,?,?,?,?)`,
-    [nguoi.maNguoiDung, hanhDong, doiTuong, maDoiTuong, chiTiet ? String(chiTiet).slice(0, 500) : null]);
+  await nhatKy.ghiNhatKy(ketNoi, { maNguoiThucHien: nguoi.maNguoiDung, hanhDong, doiTuong, maDoiTuong, chiTiet });
 }
 
 // Đếm khách còn đặt (đơn hiện tại/sắp tới) và lịch cố định còn hiệu lực trên một nhóm sân.
@@ -30,8 +29,7 @@ async function demKhachConLai(ketNoi, cacMaSan) {
   const [[don]] = await ketNoi.query(
     `SELECT COUNT(*) AS so FROM DatSan
      WHERE MaSan IN (${cho})
-       AND ((TrangThai='confirmed' AND TIMESTAMP(NgayChoi, GioKetThuc) > NOW())
-         OR (TrangThai='pending_payment' AND HetHanGiuCho > NOW()))`,
+       AND ${SLOT_BAN()} AND TIMESTAMP(NgayChoi, GioKetThuc) > NOW()`,
     cacMaSan);
   const [[lich]] = await ketNoi.query(
     `SELECT COUNT(*) AS so FROM LichCoDinh

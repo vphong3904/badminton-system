@@ -19,6 +19,8 @@ exports.datLe = xuLy((yeuCau) =>
   dichVu.taoDatSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.body), daTao);
 exports.datCoDinh = xuLy((yeuCau) =>
   dichVu.taoDatSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.body, yeuCau.body.ngayKetThuc), daTao);
+exports.datNhieu = xuLy((yeuCau) =>
+  dichVu.taoDatNhieuSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.body), daTao);
 exports.lietKeDatSan = xuLy((yeuCau) => dichVu.lietKeDatSan(yeuCau.nguoiDung.maNguoiDung));
 exports.layHoaDonNhap = xuLy((yeuCau) =>
   dichVu.layHoaDonNhap(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
