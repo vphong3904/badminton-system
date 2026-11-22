@@ -108,7 +108,10 @@ module.exports = {
       'Nhấn Authorize để nhập mã truy cập dạng Bearer sau khi đăng nhập.',
     ].join('\n\n'),
   },
-  servers: [{ url: `http://localhost:${cauHinh.cong}`, description: 'Máy phát triển cục bộ' }],
+  servers: [
+    { url: 'https://badminton-system-c2fac.containers.snapdeploy.app', description: 'Server chạy trên SnapDeploy'},
+    { url: `http://localhost:${cauHinh.cong}`, description: 'Máy phát triển cục bộ' },
+  ],
   tags: [
     { name: 'Sức khỏe' },
     { name: 'Tài khoản' },
