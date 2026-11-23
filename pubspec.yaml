@@ -1,0 +1,30 @@
+name: cau_long_app
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  shared_preferences: ^2.3.2 # lưu token đăng nhập trên máy để mở lại app không phải đăng nhập lại
+  http_parser: ^4.0.2
+  url_launcher: ^6.3.3
+  image_picker: ^1.1.2
+  geolocator: ^14.0.2 # lấy vị trí hiện tại để tìm sân gần tôi
+  gal: ^2.3.0 # lưu ảnh mã QR thẳng vào thư viện ảnh của máy (nút Tải QR)
+  qr_flutter: ^4.1.0 # tự vẽ mã QR chuyển khoản (không cần tải ảnh từ trang ngoài)
+  image: ^4.2.0 # giải mã ảnh QR chọn từ thư viện (đường dự phòng)
+  zxing2: ^0.2.3 # đọc mã QR từ ảnh bằng Dart thuần
+  mobile_scanner: ^7.0.1 # quét QR check-in tại sân (G3.9); cần quyền camera Android/iOS
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

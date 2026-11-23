@@ -1,23 +1,101 @@
-# Secrets
-.env
-.env.*
-!.env.example
-
-# Node.js
-node_modules/
-npm-debug.log*
-
-# Flutter
+# Flutter / Dart
 .dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
 .flutter-plugins
 .flutter-plugins-dependencies
-.packages
-build/
+.widget_preview/
+coverage/
+*.log
+*.iml
 
 # IDE
 .idea/
 .vscode/
-
-# OS
+*.swp
 .DS_Store
-Thumbs.db
+
+# Android
+android/.gradle/
+android/local.properties
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/**/GeneratedPluginRegistrant.*
+android/key.properties
+android/**/*.jks
+android/**/*.keystore
+
+# iOS / macOS
+ios/Flutter/ephemeral/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+macos/Flutter/ephemeral/
+macos/Pods/
+**/xcuserdata/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Linux / Windows
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# Bí mật
+.env
+.env.*
+!.env.example# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.widget_preview/
+coverage/
+*.log
+*.iml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Android
+android/.gradle/
+android/local.properties
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/**/GeneratedPluginRegistrant.*
+android/key.properties
+android/**/*.jks
+android/**/*.keystore
+
+# iOS / macOS
+ios/Flutter/ephemeral/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+macos/Flutter/ephemeral/
+macos/Pods/
+**/xcuserdata/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Linux / Windows
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# Bí mật
+.env
+.env.*
+!.env.example
