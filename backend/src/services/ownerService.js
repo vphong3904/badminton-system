@@ -1,6 +1,7 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { kiemTraKhungGia } = require('../utils/time');
+const { TAT_CA_THU, dongBangGia, COT_BANG_GIA } = require('../utils/giaTheoThu');
 const { thongBaoTheoTrangThai, layMucConThieuHoSo } = require('../utils/hoSoChuSan');
 const { timNganHang } = require('../utils/nganHang');
 const { layToaDoTuLink } = require('../utils/toaDoBanDo');
@@ -61,19 +62,34 @@ async function layCoSoTheoMa(maChuSan, maCoSo) {
 }
 
 async function layBangGia(maCoSo, ketNoi = pool) {
-  const [khungGias] = await ketNoi.query(
-    `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc,
-       MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'walk_in' THEN GiaMoiGio END) AS giaNgayThuongKhachVangLai,
-       MAX(CASE WHEN LoaiNgay = 'weekday' AND LoaiKhach = 'fixed' THEN GiaMoiGio END) AS giaNgayThuongKhachCoDinh,
-       MAX(CASE WHEN LoaiNgay = 'weekend' AND LoaiKhach = 'walk_in' THEN GiaMoiGio END) AS giaCuoiTuanKhachVangLai,
-       MAX(CASE WHEN LoaiNgay = 'weekend' AND LoaiKhach = 'fixed' THEN GiaMoiGio END) AS giaCuoiTuanKhachCoDinh
-     FROM BangGia WHERE MaCoSo = ?
-     GROUP BY GioBatDau, GioKetThuc ORDER BY GioBatDau`,
+  const [cacDong] = await ketNoi.query(
+    `SELECT Thu AS thu, LoaiKhach AS loaiKhach, GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc,
+       GiaMoiGio AS giaMoiGio
+     FROM BangGia WHERE MaCoSo = ? ORDER BY GioBatDau, Thu`,
     [maCoSo]);
-  return khungGias.map((khungGia) => ({
-    ...khungGia,
-    gioBatDau: String(khungGia.gioBatDau).slice(0, 5),
-    gioKetThuc: String(khungGia.gioKetThuc).slice(0, 5),
+  const theoKhung = new Map();
+  for (const dong of cacDong) {
+    const gioBatDau = String(dong.gioBatDau).slice(0, 5);
+    const gioKetThuc = String(dong.gioKetThuc).slice(0, 5);
+    const khoa = `${gioBatDau}-${gioKetThuc}`;
+    if (!theoKhung.has(khoa)) {
+      theoKhung.set(khoa, {
+        gioBatDau,
+        gioKetThuc,
+        giaTheoThu: TAT_CA_THU.map((thu) => ({ thu, giaKhachVangLai: null, giaKhachCoDinh: null })),
+      });
+    }
+    const gia = theoKhung.get(khoa).giaTheoThu[dong.thu - 1];
+    if (dong.loaiKhach === 'walk_in') gia.giaKhachVangLai = Number(dong.giaMoiGio);
+    else gia.giaKhachCoDinh = Number(dong.giaMoiGio);
+  }
+  // Giữ thêm 4 trường cũ (= giá Thứ 2 và Thứ 7) cho client cũ chưa biết `giaTheoThu`.
+  return [...theoKhung.values()].map((khung) => ({
+    ...khung,
+    giaNgayThuongKhachVangLai: khung.giaTheoThu[0].giaKhachVangLai,
+    giaNgayThuongKhachCoDinh: khung.giaTheoThu[0].giaKhachCoDinh,
+    giaCuoiTuanKhachVangLai: khung.giaTheoThu[5].giaKhachVangLai,
+    giaCuoiTuanKhachCoDinh: khung.giaTheoThu[5].giaKhachCoDinh,
   }));
 }
 
@@ -171,22 +187,15 @@ async function thayBangGia(maChuSan, khungGias, maCoSo) {
   const coSo = await chonCoSo(maChuSan, maCoSo);
   kiemTraKhungGia(khungGias, coSo.gioMoCua.slice(0, 5), coSo.gioDongCua.slice(0, 5));
 
-  const duLieuBangGia = khungGias.flatMap((khungGia) => [
-    [coSo.maCoSo, 'weekday', 'walk_in', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaNgayThuongKhachVangLai],
-    [coSo.maCoSo, 'weekday', 'fixed', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaNgayThuongKhachCoDinh],
-    [coSo.maCoSo, 'weekend', 'walk_in', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaCuoiTuanKhachVangLai],
-    [coSo.maCoSo, 'weekend', 'fixed', khungGia.gioBatDau, khungGia.gioKetThuc, khungGia.giaCuoiTuanKhachCoDinh],
-  ]);
-  const giaThapNhat = Math.min(...khungGias.flatMap((khungGia) => [
-    khungGia.giaNgayThuongKhachVangLai,
-    khungGia.giaCuoiTuanKhachVangLai,
-  ]));
+  const duLieuBangGia = khungGias.flatMap((khungGia) => dongBangGia(coSo.maCoSo, khungGia));
+  const giaThapNhat = Math.min(...duLieuBangGia
+    .filter((dong) => dong[3] === 'walk_in')
+    .map((dong) => Number(dong[6])));
 
   await thucHienGiaoDich(async (ketNoi) => {
     await ketNoi.query('DELETE FROM BangGia WHERE MaCoSo = ?', [coSo.maCoSo]);
     await ketNoi.query(
-      `INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio)
-       VALUES ?`,
+      `INSERT INTO BangGia ${COT_BANG_GIA} VALUES ?`,
       [duLieuBangGia]);
     await ketNoi.query('UPDATE CoSo SET GiaThapNhat=? WHERE MaCoSo=?', [giaThapNhat, coSo.maCoSo]);
     await kichHoatNeuSanSang(coSo.maCoSo, ketNoi);
@@ -215,13 +224,8 @@ async function themKhungGia(maChuSan, maCoSo, khungMoi) {
     const hienCo = await layBangGia(coSo.maCoSo, ketNoi);
     kiemTraKhungGia([...hienCo, khungMoi], coSo.gioMoCua.slice(0, 5), coSo.gioDongCua.slice(0, 5));
     await ketNoi.query(
-      `INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES ?`,
-      [[
-        [coSo.maCoSo, 'weekday', 'walk_in', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaNgayThuongKhachVangLai],
-        [coSo.maCoSo, 'weekday', 'fixed', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaNgayThuongKhachCoDinh],
-        [coSo.maCoSo, 'weekend', 'walk_in', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaCuoiTuanKhachVangLai],
-        [coSo.maCoSo, 'weekend', 'fixed', khungMoi.gioBatDau, khungMoi.gioKetThuc, khungMoi.giaCuoiTuanKhachCoDinh],
-      ]]);
+      `INSERT INTO BangGia ${COT_BANG_GIA} VALUES ?`,
+      [dongBangGia(coSo.maCoSo, khungMoi)]);
     await ketNoi.query(
       `UPDATE CoSo SET GiaThapNhat=(SELECT MIN(GiaMoiGio) FROM BangGia WHERE MaCoSo=? AND LoaiKhach='walk_in')
        WHERE MaCoSo=?`,
@@ -342,6 +346,82 @@ async function capNhatAnhCoSo(maChuSan, tep, maCoSo) {
     throw loi;
   }
   return { duongDanAnh: duongDan };
+}
+
+// ---- Thư viện ảnh của cơ sở: 1 ảnh bìa + nhiều ảnh sân (tối đa SO_ANH_TOI_DA) ----
+const SO_ANH_TOI_DA = 12;
+
+async function layAnhCoSo(maChuSan, maCoSo) {
+  const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
+  const [cacAnh] = await pool.query(
+    `SELECT MaAnh AS maAnh, DuongDan AS duongDan, LaAnhBia AS laAnhBia FROM AnhCoSo
+     WHERE MaCoSo=? ORDER BY LaAnhBia DESC, ThuTu, MaAnh`, [coSo.maCoSo]);
+  return { cacAnh: cacAnh.map((a) => ({ ...a, laAnhBia: !!a.laAnhBia })), soAnhToiDa: SO_ANH_TOI_DA };
+}
+
+// Thêm ảnh sân vào thư viện (KHÔNG đổi ảnh bìa; cơ sở chưa có ảnh nào thì ảnh đầu tiên làm ảnh bìa).
+async function themAnhSan(maChuSan, tep, maCoSo) {
+  let coSo;
+  try {
+    coSo = await layCoSoTheoMa(maChuSan, maCoSo);
+    const [[dem]] = await pool.query('SELECT COUNT(*) AS so FROM AnhCoSo WHERE MaCoSo=?', [coSo.maCoSo]);
+    if (Number(dem.so) >= SO_ANH_TOI_DA) {
+      throw AppError.duLieuKhongHopLe(`Mỗi cơ sở tối đa ${SO_ANH_TOI_DA} ảnh. Hãy xoá bớt ảnh cũ.`);
+    }
+  } catch (loi) {
+    await fs.unlink(tep.path).catch(() => {});
+    throw loi;
+  }
+  const duongDan = await luuAnh(tep, 'coso', `cs${coSo.maCoSo}`);
+  try {
+    await thucHienGiaoDich(async (ketNoi) => {
+      const [[coBia]] = await ketNoi.query(
+        'SELECT COUNT(*) AS so FROM AnhCoSo WHERE MaCoSo=? AND LaAnhBia=1 FOR UPDATE', [coSo.maCoSo]);
+      const [[thuTuCuoi]] = await ketNoi.query(
+        'SELECT COALESCE(MAX(ThuTu),0)+1 AS thuTu FROM AnhCoSo WHERE MaCoSo=?', [coSo.maCoSo]);
+      await ketNoi.query(
+        'INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia, ThuTu) VALUES (?,?,?,?)',
+        [coSo.maCoSo, duongDan, Number(coBia.so) === 0 ? 1 : 0, thuTuCuoi.thuTu]);
+    });
+  } catch (loi) {
+    await xoaAnh(duongDan);
+    throw loi;
+  }
+  return layAnhCoSo(maChuSan, coSo.maCoSo);
+}
+
+async function datAnhBia(maChuSan, maCoSo, maAnh) {
+  const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
+  await thucHienGiaoDich(async (ketNoi) => {
+    const [[anh]] = await ketNoi.query(
+      'SELECT MaAnh FROM AnhCoSo WHERE MaAnh=? AND MaCoSo=? FOR UPDATE', [maAnh, coSo.maCoSo]);
+    if (!anh) throw AppError.khongTimThay('Không tìm thấy ảnh');
+    await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=0 WHERE MaCoSo=?', [coSo.maCoSo]);
+    await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=1 WHERE MaAnh=?', [maAnh]);
+  });
+  return layAnhCoSo(maChuSan, coSo.maCoSo);
+}
+
+// Xoá ảnh; nếu xoá ảnh bìa thì ảnh đầu tiên còn lại tự làm ảnh bìa.
+async function xoaAnhCoSo(maChuSan, maCoSo, maAnh) {
+  const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
+  let duongDanXoa;
+  await thucHienGiaoDich(async (ketNoi) => {
+    const [[anh]] = await ketNoi.query(
+      'SELECT DuongDan AS duongDan, LaAnhBia AS laAnhBia FROM AnhCoSo WHERE MaAnh=? AND MaCoSo=? FOR UPDATE',
+      [maAnh, coSo.maCoSo]);
+    if (!anh) throw AppError.khongTimThay('Không tìm thấy ảnh');
+    await ketNoi.query('DELETE FROM AnhCoSo WHERE MaAnh=?', [maAnh]);
+    if (anh.laAnhBia) {
+      await ketNoi.query(
+        `UPDATE AnhCoSo SET LaAnhBia=1 WHERE MaAnh=(
+           SELECT MaAnh FROM (SELECT MaAnh FROM AnhCoSo WHERE MaCoSo=? ORDER BY ThuTu, MaAnh LIMIT 1) t)`,
+        [coSo.maCoSo]);
+    }
+    duongDanXoa = anh.duongDan;
+  });
+  await xoaAnh(duongDanXoa);
+  return layAnhCoSo(maChuSan, coSo.maCoSo);
 }
 
 // Không truyền maCoSo → sân của TẤT CẢ cơ sở của chủ sân (kèm tên cơ sở).
@@ -517,6 +597,10 @@ module.exports = {
   layBangGiaCoSo,
   themKhungGia,
   capNhatAnhCoSo,
+  layAnhCoSo,
+  themAnhSan,
+  datAnhBia,
+  xoaAnhCoSo,
   layCoSo,
   layDanhSachCoSo,
   layCoSoTheoMa,

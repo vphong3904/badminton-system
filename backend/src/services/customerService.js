@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { doiGioRaPhut } = require('../utils/time');
+const { thuTuNgay } = require('../utils/giaTheoThu');
 const { taoAnhQrUrl, taoNoiDungQr, layTaiKhoanChuSan, layTaiKhoanNhanTheoDatSan } = require('../utils/vietqr');
 const { guiThongBao, dinhDangTien, baoDanhGiaMoi } = require('./notificationService');
 const { tinhLaiDiemCoSo } = require('./reviewService');
@@ -156,12 +157,12 @@ async function kiemTraKhungDat(san, ngay, gioBatDau, gioKetThuc, ketNoi = pool) 
 // Giá = tổng giá từng ô 30 phút (giá mỗi giờ / 2). Giá lấy theo bảng giá của cơ sở:
 // loại ngày (T2–T6 hoặc T7–CN) × loại khách (vãng lai / cố định) × khung giờ chứa ô đó.
 async function tinhTongTien(maCoSo, ngay, gioBatDau, gioKetThuc, loaiKhach, ketNoi = pool) {
-  const loaiNgay = [0, 6].includes(new Date(`${ngay}T00:00:00Z`).getUTCDay()) ? 'weekend' : 'weekday';
+  const thu = thuTuNgay(ngay);
   const [cacGia] = await ketNoi.query(
     `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc, GiaMoiGio AS giaMoiGio
-     FROM BangGia WHERE MaCoSo=? AND LoaiNgay=? AND LoaiKhach=?
+     FROM BangGia WHERE MaCoSo=? AND Thu=? AND LoaiKhach=?
      ORDER BY GioBatDau`,
-    [maCoSo, loaiNgay, loaiKhach]);
+    [maCoSo, thu, loaiKhach]);
   let tongTien = 0;
   for (let phut = doiGioRaPhut(gioBatDau); phut < doiGioRaPhut(gioKetThuc); phut += 30) {
     const gia = cacGia.find((khung) =>
@@ -570,8 +571,8 @@ function khoangCachMet(viDo1, kinhDo1, viDo2, kinhDo2) {
 function giaPhuHopKhoang(cacGia, boLoc, batDau, ketThuc, giaToiThieu, giaToiDa) {
   const trongKhoang = (gia) => gia >= giaToiThieu && gia <= giaToiDa;
   if (boLoc.ngay) {
-    const loaiNgay = [0, 6].includes(new Date(`${boLoc.ngay}T00:00:00Z`).getUTCDay()) ? 'weekend' : 'weekday';
-    const bang = cacGia.filter((g) => g.loaiNgay === loaiNgay);
+    const thu = thuTuNgay(boLoc.ngay);
+    const bang = cacGia.filter((g) => g.thu === thu);
     let tong = 0;
     for (let phut = batDau; phut < ketThuc; phut += 30) {
       const khung = bang.find((g) => doiGioRaPhut(String(g.gioBatDau).slice(0, 5)) <= phut
@@ -674,7 +675,7 @@ async function timCoSo(boLoc) {
   if (coGia && ketQua.length) {
     const cacMaCoSo = [...new Set(ketQua.map((san) => san.maCoSo))];
     const [bangGia] = await pool.query(
-      `SELECT MaCoSo AS maCoSo, LoaiNgay AS loaiNgay, GioBatDau AS gioBatDau,
+      `SELECT MaCoSo AS maCoSo, Thu AS thu, GioBatDau AS gioBatDau,
          GioKetThuc AS gioKetThuc, GiaMoiGio AS giaMoiGio
        FROM BangGia WHERE LoaiKhach='walk_in' AND MaCoSo IN (?)`,
       [cacMaCoSo]);
@@ -784,9 +785,9 @@ async function layChiTietSan(maSan) {
     [maSan]);
   if (!san) throw AppError.khongTimThay('Không tìm thấy sân đang hoạt động');
   const [bangGia] = await pool.query(
-    `SELECT LoaiNgay AS loaiNgay, LoaiKhach AS loaiKhach,
+    `SELECT Thu AS thu, LoaiNgay AS loaiNgay, LoaiKhach AS loaiKhach,
        GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc, GiaMoiGio AS giaMoiGio
-     FROM BangGia WHERE MaCoSo=? ORDER BY LoaiNgay, LoaiKhach, GioBatDau`,
+     FROM BangGia WHERE MaCoSo=? ORDER BY Thu, LoaiKhach, GioBatDau`,
     [san.maCoSo]);
   return { ...san, bangGia };
 }
@@ -821,12 +822,11 @@ async function layLichNgay(maCoSo, ngay) {
      FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
      WHERE s.MaCoSo=? AND k.NgayKhoa=?`,
     [maCoSo, ngay]);
-  const loaiNgay = [0, 6].includes(new Date(`${ngay}T00:00:00Z`).getUTCDay()) ? 'weekend' : 'weekday';
   const [bangGia] = await pool.query(
     `SELECT GioBatDau AS gioBatDau, GioKetThuc AS gioKetThuc, GiaMoiGio AS giaMoiGio
-     FROM BangGia WHERE MaCoSo=? AND LoaiNgay=? AND LoaiKhach='walk_in'
+     FROM BangGia WHERE MaCoSo=? AND Thu=? AND LoaiKhach='walk_in'
      ORDER BY GioBatDau`,
-    [maCoSo, loaiNgay]);
+    [maCoSo, thuTuNgay(ngay)]);
   const gioNgan = (gio) => String(gio).slice(0, 5);
   const khungBan = (danhSach, loai, maSan) => danhSach
     .filter((muc) => muc.maSan === maSan)
@@ -860,12 +860,16 @@ async function layLichNgay(maCoSo, ngay) {
 async function lietKeDatSan(maNguoiDung) {
   await hetHanDatSan(maNguoiDung);
   const moSomPhut = await layCauHinhSo(pool, 'checkin_open_minutes', 30);
+  const phutChamDuyet = await layCauHinhSo(pool, 'complaint_slow_confirm_minutes', 30);
   const [cacDon] = await pool.query(
     `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaLichCoDinh AS maLichCoDinh,
        d.NgayChoi AS ngay, d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
        d.TongTien AS tongTien, d.TrangThai AS trangThai, d.Nguon AS nguon,
        t.TrangThai AS trangThaiThanhToan,
-       t.NgayThanhToan AS ngayThanhToan,
+       t.NgayThanhToan AS ngayThanhToan, t.NgayGuiAnh AS ngayGuiAnh,
+       (t.TrangThai='confirming' AND t.NgayGuiAnh IS NOT NULL
+         AND t.NgayGuiAnh + INTERVAL ${Number(phutChamDuyet)} MINUTE <= NOW()) AS chamDuyet,
+       (t.TrangThai='confirming') AS dangChoDuyet,
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan,
        t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan, t.LyDoLoi AS lyDoLoi,
        d.TenKhach AS tenKhach, d.SoDienThoaiLienHe AS soDienThoaiLienHe,
@@ -905,7 +909,7 @@ async function lietKeDatSan(maNguoiDung) {
      WHERE d.MaKhachHang=? ORDER BY d.NgayChoi DESC, d.GioBatDau DESC`,
     [maNguoiDung]);
   return cacDon.map(({
-    maDanhGia, maKhieuNai, lyDoLoi, danhGiaBiAn, trongHanSuaDanhGia, coTheCheckIn, trongCuaSoCheckIn,
+    maDanhGia, maKhieuNai, lyDoLoi, danhGiaBiAn, chamDuyet, dangChoDuyet, trongHanSuaDanhGia, coTheCheckIn, trongCuaSoCheckIn,
     anhChungTuHoan, coTheXacNhanNhanHoan, ...don
   }) => {
     const daDanhGia = maDanhGia != null;
@@ -919,9 +923,11 @@ async function lietKeDatSan(maNguoiDung) {
       coTheCheckIn: !!Number(coTheCheckIn),
       trongCuaSoCheckIn: !!Number(trongCuaSoCheckIn),
       lyDoTuChoi,
-      // Nút "Khiếu nại chủ sân": luôn có với đơn đặt qua app, miễn chưa khiếu nại lần nào.
+      // Nút "Khiếu nại chủ sân": đơn đặt qua app chưa khiếu nại lần nào. Riêng đơn đang chờ chủ sân duyệt ảnh
+      // thì chỉ hiện khi quá hạn (mặc định 30 phút kể từ lúc gửi ảnh) → app ghi nhãn "Khiếu nại (Chậm duyệt)".
       daKhieuNai,
-      coTheKhieuNai: !daKhieuNai && don.nguon === 'app',
+      chamDuyet: !!Number(chamDuyet),
+      coTheKhieuNai: !daKhieuNai && don.nguon === 'app' && (!Number(dangChoDuyet) || !!Number(chamDuyet)),
       daDanhGia,
       soSaoDanhGia: daDanhGia ? Number(don.soSaoDanhGia) : null,
       // Buổi đang giữ đánh giá (chính đơn này, hoặc buổi khác cùng lịch cố định): FE sửa/xoá theo mã này.
@@ -936,6 +942,7 @@ async function lietKeDatSan(maNguoiDung) {
 
 async function layHoaDonNhap(maNguoiDung, maDatSan) {
   await hetHanDatSan(maNguoiDung);
+  const phutChamDuyet = await layCauHinhSo(pool, 'complaint_slow_confirm_minutes', 30);
   const [[hoaDon]] = await pool.query(
     `SELECT d.MaDatSan AS maDatSan, d.MaNhomDat AS maNhomDat, d.MaDon AS maDon, d.NgayChoi AS ngay,
        d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc, d.TongTien AS tongTien,
@@ -945,6 +952,8 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
        t.NoiDungChuyenKhoan AS noiDungChuyenKhoan, t.AnhChuyenKhoan AS anhChuyenKhoanUrl,
        t.NgayGuiAnh AS ngayGuiAnh, t.HanXacNhan AS hanXacNhan,
        TIMESTAMPDIFF(SECOND, NOW(), t.HanXacNhan) AS conLaiXacNhanGiay, t.LyDoLoi AS lyDoLoi,
+       (t.TrangThai='confirming' AND t.NgayGuiAnh IS NOT NULL
+         AND t.NgayGuiAnh + INTERVAL ${Number(phutChamDuyet)} MINUTE <= NOW()) AS chamDuyet,
        t.TrangThaiHoanTien AS trangThaiHoanTien, t.SoTienHoan AS soTienHoan
      FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
        WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
@@ -953,7 +962,9 @@ async function layHoaDonNhap(maNguoiDung, maDatSan) {
      WHERE d.MaDatSan=? AND d.MaKhachHang=?`,
     [maDatSan, maNguoiDung]);
   if (!hoaDon) throw AppError.khongTimThay('Không tìm thấy hóa đơn');
-  const { lyDoLoi, trangThaiHoanTien, soTienHoan, ...phanConLai } = hoaDon;
+  const { lyDoLoi, trangThaiHoanTien, soTienHoan, chamDuyet, ...phanConLai } = hoaDon;
+  phanConLai.chamDuyet = !!Number(chamDuyet); // quá hạn chủ sân duyệt → app hiện nút "Khiếu nại (Chậm duyệt)"
+  phanConLai.phutChamDuyet = phutChamDuyet;
   // G2: đã gửi ảnh (confirming) thì giữ chỗ vô thời hạn → hetHanGiuCho/conLaiGiay = null; app đếm ngược theo
   // hanXacNhan/conLaiXacNhanGiay (chỉ để khách biết chủ sân còn bao lâu để xem). Chứng từ = các ảnh khách đã gửi
   // (không có cảnh báo trùng ảnh: chỉ chủ sân/Admin thấy).

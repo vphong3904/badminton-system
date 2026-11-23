@@ -8,7 +8,7 @@ const cacTruyVan = [];
 const ketNoiGia = {
   async query(cauTruyVan, thamSo = []) {
     cacTruyVan.push({ cauTruyVan, thamSo });
-    if (/FROM BangGia/.test(cauTruyVan)) return [bangGia];
+    if (/FROM BangGia/.test(cauTruyVan)) return [bangGia.flatMap((d) => [1, 2, 3, 4, 5, 6, 7].map((thu) => ({ ...d, thu })))];
     if (/FROM CoSo cs JOIN San s/.test(cauTruyVan)) return [cacDong];
     throw new Error(`Chưa giả lập truy vấn: ${cauTruyVan}`);
   },
@@ -29,7 +29,7 @@ const coSo = (maCoSo, diem, viDo, kinhDo, them = {}) => ({
   viDo, kinhDo, diemTrungBinh: diem, soDanhGia: 3, maSan: maCoSo * 10, tenSan: 'San 1', ...them,
 });
 const bang = (maCoSo, gia) => ({
-  maCoSo, loaiNgay: 'weekday', gioBatDau: '05:00:00', gioKetThuc: '23:00:00', giaMoiGio: gia,
+  maCoSo, thu: 1, loaiNgay: 'weekday', gioBatDau: '05:00:00', gioKetThuc: '23:00:00', giaMoiGio: gia,
 });
 const ma = (ketQua) => ketQua.map((dong) => dong.maCoSo);
 

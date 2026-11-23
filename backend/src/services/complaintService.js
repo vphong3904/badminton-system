@@ -1,7 +1,11 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
-const { guiThongBao, guiChoQuanTri } = require('./notificationService');
+const { guiThongBao, guiChoQuanTri, rutGonVanBan } = require('./notificationService');
+
+// Số phút chủ sân chưa xác nhận (kể từ lúc khách gửi ảnh) thì khách mới được khiếu nại "Chậm duyệt".
+const PHUT_CHAM_DUYET_MAC_DINH = 30;
 const nhatKy = require('./nhatKyService');
+const { layCauHinhSo } = require('./cauHinhService');
 
 // Khiếu nại chủ sân.
 //  - Khách luôn có nút "Khiếu nại chủ sân" ở mọi đơn đặt qua app: đang chờ chủ sân duyệt ảnh chuyển khoản,
@@ -23,11 +27,32 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
   return thucHienGiaoDich(async (ketNoi) => {
     const [[don]] = await ketNoi.query(
       `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.TrangThai AS trangThai, d.TenKhach AS tenKhach,
-         s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan
+         DATE_FORMAT(d.NgayChoi, '%d/%m/%Y') AS ngayChoi, TIME_FORMAT(d.GioBatDau, '%H:%i') AS gioBatDau,
+         TIME_FORMAT(d.GioKetThuc, '%H:%i') AS gioKetThuc,
+         s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan,
+         DATE_FORMAT(NOW(), '%H:%i %d/%m/%Y') AS luc
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        WHERE d.MaDatSan=? AND d.MaKhachHang=? AND d.Nguon='app' FOR UPDATE`,
       [maDatSan, maKhachHang]);
     if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
+
+    // Đơn đã gửi ảnh và đang chờ chủ sân duyệt: chỉ được khiếu nại sau khi quá hạn (mặc định 30 phút) → "Chậm duyệt".
+    const phutChamDuyet = await layCauHinhSo(ketNoi, 'complaint_slow_confirm_minutes', PHUT_CHAM_DUYET_MAC_DINH);
+    const [[thanhToan]] = await ketNoi.query(
+      `SELECT t.TrangThai AS trangThai,
+         (t.NgayGuiAnh IS NOT NULL AND t.NgayGuiAnh + INTERVAL ? MINUTE <= NOW()) AS daQuaHan
+       FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
+         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
+         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
+       END
+       WHERE d.MaDatSan=?`, [phutChamDuyet, maDatSan]);
+    const dangChoDuyet = thanhToan?.trangThai === 'confirming';
+    if (dangChoDuyet && !Number(thanhToan.daQuaHan)) {
+      throw AppError.duLieuKhongHopLe(
+        `Chủ sân vẫn còn trong thời gian xác nhận. Nếu sau ${phutChamDuyet} phút chủ sân chưa duyệt, bạn có thể khiếu nại.`);
+    }
+    const chamDuyet = dangChoDuyet;
+    const noiDungLuu = chamDuyet && !noiDung.startsWith('[Chậm duyệt]') ? `[Chậm duyệt] ${noiDung}` : noiDung;
     const [[daCo]] = await ketNoi.query(
       'SELECT MaKhieuNai AS maKhieuNai FROM KhieuNai WHERE MaDatSan=?', [maDatSan]);
     if (daCo) throw AppError.biTrung('Bạn đã khiếu nại đơn này rồi.');
@@ -39,7 +64,7 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
     const [ketQua] = await ketNoi.query(
       `INSERT INTO KhieuNai (MaDatSan, MaKhachHang, MaChuSan, MaCoSo, GiaiDoan, NoiDung)
        VALUES (?,?,?,?,?,?)`,
-      [maDatSan, maKhachHang, don.maChuSan, don.maCoSo, giaiDoanLuu, noiDung]);
+      [maDatSan, maKhachHang, don.maChuSan, don.maCoSo, giaiDoanLuu, noiDungLuu]);
     const maKhieuNai = ketQua.insertId;
 
     await guiThongBao(ketNoi, {
@@ -55,17 +80,20 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
     await guiThongBao(ketNoi, {
       maNguoiDung: don.maChuSan,
       loai: 'complaint_received',
-      tieuDe: 'Bạn nhận được một khiếu nại',
-      noiDung: `${don.tenKhach} khiếu nại về đơn ${don.maDon} (${don.tenCoSo}). `
-        + 'Quản trị viên sẽ xem xét; khiếu nại được xác nhận đúng sẽ bị cảnh cáo, đủ 3 lần sẽ khoá tài khoản.',
+      tieuDe: chamDuyet ? 'Khiếu nại: bạn chưa duyệt đơn quá hạn' : 'Bạn nhận được một khiếu nại',
+      noiDung: `${don.tenKhach} khiếu nại${chamDuyet ? ' (chậm duyệt)' : ''} lúc ${don.luc}. `
+        + `Cơ sở: ${don.tenCoSo}. Đơn ${don.maDon} (${don.tenSan}, ${don.ngayChoi} ${don.gioBatDau}-${don.gioKetThuc}). `
+        + `Lý do: ${rutGonVanBan(noiDung, 170)}`,
       loaiThamChieu: 'complaint',
       maThamChieu: maKhieuNai,
       khoa: `complaint_owner:${maKhieuNai}`,
     });
     await guiChoQuanTri(ketNoi, {
       loai: 'complaint_received',
-      tieuDe: 'Khiếu nại mới cần xử lý',
-      noiDung: `${don.tenKhach} khiếu nại chủ sân của ${don.tenCoSo} (đơn ${don.maDon}).`,
+      tieuDe: chamDuyet ? 'Khiếu nại mới (chậm duyệt) cần xử lý' : 'Khiếu nại mới cần xử lý',
+      noiDung: `${don.tenKhach} khiếu nại${chamDuyet ? ' (chậm duyệt)' : ''} chủ sân lúc ${don.luc}. `
+        + `Cơ sở: ${don.tenCoSo}. Đơn ${don.maDon} (${don.tenSan}, ${don.ngayChoi} ${don.gioBatDau}-${don.gioKetThuc}). `
+        + `Lý do: ${rutGonVanBan(noiDung, 170)}`,
       loaiThamChieu: 'complaint',
       maThamChieu: maKhieuNai,
       khoa: `complaint_admin:${maKhieuNai}`,

@@ -34,7 +34,7 @@ test('Đăng ký: mỗi luật FE-20 đều bị BE chặn với đúng thông b
     [{ matKhau: '1234567' }, 'Mật khẩu phải có ít nhất 8 ký tự.'],
     [{ matKhau: 'abcdefgh' }, 'Mật khẩu cần có cả chữ và số.'],
     [{ matKhau: 'abc 12345' }, 'Mật khẩu không được chứa khoảng trắng.'],
-    [{ matKhau: `a1${'x'.repeat(71)}` }, 'Mật khẩu tối đa 72 ký tự.'],
+    [{ matKhau: `a1${'x'.repeat(63)}` }, 'Mật khẩu tối đa 64 ký tự.'],
   ];
   for (const [ghiDe, thongBao] of cacCa) {
     assert.deepEqual(loi(auth.dangKy.body, { ...dangKyHopLe, ...ghiDe }), [thongBao], JSON.stringify(ghiDe));

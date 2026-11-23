@@ -404,7 +404,17 @@ module.exports = {
       put: endpoint('Cập nhật bảng giá của 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, body: 'BangGia' }),
     },
     '/api/chu-san/co-so/{maCoSo}/anh': {
-      post: endpoint('Tải ảnh cho 1 cơ sở', 'Chủ sân', { auth: true, params: maCoSo, upload: true }),
+      get: endpoint('Thư viện ảnh của cơ sở: cacAnh[{maAnh, duongDan, laAnhBia}] (ảnh bìa đầu tiên), soAnhToiDa', 'Chủ sân', { auth: true, params: maCoSo }),
+      post: endpoint('Đổi ảnh bìa của cơ sở (ảnh cũ giữ lại trong thư viện)', 'Chủ sân', { auth: true, params: maCoSo, upload: true }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/anh-san': {
+      post: endpoint('Thêm ảnh sân vào thư viện (không đổi ảnh bìa; tối đa 12 ảnh/cơ sở). Trả thư viện ảnh mới', 'Chủ sân', { auth: true, params: maCoSo, upload: true }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/anh/{maAnh}/bia': {
+      patch: endpoint('Đặt 1 ảnh trong thư viện làm ảnh bìa', 'Chủ sân', { auth: true }),
+    },
+    '/api/chu-san/co-so/{maCoSo}/anh/{maAnh}': {
+      delete: endpoint('Xoá 1 ảnh khỏi thư viện (xoá ảnh bìa thì ảnh đầu tiên còn lại thành ảnh bìa)', 'Chủ sân', { auth: true }),
     },
     '/api/chu-san/san': {
       get: endpoint('Liệt kê sân của mọi cơ sở (lọc ?maCoSo)', 'Chủ sân', {
@@ -830,7 +840,7 @@ module.exports = {
         type: 'object',
         required: ['matKhau', 'hoTen', 'soDienThoai', 'email'],
         properties: {
-          matKhau: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng', example: 'MatKhau123' },
+          matKhau: { type: 'string', format: 'password', minLength: 8, maxLength: 64, description: 'Có cả chữ và số, không khoảng trắng', example: 'MatKhau123' },
           hoTen: { type: 'string', minLength: 2, maxLength: 100, description: 'Chỉ chữ cái, khoảng trắng và . \' -', example: 'Nguyen Van A' },
           soDienThoai: { type: 'string', pattern: '^0[35789][0-9]{8}$', description: 'Số di động VN; nhận cả +84 và tự chuẩn hoá về 0xxxxxxxxx', example: '0901234567' },
           email: { type: 'string', format: 'email', example: 'khach@example.com' },
@@ -846,7 +856,7 @@ module.exports = {
           tenDoanhNghiep: { type: 'string', minLength: 2, maxLength: 150, example: 'Công ty TNHH Thể thao ABC' },
           maNganHang: { type: 'string', description: 'Mã ngân hàng lấy từ GET /api/tai-khoan/ngan-hang (BE tự điền tên ngân hàng)', example: 'MB' },
           soTaiKhoan: { type: 'string', pattern: '^[0-9]{6,20}$', example: '0123456789' },
-          matKhau: { type: 'string', format: 'password', minLength: 8, maxLength: 72, example: 'MatKhau123' },
+          matKhau: { type: 'string', format: 'password', minLength: 8, maxLength: 64, example: 'MatKhau123' },
           xacNhanMatKhau: { type: 'string', format: 'password', description: 'Phải trùng matKhau', example: 'MatKhau123' },
         },
       },
@@ -868,7 +878,7 @@ module.exports = {
         required: ['matKhauCu', 'matKhauMoi'],
         properties: {
           matKhauCu: { type: 'string', format: 'password' },
-          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 72, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu' },
+          matKhauMoi: { type: 'string', format: 'password', minLength: 8, maxLength: 64, description: 'Có cả chữ và số, không khoảng trắng, khác matKhauCu' },
         },
       },
       CapNhatCaNhan: {
@@ -1059,14 +1069,23 @@ module.exports = {
             type: 'array',
             items: {
               type: 'object',
-              required: [
-                'gioBatDau', 'gioKetThuc', 'giaNgayThuongKhachVangLai',
-                'giaNgayThuongKhachCoDinh', 'giaCuoiTuanKhachVangLai',
-                'giaCuoiTuanKhachCoDinh',
-              ],
+              required: ['gioBatDau', 'gioKetThuc'],
               properties: {
                 gioBatDau: { type: 'string', example: '06:00' },
                 gioKetThuc: { type: 'string', example: '12:00' },
+                giaTheoThu: {
+                  type: 'array',
+                  description: 'Giá riêng từng thứ (đủ 7 phần tử, thu 1 = Thứ 2 … 7 = Chủ nhật). Nếu thiếu, gửi 4 trường giá cũ (T2–T6 / T7–CN).',
+                  items: {
+                    type: 'object',
+                    required: ['thu', 'giaKhachVangLai', 'giaKhachCoDinh'],
+                    properties: {
+                      thu: { type: 'integer', minimum: 1, maximum: 7, example: 6 },
+                      giaKhachVangLai: { type: 'integer', example: 100000 },
+                      giaKhachCoDinh: { type: 'integer', example: 90000 },
+                    },
+                  },
+                },
                 giaNgayThuongKhachVangLai: { type: 'integer', example: 80000 },
                 giaNgayThuongKhachCoDinh: { type: 'integer', example: 70000 },
                 giaCuoiTuanKhachVangLai: { type: 'integer', example: 100000 },
@@ -1078,13 +1097,23 @@ module.exports = {
       },
       KhungGia: {
         type: 'object',
-        required: [
-          'gioBatDau', 'gioKetThuc', 'giaNgayThuongKhachVangLai',
-          'giaNgayThuongKhachCoDinh', 'giaCuoiTuanKhachVangLai', 'giaCuoiTuanKhachCoDinh',
-        ],
+        required: ['gioBatDau', 'gioKetThuc'],
         properties: {
           gioBatDau: { type: 'string', example: '18:00' },
           gioKetThuc: { type: 'string', example: '21:00' },
+          giaTheoThu: {
+            type: 'array',
+            description: 'Giá riêng từng thứ (đủ 7 phần tử, thu 1 = Thứ 2 … 7 = Chủ nhật). Nếu thiếu, gửi 4 trường giá cũ (T2–T6 / T7–CN).',
+            items: {
+              type: 'object',
+              required: ['thu', 'giaKhachVangLai', 'giaKhachCoDinh'],
+              properties: {
+                thu: { type: 'integer', minimum: 1, maximum: 7, example: 6 },
+                giaKhachVangLai: { type: 'integer', example: 100000 },
+                giaKhachCoDinh: { type: 'integer', example: 90000 },
+              },
+            },
+          },
           giaNgayThuongKhachVangLai: { type: 'integer', example: 120000 },
           giaNgayThuongKhachCoDinh: { type: 'integer', example: 100000 },
           giaCuoiTuanKhachVangLai: { type: 'integer', example: 140000 },

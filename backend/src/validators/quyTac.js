@@ -73,7 +73,7 @@ function kiemTraMatKhauMoi(giaTri) {
   const chu = String(giaTri ?? '');
   if (!chu) return 'Vui lòng nhập mật khẩu.';
   if (chu.length < 8) return 'Mật khẩu phải có ít nhất 8 ký tự.';
-  if (chu.length > 72) return 'Mật khẩu tối đa 72 ký tự.';
+  if (chu.length > 64) return 'Mật khẩu tối đa 64 ký tự.';
   if (/\s/.test(chu)) return 'Mật khẩu không được chứa khoảng trắng.';
   if (!/[A-Za-z]/.test(chu) || !/\d/.test(chu)) return 'Mật khẩu cần có cả chữ và số.';
   return null;
@@ -99,6 +99,17 @@ const tenKhachDat = tuHamKiem(kiemTraTenKhachDat, (g) => g.trim(), 'Vui lòng nh
 const email = tuHamKiem(kiemTraEmail, (g) => g.trim().toLowerCase(), 'Vui lòng nhập email.');
 const soDienThoaiDiDong = tuHamKiem(kiemTraSoDiDong, chuanHoaSoDienThoai, 'Vui lòng nhập số điện thoại.');
 const soDienThoaiLienHe = tuHamKiem(kiemTraSoLienHe, chuanHoaSoDienThoai, 'Vui lòng nhập số điện thoại.');
+// SĐT phụ của chủ sân: không bắt buộc (rỗng/null = xoá số phụ), nếu có thì phải là số di động 10 số.
+const soDienThoaiPhu = z.union([z.string(), z.null()]).optional().transform((g, nguCanh) => {
+  const chu = String(g ?? '').trim();
+  if (!chu) return null;
+  const loi = kiemTraSoDiDong(chu);
+  if (loi) {
+    nguCanh.addIssue({ code: 'custom', message: loi.replace('Vui lòng nhập số điện thoại.', 'Số điện thoại phụ không hợp lệ.') });
+    return z.NEVER;
+  }
+  return chuanHoaSoDienThoai(chu);
+});
 const matKhauMoi = tuHamKiem(kiemTraMatKhauMoi, (g) => g, 'Vui lòng nhập mật khẩu.');
 const ghiChu = tuHamKiem(kiemTraGhiChu, (g) => g.trim(), 'Ghi chú tối đa 500 ký tự.');
 
@@ -111,6 +122,7 @@ module.exports = {
   email,
   soDienThoaiDiDong,
   soDienThoaiLienHe,
+  soDienThoaiPhu,
   matKhauMoi,
   ghiChu,
 };

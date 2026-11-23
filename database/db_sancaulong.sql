@@ -23,7 +23,8 @@ CREATE TABLE NguoiDung (
   MaNguoiDung   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   HoTen         VARCHAR(100) NOT NULL,
   Email         VARCHAR(150) NOT NULL,
-  SoDienThoai   VARCHAR(20),
+  SoDienThoai   VARCHAR(20) COMMENT 'SĐT chính (chủ sân bắt buộc)',
+  SoDienThoaiPhu VARCHAR(20) NULL COMMENT 'SĐT phụ, chỉ chủ sân dùng, không bắt buộc (tối đa 2 số/chủ sân)',
   MatKhauMaHoa  VARCHAR(255) NOT NULL,
   VaiTro        ENUM('customer','owner','admin') NOT NULL DEFAULT 'customer',
   AnhDaiDien    VARCHAR(255) NOT NULL DEFAULT '/tep-tai-len/avatar/default-user.jpg'
@@ -147,7 +148,8 @@ CREATE TABLE KhoaSan (
 CREATE TABLE BangGia (
   MaBangGia    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaCoSo       INT UNSIGNED NOT NULL,
-  LoaiNgay     ENUM('weekday','weekend') NOT NULL COMMENT 'T2-T6 / T7-CN',
+  Thu          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '1=Thứ 2 … 7=Chủ nhật; 0 = dòng chưa tách thứ (seed), sẽ được nhân ra 7 thứ',
+  LoaiNgay     ENUM('weekday','weekend') NOT NULL COMMENT 'T2-T6 / T7-CN (suy ra từ Thu, giữ để tương thích)',
   LoaiKhach    ENUM('walk_in','fixed') NOT NULL DEFAULT 'walk_in',
   GioBatDau    TIME NOT NULL,
   GioKetThuc   TIME NOT NULL,
@@ -155,7 +157,9 @@ CREATE TABLE BangGia (
   CONSTRAINT FK_BangGia_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   CONSTRAINT CHK_BangGia_Gio CHECK (GioKetThuc > GioBatDau),
   CONSTRAINT CHK_BangGia_Gia CHECK (GiaMoiGio >= 0),
-  KEY IDX_BangGia_CoSo (MaCoSo)
+  CONSTRAINT CHK_BangGia_Thu CHECK (Thu BETWEEN 0 AND 7),
+  KEY IDX_BangGia_CoSo (MaCoSo),
+  KEY IDX_BangGia_CoSo_Thu (MaCoSo, Thu, LoaiKhach)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------

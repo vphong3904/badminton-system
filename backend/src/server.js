@@ -17,7 +17,7 @@ async function khoiDongServer() {
 
         // Khởi động API sau khi DB kết nối thành công
         ungDung.listen(cauHinh.cong, '0.0.0.0', () => {
-            console.log(`🚀 API chạy tại port ${cauHinh.cong}`);
+            console.log(`🚀 API chạy tại port: htttp://localhost${cauHinh.cong}/api-docs`);
         });
 
         // Job nền: đơn confirmed đã qua giờ chơi → completed + nhắc khách đánh giá.

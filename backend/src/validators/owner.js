@@ -28,18 +28,39 @@ const coSo = z.object({
   path: ['gioDongCua'],
 });
 
+const giaMoiGio = z.number().int().min(0).max(10_000_000);
+// Giá riêng cho từng thứ: thu 1 = Thứ 2 … 7 = Chủ nhật.
+const giaMotThu = z.object({
+  thu: z.number().int().min(1).max(7),
+  giaKhachVangLai: giaMoiGio,
+  giaKhachCoDinh: giaMoiGio,
+});
+// Một khung giờ: gửi `giaTheoThu` (7 thứ riêng biệt) HOẶC 4 trường cũ (T2–T6 / T7–CN, tương thích API cũ).
 const khungGia = z.object({
   gioBatDau: gioPhut,
   gioKetThuc: gioPhut,
-  giaNgayThuongKhachVangLai: z.number().int().min(0).max(10_000_000),
-  giaNgayThuongKhachCoDinh: z.number().int().min(0).max(10_000_000),
-  giaCuoiTuanKhachVangLai: z.number().int().min(0).max(10_000_000),
-  giaCuoiTuanKhachCoDinh: z.number().int().min(0).max(10_000_000),
+  giaTheoThu: z.array(giaMotThu).length(7, 'Phải có đủ giá cho 7 thứ').optional(),
+  giaNgayThuongKhachVangLai: giaMoiGio.optional(),
+  giaNgayThuongKhachCoDinh: giaMoiGio.optional(),
+  giaCuoiTuanKhachVangLai: giaMoiGio.optional(),
+  giaCuoiTuanKhachCoDinh: giaMoiGio.optional(),
+}).superRefine((khung, ctx) => {
+  if (khung.giaTheoThu) {
+    const cacThu = new Set(khung.giaTheoThu.map((g) => g.thu));
+    if (cacThu.size !== 7) ctx.addIssue({ code: 'custom', path: ['giaTheoThu'], message: 'Mỗi thứ (1–7) chỉ xuất hiện một lần' });
+    return;
+  }
+  const cu = [khung.giaNgayThuongKhachVangLai, khung.giaNgayThuongKhachCoDinh,
+    khung.giaCuoiTuanKhachVangLai, khung.giaCuoiTuanKhachCoDinh];
+  if (cu.some((g) => g === undefined)) {
+    ctx.addIssue({ code: 'custom', path: ['giaTheoThu'], message: 'Cần giaTheoThu (7 thứ) hoặc đủ 4 trường giá T2–T6 / T7–CN' });
+  }
 });
 
 exports.coSo = { body: coSo };
 const maCoSoTrongDuongDan = z.object({ maCoSo: maSo });
 exports.maCoSo = { params: maCoSoTrongDuongDan };
+exports.anhCoSo = { params: z.object({ maCoSo: maSo, maAnh: maSo }) };
 exports.capNhatCoSoTheoMa = { params: maCoSoTrongDuongDan, body: coSo };
 // Thêm MỘT khung giá tuỳ chỉnh vào cơ sở (trang quản lý bảng giá → nút "Thêm bảng giá").
 exports.themKhungGia = { params: maCoSoTrongDuongDan, body: khungGia };

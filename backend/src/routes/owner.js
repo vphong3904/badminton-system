@@ -40,6 +40,11 @@ dinhTuyen.put('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGiaTheoM
 dinhTuyen.get('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layBangGiaCoSo);
 dinhTuyen.post('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.themKhungGia), dieuKhien.themKhungGia);
 dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
+// Thư viện ảnh: ảnh bìa + nhiều ảnh sân. POST /anh = đổi ảnh bìa (giữ ảnh cũ trong thư viện); POST /anh-san = thêm ảnh sân.
+dinhTuyen.get('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layAnhCoSo);
+dinhTuyen.post('/co-so/:maCoSo/anh-san', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.themAnhSan);
+dinhTuyen.patch('/co-so/:maCoSo/anh/:maAnh/bia', kiemTraHopLe(kiemTraDuLieu.anhCoSo), dieuKhien.datAnhBia);
+dinhTuyen.delete('/co-so/:maCoSo/anh/:maAnh', kiemTraHopLe(kiemTraDuLieu.anhCoSo), dieuKhien.xoaAnhCoSo);
 // Đóng tạm / mở lại / xoá cơ sở: đóng & xoá chỉ khi không còn khách đặt (đơn hiện tại, lịch cố định); xoá phải đóng trước.
 dinhTuyen.patch('/co-so/:maCoSo/dong', kiemTraHopLe(kiemTraDuLieu.dongXoaCoSo), dieuKhien.dongCoSo);
 dinhTuyen.patch('/co-so/:maCoSo/mo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.moCoSo);

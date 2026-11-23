@@ -1654,3 +1654,14 @@ VALUES
 -- SELECT 'DanhGia', COUNT(*) FROM DanhGia;
 -- Hoan tat import schema
 
+
+-- Bảng giá THEO TỪNG THỨ: các dòng cũ chỉ có LoaiNgay (Thu = 0) được nhân ra từng thứ riêng.
+--   weekday → Thu 1..5 (T2–T6), weekend → Thu 6..7 (T7, CN). Chạy lại nhiều lần vẫn an toàn.
+INSERT INTO BangGia (MaCoSo, Thu, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio)
+SELECT b.MaCoSo, t.Thu, b.LoaiNgay, b.LoaiKhach, b.GioBatDau, b.GioKetThuc, b.GiaMoiGio
+FROM BangGia b
+JOIN (SELECT 1 AS Thu UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+      UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7) t
+  ON (b.LoaiNgay = 'weekday' AND t.Thu <= 5) OR (b.LoaiNgay = 'weekend' AND t.Thu >= 6)
+WHERE b.Thu = 0;
+DELETE FROM BangGia WHERE Thu = 0;

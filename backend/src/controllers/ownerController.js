@@ -33,6 +33,15 @@ exports.capNhatAnhCoSo = xuLy((yeuCau) => {
   if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
   return dichVu.capNhatAnhCoSo(layMaChuSan(yeuCau), yeuCau.file, layMaCoSo(yeuCau));
 });
+exports.layAnhCoSo = xuLy((yeuCau) => dichVu.layAnhCoSo(layMaChuSan(yeuCau), layMaCoSo(yeuCau)));
+exports.themAnhSan = xuLy((yeuCau) => {
+  if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
+  return dichVu.themAnhSan(layMaChuSan(yeuCau), yeuCau.file, layMaCoSo(yeuCau));
+}, daTao);
+exports.datAnhBia = xuLy((yeuCau) =>
+  dichVu.datAnhBia(layMaChuSan(yeuCau), layMaCoSo(yeuCau), yeuCau.params.maAnh));
+exports.xoaAnhCoSo = xuLy((yeuCau) =>
+  dichVu.xoaAnhCoSo(layMaChuSan(yeuCau), layMaCoSo(yeuCau), yeuCau.params.maAnh));
 exports.lietKeSan = xuLy((yeuCau) => dichVu.lietKeSan(layMaChuSan(yeuCau), yeuCau.query.maCoSo));
 exports.taoSan = xuLy((yeuCau) => dichVu.taoSan(layMaChuSan(yeuCau), yeuCau.body), daTao);
 exports.capNhatSan = xuLy((yeuCau) =>

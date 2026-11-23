@@ -22,6 +22,7 @@ function taoThongTinNguoiDung(nguoiDung) {
   };
   if (nguoiDung.vaiTro === 'owner') {
     thongTin.trangThaiDuyet = nguoiDung.trangThaiDuyet;
+    thongTin.soDienThoaiPhu = nguoiDung.soDienThoaiPhu ?? null; // chủ sân có tối đa 2 SĐT: chính + phụ
     thongTin.tenDoanhNghiep = nguoiDung.tenDoanhNghiep ?? null;
     thongTin.lyDoTuChoi = nguoiDung.lyDoTuChoi ?? null;
     // Chưa được duyệt vẫn đăng nhập bình thường; web hiện thông báo này thay cho chức năng quản lý.
@@ -109,8 +110,8 @@ async function dangNhap(email, matKhau, cacVaiTroDuocPhep) {
 async function layNguoiDung(maNguoiDung) {
   const [[nguoiDung]] = await pool.query(
     `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro,
-       nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.Email AS email,
-       nd.TrangThai AS trangThai, nd.AnhDaiDien AS anhDaiDien, hs.TrangThaiDuyet AS trangThaiDuyet,
+       nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.SoDienThoaiPhu AS soDienThoaiPhu,
+       nd.Email AS email, nd.TrangThai AS trangThai, nd.AnhDaiDien AS anhDaiDien, hs.TrangThaiDuyet AS trangThaiDuyet,
        hs.TenDoanhNghiep AS tenDoanhNghiep, hs.LyDoTuChoi AS lyDoTuChoi
      FROM NguoiDung nd
      LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung = nd.MaNguoiDung
@@ -124,10 +125,24 @@ async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
   const cotDuocCapNhat = {
     hoTen: 'HoTen',
     soDienThoai: 'SoDienThoai',
+    soDienThoaiPhu: 'SoDienThoaiPhu',
     email: 'Email',
   };
   const cacTruongCapNhat = Object.keys(duLieuCapNhat)
     .filter((truong) => cotDuocCapNhat[truong]);
+  if (duLieuCapNhat.soDienThoaiPhu !== undefined) {
+    const [[vaiTroHienTai]] = await pool.query(
+      'SELECT VaiTro AS vaiTro, SoDienThoai AS soDienThoai FROM NguoiDung WHERE MaNguoiDung = ?', [maNguoiDung]);
+    if (!vaiTroHienTai || vaiTroHienTai.vaiTro !== 'owner') {
+      throw AppError.khongDuQuyen('Chỉ chủ sân mới có số điện thoại phụ');
+    }
+    const soChinh = chuanHoaSoDienThoai(duLieuCapNhat.soDienThoai ?? vaiTroHienTai.soDienThoai);
+    if (duLieuCapNhat.soDienThoaiPhu && duLieuCapNhat.soDienThoaiPhu === soChinh) {
+      throw AppError.duLieuKhongHopLe('Dữ liệu không hợp lệ', [
+        { truong: 'soDienThoaiPhu', thongBao: 'Số điện thoại phụ phải khác số chính.' },
+      ]);
+    }
+  }
   if (duLieuCapNhat.soDienThoai !== undefined) {
     // Chỉ khi ĐỔI số mới bắt buộc số di động (FE: edit_profile_screen). Giữ nguyên số cũ thì không kiểm lại.
     const [[hienTai]] = await pool.query(

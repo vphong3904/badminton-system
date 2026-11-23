@@ -71,5 +71,6 @@ exports.capNhatThongTinCaNhan = {
     // nếu SĐT bị ĐỔI thì authService bắt buộc số di động (giống FE edit_profile_screen).
     soDienThoai: quyTac.soDienThoaiLienHe,
     email: quyTac.email,
+    soDienThoaiPhu: quyTac.soDienThoaiPhu, // chỉ chủ sân (authService chặn vai trò khác)
   }).partial().refine((duLieu) => Object.keys(duLieu).length > 0, 'Không có dữ liệu cập nhật'),
 };

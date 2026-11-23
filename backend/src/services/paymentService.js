@@ -296,9 +296,10 @@ async function xacNhanThanhToan(maNguoiDung, maDatSan, vaiTro = 'owner') {
     await guiThongBao(ketNoi, {
       maNguoiDung: thanhToan.maKhachHang,
       loai: 'payment_success',
-      tieuDe: 'Đơn đặt sân đã được duyệt',
-      noiDung: `Chủ sân đã xác nhận thanh toán ${dinhDangTien(thanhToan.soTien)} cho ${thanhToan.tenSan} - `
-        + `${thanhToan.tenCoSo} (mã ${thanhToan.maDon}). Sân đã được giữ cho bạn.`,
+      tieuDe: 'Chủ sân đã xác nhận đơn của bạn',
+      noiDung: `Chủ sân đã xác nhận đơn ${thanhToan.maDon} của bạn đã được thanh toán `
+        + `(${dinhDangTien(thanhToan.soTien)}) cho ${thanhToan.tenSan} - ${thanhToan.tenCoSo}. `
+        + 'Sân đã được giữ cho bạn.',
       loaiThamChieu: 'booking',
       maThamChieu: thanhToan.maDatSan,
       khoa: `payment_success:${thanhToan.maThanhToan}`,
