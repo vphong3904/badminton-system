@@ -127,6 +127,20 @@ async function capNhatTaiKhoanNhan(ketNoi, maThanhToan, taiKhoan) {
     [taiKhoan.tenNganHang, taiKhoan.maNganHang, taiKhoan.soTaiKhoan, taiKhoan.chuTaiKhoan, maThanhToan]);
 }
 
+// Có khiếu nại hoàn tiền đang chờ cho khoản này → báo Admin diễn biến mới (chủ sân đã hoàn / khách đã nhận) để xử lý đúng.
+async function baoAdminKhieuNaiHoan(ketNoi, maHoanTien, maLoai, tieuDe, noiDung) {
+  const [cacKn] = await ketNoi.query(
+    "SELECT MaKhieuNai AS ma FROM KhieuNai WHERE MaHoanTien=? AND Loai='refund' AND TrangThai='pending'", [maHoanTien]);
+  const lan = cacKn.length ? await soLanDaHoan(ketNoi, maHoanTien) : 0; // mỗi lần hoàn lại sau "chưa nhận" cần thông báo mới
+  for (const { ma } of cacKn) {
+    await guiChoQuanTri(ketNoi, {
+      loai: 'complaint_received', tieuDe,
+      noiDung: `Khiếu nại KN${String(ma).padStart(6, '0')}: ${noiDung}`,
+      loaiThamChieu: 'complaint', maThamChieu: ma, khoa: `complaint_refund_update:${ma}:${maLoai}:${lan}`,
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Ảnh chứng từ hoàn: bắt buộc, đúng ảnh JPG/PNG/WEBP (file multer đã lưu ở uploads/). Lỗi → xoá file vừa nhận.
 async function kiemTraAnhChungTu(tep) {
@@ -173,6 +187,8 @@ async function danhDauDaHoan(ketNoi, { maHoanTien, nguoi, duongDanAnh }) {
     maThamChieu: moi.maDatSan,
     khoa: `refund_completed:${maHoanTien}:${await soLanDaHoan(ketNoi, maHoanTien)}`,
   });
+  await baoAdminKhieuNaiHoan(ketNoi, maHoanTien, 'refunded', 'Chủ sân đã hoàn tiền, chờ khách xác nhận',
+    `[${nguoi.vaiTro}] đã chuyển hoàn ${dinhDangTien(moi.soTien)} kèm ảnh chứng từ cho đơn ${ben.maDon}. Chờ khách bấm "Đã nhận lại" rồi bác bỏ/đóng khiếu nại.`);
   return { maHoanTien: Number(maHoanTien), maThanhToan: moi.maThanhToan, trangThaiHoanTien: 'refunded',
     anhChungTuUrl: moi.anhChungTu };
 }
@@ -209,6 +225,8 @@ async function khachXacNhan(ketNoi, maKhach, maHoanTien) {
     maThamChieu: hoanTien.maThanhToan,
     khoa: `refund_received:${maHoanTien}`,
   });
+  await baoAdminKhieuNaiHoan(ketNoi, maHoanTien, 'received', 'Khách đã xác nhận nhận được tiền hoàn',
+    `khách xác nhận đã nhận ${dinhDangTien(hoanTien.soTien)} của đơn ${ben.maDon}. Có thể bác bỏ khiếu nại để đóng vụ việc.`);
   return { maHoanTien: Number(maHoanTien), trangThaiHoanTien: 'received' };
 }
 

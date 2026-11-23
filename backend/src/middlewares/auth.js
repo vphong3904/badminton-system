@@ -6,12 +6,12 @@ const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thongBaoTheoTrangThai, MA_LOI_THEO_TRANG_THAI } = require('../utils/hoSoChuSan');
 const { thongBaoTaiKhoanBiKhoa, MA_LOI_BI_KHOA } = require('../utils/taiKhoanBiKhoa');
 
-const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
-  const ketQuaUyQuyen = /^Bearer\s+(.+)$/i.exec(yeuCau.headers.authorization || '');
-  if (!ketQuaUyQuyen) throw AppError.chuaDangNhap();
+// Xác thực chuỗi JWT → bản ghi người dùng (kiểm tồn tại + không bị khóa). Dùng chung cho REST và Socket.IO.
+// Trả { nguoiDung, thongTinToken } (thongTinToken.exp = hạn token, giây).
+async function xacThucToken(token) {
   let thongTinToken;
   try {
-    thongTinToken = jwt.verify(ketQuaUyQuyen[1], cauHinh.khoaBiMat);
+    thongTinToken = jwt.verify(token, cauHinh.khoaBiMat);
   } catch {
     throw AppError.chuaDangNhap('Token không hợp lệ hoặc đã hết hạn');
   }
@@ -23,6 +23,13 @@ const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
   if (nguoiDung.trangThai === 'locked') {
     throw new AppError(403, thongBaoTaiKhoanBiKhoa(nguoiDung.lyDoKhoa), MA_LOI_BI_KHOA);
   }
+  return { nguoiDung, thongTinToken };
+}
+
+const xacThucNguoiDung = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => {
+  const ketQuaUyQuyen = /^Bearer\s+(.+)$/i.exec(yeuCau.headers.authorization || '');
+  if (!ketQuaUyQuyen) throw AppError.chuaDangNhap();
+  const { nguoiDung } = await xacThucToken(ketQuaUyQuyen[1]);
   yeuCau.nguoiDung = nguoiDung;
   goiTiep();
 });
@@ -48,4 +55,4 @@ const kiemTraChuSanDaDuyet = xuLyBatDongBo(async (yeuCau, _phanHoi, goiTiep) => 
   goiTiep();
 });
 
-module.exports = { xacThucNguoiDung, kiemTraVaiTro, kiemTraChuSanDaDuyet };
+module.exports = { xacThucToken, xacThucNguoiDung, kiemTraVaiTro, kiemTraChuSanDaDuyet };

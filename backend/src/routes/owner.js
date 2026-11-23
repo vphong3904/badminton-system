@@ -40,9 +40,9 @@ dinhTuyen.put('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGiaTheoM
 dinhTuyen.get('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layBangGiaCoSo);
 dinhTuyen.post('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.themKhungGia), dieuKhien.themKhungGia);
 dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
-// Thư viện ảnh: ảnh bìa + nhiều ảnh sân. POST /anh = đổi ảnh bìa (giữ ảnh cũ trong thư viện); POST /anh-san = thêm ảnh sân.
+// Thư viện ảnh: ảnh bìa + nhiều ảnh sân. POST /anh = đổi ảnh bìa (giữ ảnh cũ trong thư viện); POST /anh-san = thêm 1 hoặc nhiều ảnh sân (field `tepAnh` lặp lại, tối đa 12 file/lần).
 dinhTuyen.get('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layAnhCoSo);
-dinhTuyen.post('/co-so/:maCoSo/anh-san', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.themAnhSan);
+dinhTuyen.post('/co-so/:maCoSo/anh-san', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.array('tepAnh', 12), dieuKhien.themAnhSan);
 dinhTuyen.patch('/co-so/:maCoSo/anh/:maAnh/bia', kiemTraHopLe(kiemTraDuLieu.anhCoSo), dieuKhien.datAnhBia);
 dinhTuyen.delete('/co-so/:maCoSo/anh/:maAnh', kiemTraHopLe(kiemTraDuLieu.anhCoSo), dieuKhien.xoaAnhCoSo);
 // Đóng tạm / mở lại / xoá cơ sở: đóng & xoá chỉ khi không còn khách đặt (đơn hiện tại, lịch cố định); xoá phải đóng trước.
@@ -74,6 +74,11 @@ dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDon), don
 // Đơn chủ sân tự tạo (Nguon='owner', thanh toán ngoài hệ thống): đánh dấu đã thu / huỷ (không hoàn tiền).
 dinhTuyen.patch('/dat-san/:maDatSan/da-thu', kiemTraHopLe(kiemTraBaoCao.daThuDon), donDatSan.daThuDon);
 dinhTuyen.patch('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDonOwner), donDatSan.huyDonOwner);
+// Khiếu nại gửi tới chủ sân (khách báo chậm duyệt / chưa nhận được tiền hoàn): xem + giải trình 1 lần.
+dinhTuyen.get('/khieu-nai', kiemTraHopLe(kiemTraDuLieu.danhSachKhieuNai), dieuKhien.lietKeKhieuNai);
+dinhTuyen.post('/khieu-nai/:maKhieuNai/phan-hoi', kiemTraHopLe(kiemTraDuLieu.phanHoiKhieuNai), dieuKhien.phanHoiKhieuNai);
+// G5.5: kháng nghị quyết định chấp nhận khiếu nại (1 lần, trong appeal_hours = 48h).
+dinhTuyen.post('/khieu-nai/:maKhieuNai/khang-nghi', kiemTraHopLe(kiemTraDuLieu.khangNghiKhieuNai), dieuKhien.khangNghiKhieuNai);
 dinhTuyen.get('/hoan-tien', kiemTraHopLe(kiemTraBaoCao.danhSachHoanTien), donDatSan.lietKeHoanTien);
 // G4: kèm ảnh chứng từ chuyển khoản hoàn (multipart, field `anhChungTu`, bắt buộc).
 dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien),

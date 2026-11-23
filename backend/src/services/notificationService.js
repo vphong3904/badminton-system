@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const AppError = require('../utils/AppError');
+const { phatChoNguoiDung, phatSauGiaoDich } = require('../realtime/phat');
 
 // Ghi thông báo cho một người dùng. Dùng chung `ketNoi` của giao dịch nghiệp vụ để thông báo
 // chỉ tồn tại khi nghiệp vụ thành công. Lỗi ghi thông báo KHÔNG được làm hỏng nghiệp vụ chính
@@ -10,11 +11,18 @@ async function guiThongBao(ketNoi, {
 }) {
   if (!maNguoiDung) return;
   try {
-    await ketNoi.query(
+    const [ketQua] = await ketNoi.query(
       `INSERT IGNORE INTO ThongBao
        (MaNguoiDung, Loai, TieuDe, NoiDung, LoaiThamChieu, MaThamChieu, KhoaChongTrung)
        VALUES (?,?,?,?,?,?,?)`,
       [maNguoiDung, loai, tieuDe, noiDung, loaiThamChieu, maThamChieu, khoa]);
+    // affectedRows=0 khi INSERT IGNORE gặp khóa chống trùng: tuyệt đối không phát socket.
+    if (ketQua.affectedRows === 1) {
+      const payload = { maThongBao: Number(ketQua.insertId), loai, tieuDe, noiDung,
+        loaiThamChieu, maThamChieu: maThamChieu == null ? null : Number(maThamChieu) };
+      // Nhiều nơi gọi trong transaction; trì hoãn ngắn để DB commit trước khi client tải REST.
+      phatSauGiaoDich(() => phatChoNguoiDung(maNguoiDung, 'thong-bao:moi', payload));
+    }
   } catch (loi) {
     console.error('[thong-bao] Không ghi được thông báo:', loi.message);
   }
@@ -103,6 +111,54 @@ async function baoDanhGiaMoi(ketNoi, { maDanhGia, maCoSo, maKhachHang, soSao, no
   }
 }
 
+
+// G7.11: gửi cùng một thông báo cho những khách đang có đăng ký hiệu lực của sự kiện.
+// `khoa` là tiền tố; mỗi người nhận có khóa riêng để không ảnh hưởng nhau.
+async function baoNguoiDangKySuKien(ketNoi, {
+  maSuKien, loai, tieuDe, noiDung, khoa,
+  loaiThamChieu = 'event', maThamChieu = maSuKien,
+  cacTrangThai = ['pending', 'accepted'],
+}) {
+  if (!maSuKien || !Array.isArray(cacTrangThai) || !cacTrangThai.length) return 0;
+  try {
+    const [cacKhach] = await ketNoi.query(
+      `SELECT DISTINCT MaKhachHang AS maKhachHang
+       FROM DangKySuKien WHERE MaSuKien=? AND TrangThai IN (?) ORDER BY MaKhachHang`,
+      [maSuKien, cacTrangThai]);
+    for (const khach of cacKhach) {
+      await guiThongBao(ketNoi, {
+        maNguoiDung: khach.maKhachHang, loai, tieuDe, noiDung,
+        loaiThamChieu, maThamChieu,
+        khoa: khoa ? `${khoa}:${khach.maKhachHang}` : null,
+      });
+    }
+    return cacKhach.length;
+  } catch (loi) {
+    console.error('[thong-bao] Không gửi được thông báo sự kiện:', loi.message);
+    return 0;
+  }
+}
+
+// Được G7.12 gọi khi Admin ẩn sự kiện; chỉ báo người đã đăng ký, không lộ sự kiện với khách mới.
+async function baoSuKienBiAn(ketNoi, { maSuKien, lyDo }) {
+  try {
+    const [[sk]] = await ketNoi.query(
+      'SELECT TieuDe AS tieuDe FROM SuKien WHERE MaSuKien=?', [maSuKien]);
+    if (!sk) return 0;
+    const lyDoAn = String(lyDo || 'Sự kiện không còn được hiển thị công khai.').trim().slice(0, 220);
+    return await baoNguoiDangKySuKien(ketNoi, {
+      maSuKien,
+      loai: 'event_hidden',
+      tieuDe: 'Sự kiện đã bị ẩn',
+      noiDung: `Sự kiện "${sk.tieuDe}" đã bị quản trị viên ẩn. Lý do: ${lyDoAn}`.slice(0, 500),
+      khoa: `event_hidden:${maSuKien}:${Date.now()}`,
+    });
+  } catch (loi) {
+    console.error('[thong-bao] Không báo được sự kiện bị ẩn:', loi.message);
+    return 0;
+  }
+}
+
 async function lietKe(maNguoiDung, { trang = 1, soLuong = 30, chiChuaDoc = false } = {}) {
   const gioiHan = Math.min(Math.max(Number(soLuong) || 30, 1), 50);
   const lech = (Math.max(Number(trang) || 1, 1) - 1) * gioiHan;
@@ -143,5 +199,5 @@ async function danhDauTatCaDaDoc(maNguoiDung) {
 }
 
 module.exports = {
-  guiThongBao, guiChoQuanTri, baoKhachDaHoanTien, baoDanhGiaMoi, rutGonVanBan, dinhDangTien, lietKe, demChuaDoc, danhDauDaDoc, danhDauTatCaDaDoc,
+  guiThongBao, guiChoQuanTri, baoKhachDaHoanTien, baoDanhGiaMoi, baoNguoiDangKySuKien, baoSuKienBiAn, rutGonVanBan, dinhDangTien, lietKe, demChuaDoc, danhDauDaDoc, danhDauTatCaDaDoc,
 };

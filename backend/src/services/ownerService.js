@@ -34,8 +34,8 @@ const CHON_CO_SO = `
     cs.MoTa AS moTa, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
     cs.SoPhutDatToiThieu AS soPhutDatToiThieu, cs.SoPhutTreToiDa AS soPhutTreToiDa, cs.GiaThapNhat AS giaThapNhat,
     cs.TrangThai AS trangThai,
-    COALESCE((SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo
-     ORDER BY LaAnhBia DESC, ThuTu, MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh,
+    COALESCE((SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo AND LaAnhBia = 1
+     ORDER BY ThuTu, MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh,
     (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo) AS soSan,
     (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active') AS soSanHoatDong
   FROM CoSo cs`;
@@ -326,7 +326,8 @@ async function taoCoSoMoi(maChuSan, duLieuCoSo) {
   return layCoSoTheoMa(maChuSan, ketQua.insertId);
 }
 
-// Ảnh mới thành ảnh bìa; ảnh cũ giữ trong gallery. File lưu uploads/coso/cs<maCoSo>-<ms>-<4hex>.<đuôi>.
+// Đổi ảnh bìa: ảnh bìa tính RIÊNG (1 ảnh), không chiếm chỗ trong 12 ảnh sân → ảnh bìa cũ bị thay (xoá hẳn).
+// File lưu uploads/coso/cs<maCoSo>-<ms>-<4hex>.<đuôi>.
 async function capNhatAnhCoSo(maChuSan, tep, maCoSo) {
   let coSo;
   try {
@@ -336,20 +337,25 @@ async function capNhatAnhCoSo(maChuSan, tep, maCoSo) {
     throw loi;
   }
   const duongDan = await luuAnh(tep, 'coso', `cs${coSo.maCoSo}`);
+  let cacBiaCu = [];
   try {
     await thucHienGiaoDich(async (ketNoi) => {
-      await ketNoi.query('UPDATE AnhCoSo SET LaAnhBia=0 WHERE MaCoSo=?', [coSo.maCoSo]);
+      const [biaCu] = await ketNoi.query(
+        'SELECT DuongDan AS duongDan FROM AnhCoSo WHERE MaCoSo=? AND LaAnhBia=1 FOR UPDATE', [coSo.maCoSo]);
+      cacBiaCu = biaCu.map((b) => b.duongDan);
+      await ketNoi.query('DELETE FROM AnhCoSo WHERE MaCoSo=? AND LaAnhBia=1', [coSo.maCoSo]);
       await ketNoi.query('INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia) VALUES (?,?,1)', [coSo.maCoSo, duongDan]);
     });
   } catch (loi) {
     await xoaAnh(duongDan);
     throw loi;
   }
+  await Promise.all(cacBiaCu.map(xoaAnh));
   return { duongDanAnh: duongDan };
 }
 
-// ---- Thư viện ảnh của cơ sở: 1 ảnh bìa + nhiều ảnh sân (tối đa SO_ANH_TOI_DA) ----
-const SO_ANH_TOI_DA = 12;
+// ---- Thư viện ảnh của cơ sở: 1 ảnh bìa (tính riêng) + tối đa SO_ANH_TOI_DA ảnh sân ----
+const SO_ANH_TOI_DA = 12; // số ảnh SÂN tối đa; ảnh bìa không tính
 
 async function layAnhCoSo(maChuSan, maCoSo) {
   const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
@@ -359,32 +365,51 @@ async function layAnhCoSo(maChuSan, maCoSo) {
   return { cacAnh: cacAnh.map((a) => ({ ...a, laAnhBia: !!a.laAnhBia })), soAnhToiDa: SO_ANH_TOI_DA };
 }
 
-// Thêm ảnh sân vào thư viện (KHÔNG đổi ảnh bìa; cơ sở chưa có ảnh nào thì ảnh đầu tiên làm ảnh bìa).
-async function themAnhSan(maChuSan, tep, maCoSo) {
+// Thêm MỘT HOẶC NHIỀU ảnh sân (không bao giờ thành ảnh bìa). Số ảnh sân sau khi thêm không được vượt SO_ANH_TOI_DA: vượt → từ chối CẢ LÔ (không lưu ảnh nào), dọn file tạm.
+async function themAnhSan(maChuSan, cacTep, maCoSo) {
+  const dsTep = Array.isArray(cacTep) ? cacTep : [cacTep];
+  const donTam = () => Promise.all(dsTep.map((t) => fs.unlink(t.path).catch(() => {})));
   let coSo;
   try {
     coSo = await layCoSoTheoMa(maChuSan, maCoSo);
-    const [[dem]] = await pool.query('SELECT COUNT(*) AS so FROM AnhCoSo WHERE MaCoSo=?', [coSo.maCoSo]);
-    if (Number(dem.so) >= SO_ANH_TOI_DA) {
-      throw AppError.duLieuKhongHopLe(`Mỗi cơ sở tối đa ${SO_ANH_TOI_DA} ảnh. Hãy xoá bớt ảnh cũ.`);
+    const [[dem]] = await pool.query('SELECT COUNT(*) AS so FROM AnhCoSo WHERE MaCoSo=? AND LaAnhBia=0', [coSo.maCoSo]);
+    const conCho = SO_ANH_TOI_DA - Number(dem.so);
+    if (dsTep.length > conCho) {
+      throw AppError.duLieuKhongHopLe(conCho <= 0
+        ? `Mỗi cơ sở tối đa ${SO_ANH_TOI_DA} ảnh sân (ảnh bìa tính riêng). Hãy xoá bớt ảnh cũ.`
+        : `Mỗi cơ sở tối đa ${SO_ANH_TOI_DA} ảnh sân, hiện chỉ còn ${conCho} chỗ nhưng bạn chọn ${dsTep.length} ảnh.`);
     }
   } catch (loi) {
-    await fs.unlink(tep.path).catch(() => {});
+    await donTam();
     throw loi;
   }
-  const duongDan = await luuAnh(tep, 'coso', `cs${coSo.maCoSo}`);
+  const cacDuongDan = [];
+  try {
+    for (const tep of dsTep) cacDuongDan.push(await luuAnh(tep, 'coso', `cs${coSo.maCoSo}`));
+  } catch (loi) {
+    await Promise.all(cacDuongDan.map(xoaAnh));
+    await donTam(); // luuAnh đã tự xoá file lỗi; các file chưa xử lý còn lại thì dọn ở đây
+    throw loi;
+  }
   try {
     await thucHienGiaoDich(async (ketNoi) => {
-      const [[coBia]] = await ketNoi.query(
-        'SELECT COUNT(*) AS so FROM AnhCoSo WHERE MaCoSo=? AND LaAnhBia=1 FOR UPDATE', [coSo.maCoSo]);
-      const [[thuTuCuoi]] = await ketNoi.query(
-        'SELECT COALESCE(MAX(ThuTu),0)+1 AS thuTu FROM AnhCoSo WHERE MaCoSo=?', [coSo.maCoSo]);
-      await ketNoi.query(
-        'INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia, ThuTu) VALUES (?,?,?,?)',
-        [coSo.maCoSo, duongDan, Number(coBia.so) === 0 ? 1 : 0, thuTuCuoi.thuTu]);
+      // Khoá các dòng ảnh của cơ sở rồi đếm lại để 2 yêu cầu song song không cùng vượt giới hạn.
+      const [dongAnh] = await ketNoi.query(
+        'SELECT LaAnhBia AS laAnhBia, ThuTu AS thuTu FROM AnhCoSo WHERE MaCoSo=? FOR UPDATE', [coSo.maCoSo]);
+      const soAnhSan = dongAnh.filter((d) => !d.laAnhBia).length;
+      if (soAnhSan + cacDuongDan.length > SO_ANH_TOI_DA) {
+        throw AppError.duLieuKhongHopLe(`Mỗi cơ sở tối đa ${SO_ANH_TOI_DA} ảnh sân (ảnh bìa tính riêng). Hãy xoá bớt ảnh cũ.`);
+      }
+      let thuTu = dongAnh.reduce((m, d) => Math.max(m, d.thuTu), 0);
+      for (const duongDan of cacDuongDan) {
+        thuTu += 1;
+        await ketNoi.query(
+          'INSERT INTO AnhCoSo (MaCoSo, DuongDan, LaAnhBia, ThuTu) VALUES (?,?,?,?)',
+          [coSo.maCoSo, duongDan, 0, thuTu]);
+      }
     });
   } catch (loi) {
-    await xoaAnh(duongDan);
+    await Promise.all(cacDuongDan.map(xoaAnh));
     throw loi;
   }
   return layAnhCoSo(maChuSan, coSo.maCoSo);
@@ -402,7 +427,7 @@ async function datAnhBia(maChuSan, maCoSo, maAnh) {
   return layAnhCoSo(maChuSan, coSo.maCoSo);
 }
 
-// Xoá ảnh; nếu xoá ảnh bìa thì ảnh đầu tiên còn lại tự làm ảnh bìa.
+// Xoá ảnh. Xoá ảnh bìa → cơ sở dùng ảnh mặc định (không tự lấy ảnh sân làm bìa).
 async function xoaAnhCoSo(maChuSan, maCoSo, maAnh) {
   const coSo = await layCoSoTheoMa(maChuSan, maCoSo);
   let duongDanXoa;
@@ -412,12 +437,6 @@ async function xoaAnhCoSo(maChuSan, maCoSo, maAnh) {
       [maAnh, coSo.maCoSo]);
     if (!anh) throw AppError.khongTimThay('Không tìm thấy ảnh');
     await ketNoi.query('DELETE FROM AnhCoSo WHERE MaAnh=?', [maAnh]);
-    if (anh.laAnhBia) {
-      await ketNoi.query(
-        `UPDATE AnhCoSo SET LaAnhBia=1 WHERE MaAnh=(
-           SELECT MaAnh FROM (SELECT MaAnh FROM AnhCoSo WHERE MaCoSo=? ORDER BY ThuTu, MaAnh LIMIT 1) t)`,
-        [coSo.maCoSo]);
-    }
     duongDanXoa = anh.duongDan;
   });
   await xoaAnh(duongDanXoa);
@@ -575,13 +594,19 @@ async function lietKeKhoaSan(maChuSan, boLoc) {
 }
 
 async function xoaKhoaSan(maChuSan, maKhoa) {
-  const [ketQua] = await pool.query(
-    `DELETE k FROM KhoaSan k
-     JOIN San s ON s.MaSan=k.MaSan
-     JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     WHERE k.MaKhoa=? AND cs.MaChuSan=?`,
-    [maKhoa, maChuSan]);
-  if (!ketQua.affectedRows) throw AppError.khongTimThay('Không tìm thấy khóa giờ');
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[khoa]] = await ketNoi.query(
+      `SELECT k.MaKhoa AS maKhoa, k.MaSuKien AS maSuKien
+       FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
+         JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+       WHERE k.MaKhoa=? AND cs.MaChuSan=? FOR UPDATE`,
+      [maKhoa, maChuSan]);
+    if (!khoa) throw AppError.khongTimThay('Không tìm thấy khóa giờ');
+    if (khoa.maSuKien !== null) {
+      throw AppError.biTrung('Đây là khung giờ được giữ cho sự kiện. Hãy chỉnh sửa hoặc hủy sự kiện để giải phóng sân.', 'EVENT_LOCK_PROTECTED');
+    }
+    await ketNoi.query('DELETE FROM KhoaSan WHERE MaKhoa=? AND MaSuKien IS NULL', [maKhoa]);
+  });
 }
 
 module.exports = {

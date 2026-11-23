@@ -176,3 +176,22 @@ exports.phanHoiDanhGia = {
   }),
 };
 exports.xoaPhanHoiDanhGia = { params: z.object({ maDanhGia: maSo }) };
+
+// Khiếu nại gửi tới chủ sân: xem danh sách + giải trình 1 lần.
+exports.danhSachKhieuNai = {
+  query: z.object({ trangThai: z.enum(['pending', 'upheld', 'rejected', 'all']).default('all') }),
+};
+exports.khangNghiKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    noiDung: z.string({ error: 'Vui lòng nhập nội dung kháng nghị.' }).trim()
+      .min(10, 'Nội dung kháng nghị tối thiểu 10 ký tự.').max(1000, 'Nội dung kháng nghị tối đa 1000 ký tự.'),
+  }),
+};
+exports.phanHoiKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    noiDung: z.string({ error: 'Vui lòng nhập nội dung phản hồi.' }).trim()
+      .min(10, 'Nội dung phản hồi tối thiểu 10 ký tự.').max(1000, 'Nội dung phản hồi tối đa 1000 ký tự.'),
+  }),
+};

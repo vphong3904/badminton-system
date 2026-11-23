@@ -7,6 +7,7 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
 const { layCauHinhSo } = require('./cauHinhService');
 const nhatKy = require('./nhatKyService');
+const { guiThongBao } = require('./notificationService');
 const chungTu = require('./chungTuService');
 const { ganTrangThaiHienThi } = require('../utils/trangThaiDon');
 const { kiemTraCheckInQr, kiemTraCheckInThuCong } = require('../utils/kiemTraCheckIn');
@@ -222,6 +223,24 @@ async function ghiCheckIn(ketNoi, { don, phuongThuc, nguoi, canTuXacNhan, phienB
   });
   const [[dong]] = await ketNoi.query(
     'SELECT ThoiDiem AS thoiDiem FROM CheckIn WHERE MaDatSan=?', [don.maDatSan]);
+  // G6.1: báo check-in thành công cho khách và chủ sân (mỗi đơn 1 lần: UNIQUE CheckIn + KhoaChongTrung).
+  const [[tt]] = await ketNoi.query(
+    `SELECT d.TenKhach AS tenKhach, s.TenSan AS tenSan, cs.TenCoSo AS tenCoSo,
+       DATE_FORMAT(TIMESTAMP(d.NgayChoi, d.GioBatDau), '%H:%i %d/%m') AS gio
+     FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo WHERE d.MaDatSan=?`, [don.maDatSan]);
+  const tham = { loaiThamChieu: 'booking', maThamChieu: don.maDatSan };
+  await guiThongBao(ketNoi, {
+    maNguoiDung: don.maKhachHang, loai: 'checkin_success', tieuDe: 'Check-in thành công',
+    noiDung: `Đơn ${don.maDon} tại ${tt?.tenCoSo} (${tt?.tenSan}, ${tt?.gio}) đã check-in${phuongThuc === 'qr' ? '' : ' do chủ sân xác nhận'}. Chúc bạn chơi vui!`,
+    ...tham, khoa: `checkin_success:khach:${don.maDatSan}`,
+  });
+  if (phuongThuc === 'qr') {
+    await guiThongBao(ketNoi, {
+      maNguoiDung: don.maChuSan, loai: 'checkin_success', tieuDe: 'Khách đã check-in',
+      noiDung: `${tt?.tenKhach || 'Khách'} đã quét QR check-in đơn ${don.maDon} tại ${tt?.tenCoSo} (${tt?.tenSan}, ${tt?.gio}).`,
+      ...tham, khoa: `checkin_success:chu:${don.maDatSan}`,
+    });
+  }
   const { trangThaiHienThi, nhanTrangThai, nhomTrangThai } = ganTrangThaiHienThi(
     { trangThai: 'checked_in', trangThaiThanhToan: 'success' });
   return {

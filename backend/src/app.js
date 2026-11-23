@@ -36,8 +36,11 @@ ungDung.get('/api/suc-khoe/co-so-du-lieu', xuLyBatDongBo(async (_yeuCau, phanHoi
   await pool.query('SELECT 1');
   thanhCong(phanHoi, { tenCoSoDuLieu: 'db_sancaulong', trangThai: 'ok' });
 }));
+ungDung.use('/api', require('./routes/suKien'));
 ungDung.use('/api/tai-khoan', require('./routes/auth'));
 ungDung.use('/api/khach', require('./routes/customer'));
+ungDung.use('/api/khach/chat', require('./routes/communityChat'));
+ungDung.use('/api/khach', require('./routes/community'));
 ungDung.use('/api/thanh-toan', require('./routes/payment'));
 ungDung.use('/api/thong-bao', require('./routes/notification'));
 ungDung.use('/api/chu-san', require('./routes/owner'));

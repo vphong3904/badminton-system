@@ -1,11 +1,12 @@
 const dichVu = require('../services/qrCheckInService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thanhCong } = require('../utils/response');
+const { phatCapNhatDatSan } = require('../realtime/datSan');
 
 // Khách quét QR tại sân.
 exports.checkInKhach = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVu.checkInBangQr(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body));
+  const r = await dichVu.checkInBangQr(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body);
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });
 
 // Chủ sân: xem / đổi QR của sân, tải PNG, trang in.
@@ -32,6 +33,6 @@ exports.trangInQr = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   phanHoi.send(html);
 });
 exports.checkInThuCong = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVu.checkInThuCong(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo));
+  const r = await dichVu.checkInThuCong(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo);
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });

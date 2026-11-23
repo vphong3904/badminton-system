@@ -6,9 +6,10 @@
 -- Quy ước: tên bảng, tên cột viết tiếng Việt không dấu, PascalCase
 -- Giá trị ENUM và khóa trong CauHinhHeThong giữ nguyên tiếng Anh
 -- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực)
--- Bảng (20): NguoiDung, HoSoChuSan, CoSo, AnhCoSo, San, KhoaSan, BangGia, LichCoDinh,
---   DatSan, ThanhToan, HoanTien, ChungTuThanhToan, DanhGia, YeuThich, KhieuNai,
---   LichSuQrSan, CheckIn, ThongBao, CauHinhHeThong, NhatKyHeThong
+-- Bảng (29): NguoiDung, HoSoChuSan, CoSo, AnhCoSo, San, SuKien, KhoaSan, BangGia, LichCoDinh,
+--   DatSan, ThanhToan, HoanTien, ChungTuThanhToan, DanhGia, YeuThich, KhieuNai, Gay, KhangNghi,
+--   LichSuQrSan, CheckIn, HangMucSuKien, DangKySuKien, ThanhToanSuKien, ChungTuSuKien,
+--   BaoCaoViPham, ThongBao, CauHinhHeThong, NhatKyHeThong
 -- =====================================================================
 SET NAMES utf8mb4;
 CREATE DATABASE IF NOT EXISTS db_sancaulong
@@ -58,6 +59,7 @@ CREATE TABLE HoSoChuSan (
   MaQuanTriDuyet  INT UNSIGNED NULL COMMENT 'admin duyệt hoặc từ chối',
   LyDoTuChoi      VARCHAR(255) NULL,
   SoLanViPham     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'số khiếu nại admin xác nhận đúng: 1 cảnh cáo, 2 cảnh cáo nghiêm trọng, 3 khóa tài khoản',
+  KhoaDatMoi      TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = chặn khách đặt mới vào cơ sở của chủ sân; lịch đã đặt giữ nguyên. Admin đặt/gỡ, ghi nhật ký (G5)',
   CONSTRAINT FK_HoSoChuSan_NguoiDung FOREIGN KEY (MaNguoiDung)    REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
   CONSTRAINT FK_HoSoChuSan_QuanTri   FOREIGN KEY (MaQuanTriDuyet) REFERENCES NguoiDung(MaNguoiDung),
   KEY IDX_HoSoChuSan_Duyet (TrangThaiDuyet, NgayGuiDuyet)
@@ -127,6 +129,52 @@ CREATE TABLE San (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
+-- G7. SuKien: Loai social = Giao lưu (sức chứa ở SoLuongToiDa) · tournament = Giải đấu (sức chứa theo HangMucSuKien)
+--    Giờ VN, bội 30 phút. Phi = 0 là miễn phí. Sân tham gia = các dòng KhoaSan có MaSuKien (mọi sân cùng một cơ sở).
+--    TrangThai: open → closed → finished | cancelled. BiAn là cờ riêng do Admin, không đổi TrangThai.
+CREATE TABLE SuKien (
+  MaSuKien        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaCoSo          INT UNSIGNED NOT NULL,
+  MaChuSan        INT UNSIGNED NOT NULL,
+  Loai            ENUM('social','tournament') NOT NULL,
+  TieuDe          VARCHAR(150) NOT NULL,
+  MoTa            TEXT NULL,
+  DieuLe          TEXT NULL COMMENT 'điều lệ / thể thức (chủ yếu cho giải đấu)',
+  AnhBia          VARCHAR(255) NULL COMMENT 'đường dẫn tương đối ảnh bìa',
+  NgaySuKien      DATE NOT NULL,
+  GioBatDau       TIME NOT NULL,
+  GioKetThuc      TIME NOT NULL,
+  HanDangKy       DATETIME NOT NULL COMMENT 'hạn đăng ký; phải trước giờ bắt đầu',
+  SoLuongToiDa    SMALLINT UNSIGNED NULL COMMENT 'sức chứa của Giao lưu; NULL với Giải đấu (dùng HangMucSuKien.SoLuongToiDa)',
+  TrinhDoTu       TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '1–8: Y, TBY, TB-, TB, TB+, K, BC, CN',
+  TrinhDoDen      TINYINT UNSIGNED NOT NULL DEFAULT 8,
+  CheDoDuyet      ENUM('auto','manual') NOT NULL DEFAULT 'auto' COMMENT 'auto = đăng ký vào thẳng accepted; manual = chủ sân duyệt',
+  Phi             DECIMAL(12,0) NOT NULL DEFAULT 0 COMMENT '0 = miễn phí; có phí thì thu qua hệ thống như đặt sân (ThanhToanSuKien)',
+  GhiChuPhi       VARCHAR(255) NULL COMMENT 'ghi chú thêm về khoản phí (tùy chọn)',
+  TrangThai       ENUM('open','closed','finished','cancelled') NOT NULL DEFAULT 'open',
+  NguoiHuy        ENUM('owner','system') NULL,
+  LyDoHuy         VARCHAR(255) NULL,
+  NgayHuy         DATETIME NULL,
+  BiAn            TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = Admin ẩn khỏi khách; bỏ ẩn thì TrangThai cũ giữ nguyên',
+  LyDoAn          VARCHAR(255) NULL,
+  MaQuanTriAn     INT UNSIGNED NULL,
+  NgayAn          DATETIME NULL,
+  NgayTao         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_SuKien_CoSo    FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo),
+  CONSTRAINT FK_SuKien_ChuSan  FOREIGN KEY (MaChuSan)    REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_SuKien_QuanTri FOREIGN KEY (MaQuanTriAn) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT CHK_SuKien_Gio     CHECK (GioKetThuc > GioBatDau),
+  CONSTRAINT CHK_SuKien_TrinhDo CHECK (TrinhDoTu BETWEEN 1 AND 8 AND TrinhDoDen BETWEEN 1 AND 8 AND TrinhDoTu <= TrinhDoDen),
+  CONSTRAINT CHK_SuKien_Phi     CHECK (Phi >= 0),
+  CONSTRAINT CHK_SuKien_SoLuong CHECK (SoLuongToiDa IS NULL OR SoLuongToiDa >= 1),
+  KEY IDX_SuKien_ChuSan (MaChuSan, TrangThai),
+  KEY IDX_SuKien_CoSo (MaCoSo, TrangThai, NgaySuKien),
+  KEY IDX_SuKien_Ngay (TrangThai, BiAn, NgaySuKien),           -- danh sách khách + job finished
+  KEY IDX_SuKien_HanDangKy (TrangThai, HanDangKy)              -- job đóng quá hạn đăng ký
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
 -- 6. KhoaSan: khóa một khung giờ cụ thể của sân (sửa chữa, giải đấu...)
 --    Không dùng cho khách đặt tại chỗ: trường hợp đó chủ sân tạo đơn (DatSan.Nguon = 'owner')
 CREATE TABLE KhoaSan (
@@ -136,8 +184,11 @@ CREATE TABLE KhoaSan (
   GioBatDau   TIME NOT NULL,
   GioKetThuc  TIME NOT NULL,
   LyDo        VARCHAR(255) NULL,
+  MaSuKien    INT UNSIGNED NULL COMMENT 'có giá trị = khóa do sự kiện (G7) tạo; không xóa tay ở màn Khóa sân',
   CONSTRAINT FK_KhoaSan_San FOREIGN KEY (MaSan) REFERENCES San(MaSan) ON DELETE CASCADE,
+  CONSTRAINT FK_KhoaSan_SuKien FOREIGN KEY (MaSuKien) REFERENCES SuKien(MaSuKien) ON DELETE CASCADE,
   CONSTRAINT CHK_KhoaSan_Gio CHECK (GioKetThuc > GioBatDau),
+  KEY IDX_KhoaSan_SuKien (MaSuKien),
   KEY IDX_KhoaSan_Khung (MaSan, NgayKhoa, GioBatDau, GioKetThuc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -379,10 +430,16 @@ CREATE TABLE KhieuNai (
   MaKhachHang    INT UNSIGNED NOT NULL,
   MaChuSan       INT UNSIGNED NOT NULL,
   MaCoSo         INT UNSIGNED NOT NULL,
+  Loai           ENUM('service','refund') NOT NULL DEFAULT 'service' COMMENT 'service = chủ sân chậm duyệt thanh toán; refund = chưa nhận được tiền hoàn (sau refund_complaint_wait_minutes)',
+  MaHoanTien     INT UNSIGNED NULL COMMENT 'khoản hoàn bị khiếu nại (Loai=refund)',
   GiaiDoan       ENUM('after_payment','at_cancel','after_cancel') NOT NULL COMMENT 'khách bấm khiếu nại ở màn nào',
   NoiDung        VARCHAR(1000) NOT NULL,
   TrangThai      ENUM('pending','upheld','rejected') NOT NULL DEFAULT 'pending',
+  PhanHoiChuSan  VARCHAR(1000) NULL COMMENT 'chủ sân giải trình (1 lần, trong complaint_owner_reply_hours kể từ NgayTao)',
+  NgayPhanHoi    DATETIME NULL,
+  HanPhanHoi     DATETIME NULL COMMENT 'hạn chủ sân giải trình = NgayTao + complaint_owner_reply_hours; NULL = dòng cũ',
   GhiChuQuanTri  VARCHAR(500) NULL,
+  BangChungQuanTri VARCHAR(1500) NULL COMMENT 'JSON mảng ảnh bằng chứng Admin đính kèm khi quyết định (tối đa 3)',
   MucXuLy        ENUM('none','warning','severe_warning','banned') NOT NULL DEFAULT 'none',
   MaQuanTri      INT UNSIGNED NULL,
   NgayXuLy       DATETIME NULL,
@@ -392,10 +449,58 @@ CREATE TABLE KhieuNai (
   CONSTRAINT FK_KhieuNai_ChuSan   FOREIGN KEY (MaChuSan)    REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_KhieuNai_CoSo     FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   CONSTRAINT FK_KhieuNai_QuanTri  FOREIGN KEY (MaQuanTri)   REFERENCES NguoiDung(MaNguoiDung),
-  UNIQUE KEY UQ_KhieuNai_DatSan (MaDatSan),
+  CONSTRAINT FK_KhieuNai_HoanTien FOREIGN KEY (MaHoanTien)  REFERENCES HoanTien(MaHoanTien) ON DELETE SET NULL,
+  UNIQUE KEY UQ_KhieuNai_DatSan_Loai (MaDatSan, Loai),
   KEY IDX_KhieuNai_TrangThai (TrangThai, NgayTao),
   KEY IDX_KhieuNai_ChuSan (MaChuSan, TrangThai),
   KEY IDX_KhieuNai_Khach (MaKhachHang, NgayTao)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- 13c. Gay: gậy vi phạm của chủ sân. Mỗi khiếu nại upheld = tối đa 1 gậy.
+--      active = có hiệu lực; appealed = đang kháng nghị; revoked = đã thu hồi (không tính vào HoSoChuSan.SoLanViPham)
+CREATE TABLE Gay (
+  MaGay          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaChuSan       INT UNSIGNED NOT NULL,
+  MaKhieuNai     INT UNSIGNED NULL COMMENT 'Nguồn vi phạm từ khiếu nại đặt sân; NULL nếu từ báo cáo sự kiện',
+  MaBaoCao       INT UNSIGNED NULL COMMENT 'Nguồn vi phạm từ báo cáo sự kiện; NULL nếu từ khiếu nại đặt sân',
+  TrangThai      ENUM('active','appealed','revoked') NOT NULL DEFAULT 'active',
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  HetHieuLuc     DATETIME NULL COMMENT 'tùy chọn: gậy tự hết hiệu lực; NULL = không hết hạn',
+  NgayThuHoi     DATETIME NULL,
+  LyDoThuHoi     VARCHAR(500) NULL,
+  MaQuanTriThuHoi INT UNSIGNED NULL,
+  CONSTRAINT FK_Gay_ChuSan    FOREIGN KEY (MaChuSan)        REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_Gay_KhieuNai  FOREIGN KEY (MaKhieuNai)      REFERENCES KhieuNai(MaKhieuNai),
+  CONSTRAINT FK_Gay_QuanTri   FOREIGN KEY (MaQuanTriThuHoi) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_Gay_KhieuNai (MaKhieuNai),
+  UNIQUE KEY UQ_Gay_BaoCao (MaBaoCao),
+  CONSTRAINT CHK_Gay_Nguon CHECK (
+    (MaKhieuNai IS NOT NULL AND MaBaoCao IS NULL) OR
+    (MaKhieuNai IS NULL AND MaBaoCao IS NOT NULL)
+  ),
+  KEY IDX_Gay_ChuSan (MaChuSan, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 13d. KhangNghi: chủ sân kháng nghị quyết định chấp nhận khiếu nại (trong appeal_hours); mỗi khiếu nại 1 lần.
+--      accepted = Admin thu hồi gậy; rejected = giữ gậy
+CREATE TABLE KhangNghi (
+  MaKhangNghi    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaKhieuNai     INT UNSIGNED NOT NULL,
+  MaGay          INT UNSIGNED NOT NULL,
+  MaChuSan       INT UNSIGNED NOT NULL,
+  NoiDung        VARCHAR(1000) NOT NULL,
+  TrangThai      ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  GhiChuQuanTri  VARCHAR(500) NULL,
+  MaQuanTri      INT UNSIGNED NULL,
+  NgayXuLy       DATETIME NULL,
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_KhangNghi_KhieuNai FOREIGN KEY (MaKhieuNai) REFERENCES KhieuNai(MaKhieuNai),
+  CONSTRAINT FK_KhangNghi_Gay      FOREIGN KEY (MaGay)      REFERENCES Gay(MaGay),
+  CONSTRAINT FK_KhangNghi_ChuSan   FOREIGN KEY (MaChuSan)   REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_KhangNghi_QuanTri  FOREIGN KEY (MaQuanTri)  REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_KhangNghi_KhieuNai (MaKhieuNai),
+  KEY IDX_KhangNghi_TrangThai (TrangThai, NgayTao)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -433,6 +538,129 @@ CREATE TABLE CheckIn (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
+-- G7. HangMucSuKien: hạng mục của Giải đấu (vd "Đơn nam", "Đôi nam nữ"); LaDoi = 1 thì đăng ký phải có đồng đội
+CREATE TABLE HangMucSuKien (
+  MaHangMuc     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaSuKien      INT UNSIGNED NOT NULL,
+  TenHangMuc    VARCHAR(100) NOT NULL,
+  LaDoi         TINYINT(1) NOT NULL DEFAULT 0,
+  SoLuongToiDa  SMALLINT UNSIGNED NOT NULL,
+  NgayTao       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_HangMuc_SuKien FOREIGN KEY (MaSuKien) REFERENCES SuKien(MaSuKien) ON DELETE CASCADE,
+  CONSTRAINT CHK_HangMuc_SoLuong CHECK (SoLuongToiDa >= 1),
+  UNIQUE KEY UQ_HangMuc_Ten (MaSuKien, TenHangMuc)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. DangKySuKien: 1 khách × 1 sự kiện (Giao lưu) hoặc × 1 hạng mục (Giải đấu), dùng lại dòng cũ khi đăng ký lại.
+--    KhoaHangMuc = IFNULL(MaHangMuc,0) để UNIQUE chặn trùng cả khi MaHangMuc NULL (MySQL coi NULL ≠ NULL).
+--    TrangThai: pending (chế độ duyệt, chưa chiếm chỗ) → accepted (chiếm chỗ) → cancelled | rejected.
+--    Sự kiện có phí: accepted nhưng chưa trả vẫn chiếm chỗ đến hết ThanhToanSuKien.HanThanhToan, quá hạn thì job hủy (system).
+CREATE TABLE DangKySuKien (
+  MaDangKy       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaSuKien       INT UNSIGNED NOT NULL,
+  MaHangMuc      INT UNSIGNED NULL,
+  KhoaHangMuc    INT UNSIGNED AS (IFNULL(MaHangMuc, 0)) STORED,
+  MaKhachHang    INT UNSIGNED NOT NULL,
+  TenKhach       VARCHAR(100) NOT NULL COMMENT 'lưu cứng tên lúc đăng ký',
+  SoDienThoai    VARCHAR(20)  NOT NULL COMMENT 'SĐT khách nhập lúc đăng ký',
+  TrinhDoKhai    TINYINT UNSIGNED NULL COMMENT '1–8, khách tự khai; ngoài khoảng sự kiện chỉ cảnh báo',
+  TenDongDoi     VARCHAR(100) NULL COMMENT 'bắt buộc với hạng mục đôi',
+  SdtDongDoi     VARCHAR(20)  NULL,
+  TrangThai      ENUM('pending','accepted','cancelled','rejected') NOT NULL,
+  NguoiHuy       ENUM('customer','owner','system') NULL,
+  LyDo           VARCHAR(255) NULL COMMENT 'lý do từ chối / loại / hủy',
+  SoLanRut       TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'số lần rút đăng ký của khách ở sự kiện này (tối đa 3)',
+  NgayDangKy     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayXuLy       DATETIME NULL COMMENT 'lúc chủ sân chấp nhận / từ chối',
+  NgayHuy        DATETIME NULL,
+  NgayNhacNho    DATETIME NULL COMMENT 'đã gửi nhắc trước giờ diễn ra (chống gửi lặp)',
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_DangKySK_SuKien   FOREIGN KEY (MaSuKien)    REFERENCES SuKien(MaSuKien) ON DELETE CASCADE,
+  CONSTRAINT FK_DangKySK_HangMuc  FOREIGN KEY (MaHangMuc)   REFERENCES HangMucSuKien(MaHangMuc),
+  CONSTRAINT FK_DangKySK_Khach    FOREIGN KEY (MaKhachHang) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT CHK_DangKySK_TrinhDo CHECK (TrinhDoKhai IS NULL OR TrinhDoKhai BETWEEN 1 AND 8),
+  UNIQUE KEY UQ_DangKySK_Khach (MaSuKien, KhoaHangMuc, MaKhachHang),
+  KEY IDX_DangKySK_SuKien (MaSuKien, TrangThai),
+  KEY IDX_DangKySK_HangMuc (MaHangMuc, TrangThai),
+  KEY IDX_DangKySK_Khach (MaKhachHang, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. ThanhToanSuKien: phí sự kiện thu như đặt sân (QR vào TK chủ sân, khách gửi ảnh, chủ sân xác nhận đã nhận tiền).
+--    Chỉ có dòng cho đăng ký của sự kiện có phí, tạo khi đăng ký thành accepted. Nền tảng không giữ/chuyển tiền.
+--    pending: chờ khách chuyển + gửi ảnh | confirming: đã gửi ảnh, đợi chủ sân | success: chủ sân đã xác nhận
+--    expired: quá HanThanhToan | cancelled: đăng ký/sự kiện bị hủy khi chưa trả
+--    TrangThaiHoan: none | pending (đã trả mà đăng ký/sự kiện bị hủy: chủ sân tự chuyển khoản hoàn) | refunded
+CREATE TABLE ThanhToanSuKien (
+  MaThanhToan         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaDangKy            INT UNSIGNED NOT NULL,
+  SoTien              DECIMAL(12,0) NOT NULL COMMENT 'lưu cứng = SuKien.Phi lúc chấp nhận',
+  PhiNenTang          DECIMAL(12,0) NOT NULL DEFAULT 0 COMMENT 'hoa hồng hệ thống theo event_commission_rate, lưu cứng (mặc định 0)',
+  TienChuSan          DECIMAL(12,0) NOT NULL DEFAULT 0 COMMENT '= SoTien - PhiNenTang',
+  TrangThai           ENUM('pending','confirming','success','expired','cancelled') NOT NULL DEFAULT 'pending',
+  NoiDungChuyenKhoan  VARCHAR(100) NULL COMMENT 'nội dung chuyển khoản để đối chiếu',
+  HanThanhToan        DATETIME NULL COMMENT 'hạn khách chuyển + gửi ảnh (event_payment_hold_minutes)',
+  HanXacNhan          DATETIME NULL COMMENT 'hạn chủ sân xác nhận sau khi khách gửi ảnh',
+  LyDoLoi             VARCHAR(255) NULL COMMENT 'lý do chủ sân từ chối ảnh',
+  NgayGuiAnh          DATETIME NULL,
+  MaNguoiXacNhan      INT UNSIGNED NULL,
+  NgayThanhToan       DATETIME NULL COMMENT 'thời điểm chủ sân xác nhận',
+  TrangThaiHoan       ENUM('none','pending','refunded') NOT NULL DEFAULT 'none',
+  NgayHoan            DATETIME NULL,
+  NgayTao             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_TTSK_DangKy   FOREIGN KEY (MaDangKy)       REFERENCES DangKySuKien(MaDangKy) ON DELETE CASCADE,
+  CONSTRAINT FK_TTSK_NguoiXN  FOREIGN KEY (MaNguoiXacNhan) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_TTSK_DangKy (MaDangKy),
+  KEY IDX_TTSK_TrangThai (TrangThai, HanThanhToan),
+  KEY IDX_TTSK_Hoan (TrangThaiHoan)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. ChungTuSuKien: ảnh chuyển khoản khách gửi (mỗi lần gửi 1 dòng, tối đa 5 ảnh/đăng ký), cùng dạng ChungTuThanhToan
+CREATE TABLE ChungTuSuKien (
+  MaChungTu       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaThanhToan     INT UNSIGNED NOT NULL,
+  SoTien          DECIMAL(12,0) NULL COMMENT 'số tiền phải chuyển của lần gửi này (backend lấy từ ThanhToanSuKien)',
+  ThoiDiemChuyen  DATETIME NULL COMMENT 'giờ chuyển khoản trên biên lai (khách nhập, tùy chọn, ≤ giờ máy chủ)',
+  NgayGui         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  Anh             VARCHAR(255) NOT NULL COMMENT 'đường dẫn tương đối /tep-tai-len/<tên file>',
+  MaBamAnh        CHAR(64) NOT NULL COMMENT 'SHA-256 nội dung ảnh',
+  KetQua          ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  MaNguoiDuyet    INT UNSIGNED NULL,
+  NgayDuyet       DATETIME NULL,
+  LyDo            VARCHAR(255) NULL COMMENT 'lý do từ chối',
+  CONSTRAINT FK_ChungTuSK_ThanhToan  FOREIGN KEY (MaThanhToan)  REFERENCES ThanhToanSuKien(MaThanhToan) ON DELETE CASCADE,
+  CONSTRAINT FK_ChungTuSK_NguoiDuyet FOREIGN KEY (MaNguoiDuyet) REFERENCES NguoiDung(MaNguoiDung),
+  KEY IDX_ChungTuSK_ThanhToan (MaThanhToan),
+  KEY IDX_ChungTuSK_Bam (MaBamAnh)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. BaoCaoViPham: khách báo cáo vi phạm; mỗi người báo mỗi đối tượng 1 lần. Hiện chỉ LoaiDoiTuong = 'event'.
+--    HanhDong (khi upheld): none | hide (ẩn) | cancel (hủy sự kiện). CongViPham = 1: cộng vào SoLanViPham của chủ sân (chờ chốt #4).
+CREATE TABLE BaoCaoViPham (
+  MaBaoCao         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaNguoiBaoCao    INT UNSIGNED NOT NULL,
+  LoaiDoiTuong     ENUM('event') NOT NULL DEFAULT 'event',
+  MaDoiTuong       INT UNSIGNED NOT NULL,
+  LyDo             ENUM('misleading','fraud','inappropriate','other') NOT NULL,
+  NoiDung          VARCHAR(500) NULL,
+  TrangThai        ENUM('pending','upheld','dismissed') NOT NULL DEFAULT 'pending',
+  HanhDong         ENUM('none','hide','cancel') NULL,
+  CongViPham       TINYINT(1) NOT NULL DEFAULT 0,
+  GhiChuQuanTri    VARCHAR(500) NULL,
+  MaQuanTriXuLy    INT UNSIGNED NULL,
+  NgayXuLy         DATETIME NULL,
+  NgayTao          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_BaoCao_NguoiBao FOREIGN KEY (MaNguoiBaoCao) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_BaoCao_QuanTri  FOREIGN KEY (MaQuanTriXuLy) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_BaoCao_Moi (MaNguoiBaoCao, LoaiDoiTuong, MaDoiTuong),
+  KEY IDX_BaoCao_TrangThai (TrangThai, NgayTao),
+  KEY IDX_BaoCao_DoiTuong (LoaiDoiTuong, MaDoiTuong)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+ALTER TABLE Gay
+  ADD CONSTRAINT FK_Gay_BaoCao FOREIGN KEY (MaBaoCao) REFERENCES BaoCaoViPham(MaBaoCao);
+
+-- ---------------------------------------------------------------------
 -- 14. ThongBao: thông báo cho khách, chủ sân và admin
 --     KhoaChongTrung UNIQUE để chống gửi trùng
 CREATE TABLE ThongBao (
@@ -444,11 +672,16 @@ CREATE TABLE ThongBao (
                        'complaint_resolved','owner_warning','owner_banned',
                        'review_received','review_replied','review_hidden','review_sent',
                        'review_reminder',
-                       'refund_reminder','refund_escalated','refund_received','refund_not_received')
+                       'refund_reminder','refund_escalated','refund_received','refund_not_received',
+                       'hold_expiring','confirm_expiring','checkin_success',
+                       'event_registered','event_accepted','event_rejected','event_removed',
+                       'event_updated','event_cancelled','event_reminder','event_hidden',
+                       'event_payment_submitted','event_payment_confirmed','event_payment_rejected',
+                       'event_payment_expired')
                   NOT NULL,
   TieuDe          VARCHAR(150) NOT NULL,
   NoiDung         VARCHAR(500) NOT NULL,
-  LoaiThamChieu   ENUM('booking','payment','venue','complaint') NULL COMMENT 'để app/web điều hướng khi bấm vào',
+  LoaiThamChieu   ENUM('booking','payment','venue','complaint','event','registration') NULL COMMENT 'để app/web điều hướng khi bấm vào',
   MaThamChieu     INT UNSIGNED NULL,
   DaDoc           TINYINT(1) NOT NULL DEFAULT 0,
   KhoaChongTrung  VARCHAR(100) NULL,
@@ -485,3 +718,161 @@ CREATE TABLE NhatKyHeThong (
   KEY IDX_NhatKy_DoiTuong (DoiTuong, MaDoiTuong),
   KEY IDX_NhatKy_NguoiThucHien (MaNguoiThucHien, NgayTao)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G8.1: schema Cộng đồng (bài tìm người chơi, đội nhóm, phòng chat).
+-- Chạy sau db_sancaulong.sql hiện tại. Có thể chạy lại an toàn.
+USE db_sancaulong;
+
+CREATE TABLE IF NOT EXISTS PhongChat (
+  MaPhong INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  Loai ENUM('player_post','team') NOT NULL,
+  TrangThai ENUM('open','readonly') NOT NULL DEFAULT 'open',
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY IDX_PhongChat_LoaiTrangThai (Loai, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ThanhVienPhong (
+  MaPhong INT UNSIGNED NOT NULL,
+  MaNguoiDung INT UNSIGNED NOT NULL,
+  VaiTro ENUM('owner','member') NOT NULL DEFAULT 'member',
+  TrangThai ENUM('active','left','removed') NOT NULL DEFAULT 'active',
+  NgayVao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayRoi DATETIME NULL,
+  PRIMARY KEY (MaPhong, MaNguoiDung),
+  KEY IDX_ThanhVienPhong_NguoiDung (MaNguoiDung, TrangThai),
+  CONSTRAINT FK_ThanhVienPhong_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong) ON DELETE CASCADE,
+  CONSTRAINT FK_ThanhVienPhong_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS TinNhan (
+  MaTin INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaPhong INT UNSIGNED NOT NULL,
+  MaNguoiGui INT UNSIGNED NOT NULL,
+  NoiDung VARCHAR(1000) NOT NULL,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_TinNhan_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong) ON DELETE CASCADE,
+  CONSTRAINT FK_TinNhan_NguoiGui FOREIGN KEY (MaNguoiGui) REFERENCES NguoiDung(MaNguoiDung),
+  KEY IDX_TinNhan_PhongMaTin (MaPhong, MaTin),
+  KEY IDX_TinNhan_NguoiGui (MaNguoiGui, NgayTao)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS BaiTimNguoi (
+  MaBai INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaNguoiTao INT UNSIGNED NOT NULL,
+  MaPhong INT UNSIGNED NOT NULL,
+  TieuDe VARCHAR(150) NOT NULL,
+  MoTa TEXT NULL,
+  TrinhDoTu TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  TrinhDoDen TINYINT UNSIGNED NOT NULL DEFAULT 8,
+  SoNguoiCan TINYINT UNSIGNED NOT NULL,
+  NgayChoi DATE NOT NULL,
+  GioBatDau TIME NOT NULL,
+  GioKetThuc TIME NOT NULL,
+  KhuVuc VARCHAR(150) NOT NULL,
+  ChiPhi VARCHAR(100) NULL,
+  MaDatSan INT UNSIGNED NULL,
+  AnhBia VARCHAR(255) NULL,
+  TrangThai ENUM('open','full','closed','ended','cancelled','hidden','removed') NOT NULL DEFAULT 'open',
+  LyDoGo VARCHAR(500) NULL,
+  MaNguoiGo INT UNSIGNED NULL,
+  NgayGo DATETIME NULL,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_BaiTimNguoi_NguoiTao FOREIGN KEY (MaNguoiTao) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_BaiTimNguoi_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong),
+  CONSTRAINT FK_BaiTimNguoi_DatSan FOREIGN KEY (MaDatSan) REFERENCES DatSan(MaDatSan),
+  CONSTRAINT FK_BaiTimNguoi_NguoiGo FOREIGN KEY (MaNguoiGo) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_BaiTimNguoi_Phong (MaPhong),
+  KEY IDX_BaiTimNguoi_DanhSach (TrangThai, NgayChoi, NgayTao),
+  KEY IDX_BaiTimNguoi_NguoiTao (MaNguoiTao, TrangThai),
+  CONSTRAINT CHK_BaiTimNguoi_TrinhDo CHECK (TrinhDoTu BETWEEN 1 AND 8 AND TrinhDoDen BETWEEN 1 AND 8 AND TrinhDoTu <= TrinhDoDen),
+  CONSTRAINT CHK_BaiTimNguoi_SoNguoi CHECK (SoNguoiCan BETWEEN 1 AND 20),
+  CONSTRAINT CHK_BaiTimNguoi_Gio CHECK (GioKetThuc > GioBatDau)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS DoiNhom (
+  MaDoi INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaTruongNhom INT UNSIGNED NOT NULL,
+  MaPhong INT UNSIGNED NOT NULL,
+  TenNhom VARCHAR(120) NOT NULL,
+  AnhDaiDien VARCHAR(255) NULL,
+  MoTa TEXT NULL,
+  KhuVuc VARCHAR(150) NULL,
+  TrinhDoTu TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  TrinhDoDen TINYINT UNSIGNED NOT NULL DEFAULT 8,
+  SoThanhVienToiDa SMALLINT UNSIGNED NOT NULL DEFAULT 20,
+  CheDoThamGia ENUM('free','approval') NOT NULL DEFAULT 'free',
+  NoiQuy TEXT NULL,
+  TrangThai ENUM('active','disbanded','hidden','removed') NOT NULL DEFAULT 'active',
+  LyDoGo VARCHAR(500) NULL,
+  MaNguoiGo INT UNSIGNED NULL,
+  NgayGo DATETIME NULL,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_DoiNhom_TruongNhom FOREIGN KEY (MaTruongNhom) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_DoiNhom_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong),
+  CONSTRAINT FK_DoiNhom_NguoiGo FOREIGN KEY (MaNguoiGo) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_DoiNhom_Phong (MaPhong),
+  KEY IDX_DoiNhom_DanhSach (TrangThai, NgayTao),
+  KEY IDX_DoiNhom_TruongNhom (MaTruongNhom, TrangThai),
+  CONSTRAINT CHK_DoiNhom_TrinhDo CHECK (TrinhDoTu BETWEEN 1 AND 8 AND TrinhDoDen BETWEEN 1 AND 8 AND TrinhDoTu <= TrinhDoDen),
+  CONSTRAINT CHK_DoiNhom_SoThanhVien CHECK (SoThanhVienToiDa >= 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS YeuCauVaoDoi (
+  MaYeuCau INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaDoi INT UNSIGNED NOT NULL,
+  MaNguoiDung INT UNSIGNED NOT NULL,
+  TrangThai ENUM('pending','accepted','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  MaNguoiDungPending INT UNSIGNED AS (CASE WHEN TrangThai='pending' THEN MaNguoiDung ELSE NULL END) STORED,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayXuLy DATETIME NULL,
+  CONSTRAINT FK_YeuCauVaoDoi_Doi FOREIGN KEY (MaDoi) REFERENCES DoiNhom(MaDoi) ON DELETE CASCADE,
+  CONSTRAINT FK_YeuCauVaoDoi_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
+  UNIQUE KEY UQ_YeuCauVaoDoi_Pending (MaDoi, MaNguoiDungPending),
+  KEY IDX_YeuCauVaoDoi_DoiTrangThai (MaDoi, TrangThai, NgayTao),
+  KEY IDX_YeuCauVaoDoi_NguoiTrangThai (MaNguoiDung, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Mỗi người chỉ được một báo cáo trên mỗi đối tượng; UNIQUE hiện hữu được giữ nguyên.
+ALTER TABLE BaoCaoViPham
+  MODIFY LoaiDoiTuong ENUM('event','player_post','team') NOT NULL DEFAULT 'event',
+  MODIFY TrangThai ENUM('pending','upheld','dismissed','rejected') NOT NULL DEFAULT 'pending',
+  MODIFY HanhDong ENUM('none','hide','cancel','remove') NULL;
+
+
+DELIMITER $$
+DROP PROCEDURE IF EXISTS migration_g8_community_unique_report$$
+CREATE PROCEDURE migration_g8_community_unique_report()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='BaoCaoViPham' AND INDEX_NAME='UQ_BaoCao_Moi'
+  ) THEN
+    ALTER TABLE BaoCaoViPham
+      ADD UNIQUE KEY UQ_BaoCao_Moi (MaNguoiBaoCao, LoaiDoiTuong, MaDoiTuong);
+  END IF;
+END$$
+CALL migration_g8_community_unique_report()$$
+DROP PROCEDURE migration_g8_community_unique_report$$
+DELIMITER ;
+
+ALTER TABLE ThongBao
+  MODIFY Loai ENUM(
+    'booking_created','payment_success','payment_failed','booking_cancelled','new_booking_for_owner','system',
+    'refund_requested','refund_completed','complaint_received','complaint_resolved','owner_warning','owner_banned',
+    'review_received','review_replied','review_hidden','review_sent','review_reminder',
+    'refund_reminder','refund_escalated','refund_received','refund_not_received','hold_expiring','confirm_expiring','checkin_success',
+    'event_registered','event_accepted','event_rejected','event_removed','event_updated','event_cancelled','event_reminder','event_hidden',
+    'event_payment_submitted','event_payment_confirmed','event_payment_rejected','event_payment_expired',
+    'post_joined','post_left','post_cancelled','post_ended','member_removed',
+    'team_request','team_accepted','team_rejected','team_disbanded','team_owner_changed',
+    'community_hidden','community_removed','report_processed'
+  ) NOT NULL,
+  MODIFY LoaiThamChieu ENUM('booking','payment','venue','complaint','event','registration','player_post','team') NULL;
+
+INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
+ ('community_max_open_posts','5','Số bài tìm người đang mở tối đa mỗi người'),
+ ('community_max_owned_teams','3','Số đội nhóm tối đa một người đang làm trưởng nhóm'),
+ ('community_post_max_days','60','Số ngày tối đa từ hôm nay đến ngày chơi của bài tìm người')
+ON DUPLICATE KEY UPDATE MoTa=VALUES(MoTa);

@@ -1,9 +1,11 @@
 const dichVu = require('../services/ownerService');
 const dichVuDanhGia = require('../services/reviewService');
 const sanCoSo = require('../services/sanCoSoService');
+const dichVuKhieuNai = require('../services/complaintService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { thanhCong, daTao } = require('../utils/response');
+const { phatMotSlot } = require('../realtime/datSan');
 
 const xuLy = (hamXuLy, dinhDang = thanhCong) =>
   xuLyBatDongBo(async (yeuCau, phanHoi) => dinhDang(phanHoi, await hamXuLy(yeuCau)));
@@ -35,8 +37,8 @@ exports.capNhatAnhCoSo = xuLy((yeuCau) => {
 });
 exports.layAnhCoSo = xuLy((yeuCau) => dichVu.layAnhCoSo(layMaChuSan(yeuCau), layMaCoSo(yeuCau)));
 exports.themAnhSan = xuLy((yeuCau) => {
-  if (!yeuCau.file) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
-  return dichVu.themAnhSan(layMaChuSan(yeuCau), yeuCau.file, layMaCoSo(yeuCau));
+  if (!yeuCau.files?.length) throw AppError.duLieuKhongHopLe('Thiếu tệp ảnh (trường "tepAnh")');
+  return dichVu.themAnhSan(layMaChuSan(yeuCau), yeuCau.files, layMaCoSo(yeuCau));
 }, daTao);
 exports.datAnhBia = xuLy((yeuCau) =>
   dichVu.datAnhBia(layMaChuSan(yeuCau), layMaCoSo(yeuCau), yeuCau.params.maAnh));
@@ -53,10 +55,22 @@ exports.xoaSan = xuLy((yeuCau) => sanCoSo.xoaSan(nguoi(yeuCau), yeuCau.params.ma
 exports.dongCoSo = xuLy((yeuCau) => sanCoSo.dongCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
 exports.moCoSo = xuLy((yeuCau) => sanCoSo.moCoSo(nguoi(yeuCau), yeuCau.params.maCoSo));
 exports.xoaCoSo = xuLy((yeuCau) => sanCoSo.xoaCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
-exports.taoKhoaSan = xuLy((yeuCau) => dichVu.taoKhoaSan(layMaChuSan(yeuCau), yeuCau.body), daTao);
+exports.taoKhoaSan = xuLy(async (yeuCau) => {
+  const r = await dichVu.taoKhoaSan(layMaChuSan(yeuCau), yeuCau.body);
+  const db = require('../config/db').pool;
+  const tuNgay = r.tuNgay || String(r.thoiGianBatDau || '').slice(0,10);
+  const denNgay = r.denNgay || tuNgay;
+  if (tuNgay) {
+    const [locks] = await db.query('SELECT MaSan,NgayKhoa,GioBatDau,GioKetThuc FROM KhoaSan WHERE MaSan=? AND NgayKhoa BETWEEN ? AND ? AND GioBatDau<? AND GioKetThuc>?', [r.maSan, tuNgay, denNgay, r.gioKetThuc || String(r.thoiGianKetThuc || '').slice(11), r.gioBatDau || String(r.thoiGianBatDau || '').slice(11)]);
+    for (const k of locks) await phatMotSlot(k.MaSan,k.NgayKhoa,k.GioBatDau,k.GioKetThuc);
+  }
+  return r;
+}, daTao);
 exports.lietKeKhoaSan = xuLy((yeuCau) => dichVu.lietKeKhoaSan(layMaChuSan(yeuCau), yeuCau.query));
 exports.xoaKhoaSan = xuLy(async (yeuCau) => {
+  const [[k]] = await require('../config/db').pool.query('SELECT MaSan,NgayKhoa,GioBatDau,GioKetThuc FROM KhoaSan WHERE MaKhoa=?',[yeuCau.params.maKhoa]);
   await dichVu.xoaKhoaSan(layMaChuSan(yeuCau), yeuCau.params.maKhoa);
+  if (k) await phatMotSlot(k.MaSan,k.NgayKhoa,k.GioBatDau,k.GioKetThuc);
   return { daXoa: true };
 });
 
@@ -66,3 +80,9 @@ exports.phanHoiDanhGia = xuLy((yeuCau) =>
   dichVuDanhGia.phanHoiDanhGia(layMaChuSan(yeuCau), yeuCau.params.maDanhGia, yeuCau.body.noiDung));
 exports.xoaPhanHoiDanhGia = xuLy((yeuCau) =>
   dichVuDanhGia.xoaPhanHoiDanhGia(layMaChuSan(yeuCau), yeuCau.params.maDanhGia));
+
+exports.lietKeKhieuNai = xuLy((yeuCau) => dichVuKhieuNai.lietKeKhieuNaiCuaChuSan(layMaChuSan(yeuCau), yeuCau.query));
+exports.khangNghiKhieuNai = xuLy((yeuCau) =>
+  dichVuKhieuNai.khangNghiKhieuNai(layMaChuSan(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));
+exports.phanHoiKhieuNai = xuLy((yeuCau) =>
+  dichVuKhieuNai.phanHoiKhieuNai(layMaChuSan(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));

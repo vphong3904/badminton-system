@@ -17,6 +17,8 @@ const cauHinh = {
   // Job nhả slot đơn quá hạn giữ chỗ (chu kỳ, phút; tối thiểu 1).
   jobHetHanGiuChoPhut: Math.max(Number(process.env.JOB_HET_HAN_GIU_CHO_PHUT) || 1, 1),
   jobHanHoanPhut: Math.max(Number(process.env.JOB_HAN_HOAN_PHUT) || 10, 1),
+  // Job sự kiện: đóng đăng ký quá hạn, kết thúc sự kiện, hết hạn phí và nhắc người tham gia.
+  jobSuKienPhut: Math.max(Number(process.env.JOB_SU_KIEN_PHUT) || 1, 1),
   khoaBiMat: process.env.JWT_SECRET || 'dev_secret',
   thoiHanMaTruyCap: process.env.JWT_EXPIRES_IN || '7d',
   nguonTruyCap: process.env.CORS_ORIGIN || '*',

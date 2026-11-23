@@ -5,6 +5,7 @@ const kiemTraHopLe = require('../middlewares/validate');
 const checkIn = require('../controllers/checkInController');
 const kiemTraCheckIn = require('../validators/checkIn');
 const hoanTien = require('../controllers/hoanTienController');
+const dieuKhienSuKien = require('../controllers/suKienController');
 const { xacThucNguoiDung, kiemTraVaiTro } = require('../middlewares/auth');
 
 dinhTuyen.get('/co-so', kiemTraHopLe(kiemTraDuLieu.timCoSo), dieuKhien.timCoSo);
@@ -19,6 +20,7 @@ dinhTuyen.get('/san/:maSan', kiemTraHopLe(kiemTraDuLieu.maSan), dieuKhien.layChi
 dinhTuyen.get('/san/:maSan/lich-trong', kiemTraHopLe(kiemTraDuLieu.kiemTraTrong), dieuKhien.kiemTraTrong);
 
 dinhTuyen.use(xacThucNguoiDung, kiemTraVaiTro('customer'));
+dinhTuyen.post('/bao-cao', kiemTraHopLe(kiemTraDuLieu.baoCaoSuKien), dieuKhienSuKien.baoCao);
 dinhTuyen.get('/yeu-thich', dieuKhien.layDanhSachYeuThich);
 dinhTuyen.post('/yeu-thich', kiemTraHopLe(kiemTraDuLieu.themYeuThich), dieuKhien.themYeuThich);
 dinhTuyen.delete('/yeu-thich/:maCoSo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.boYeuThich);
@@ -30,7 +32,7 @@ dinhTuyen.get('/dat-san/:maDatSan/hoa-don-nhap', kiemTraHopLe(kiemTraDuLieu.maDa
 dinhTuyen.get('/dat-san/:maDatSan/huy-xem-truoc', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.xemTruocHuy);
 // G3: khách quét QR check-in tại sân (mỗi đơn con check-in riêng).
 dinhTuyen.post('/dat-san/:maDatSan/check-in', kiemTraHopLe(kiemTraCheckIn.checkIn), checkIn.checkInKhach);
-dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.huyDatSan);
+dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraDuLieu.huyDatSan), dieuKhien.huyDatSan);
 dinhTuyen.post('/dat-san/:maDatSan/danh-gia',
   kiemTraHopLe(kiemTraDuLieu.guiDanhGia), dieuKhien.guiDanhGia);
 dinhTuyen.patch('/dat-san/:maDatSan/danh-gia',
@@ -46,6 +48,8 @@ dinhTuyen.post('/hoan-tien/:maHoanTien/chua-nhan', kiemTraHopLe(kiemTraDuLieu.ho
 
 dinhTuyen.post('/dat-san/:maDatSan/khieu-nai',
   kiemTraHopLe(kiemTraDuLieu.guiKhieuNai), dieuKhien.guiKhieuNai);
+dinhTuyen.post('/hoan-tien/:maHoanTien/khieu-nai',
+  kiemTraHopLe(kiemTraDuLieu.khieuNaiHoanTien), dieuKhien.khieuNaiHoanTien);
 dinhTuyen.get('/khieu-nai', dieuKhien.lietKeKhieuNai);
 
 module.exports = dinhTuyen;

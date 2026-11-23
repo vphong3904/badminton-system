@@ -24,7 +24,7 @@ async function ghiNhatKy(ketNoi, nguoi, hanhDong, doiTuong, maDoiTuong, chiTiet)
 
 // Đếm khách còn đặt (đơn hiện tại/sắp tới) và lịch cố định còn hiệu lực trên một nhóm sân.
 async function demKhachConLai(ketNoi, cacMaSan) {
-  if (!cacMaSan.length) return { soDon: 0, soLichCoDinh: 0 };
+  if (!cacMaSan.length) return { soDon: 0, soLichCoDinh: 0, cacSuKien: [] };
   const cho = cacMaSan.map(() => '?').join(',');
   const [[don]] = await ketNoi.query(
     `SELECT COUNT(*) AS so FROM DatSan
@@ -36,10 +36,31 @@ async function demKhachConLai(ketNoi, cacMaSan) {
      WHERE MaSan IN (${cho}) AND TrangThai='active'
        AND (NgayKetThuc IS NULL OR NgayKetThuc >= CURDATE())`,
     cacMaSan);
-  return { soDon: Number(don.so), soLichCoDinh: Number(lich.so) };
+  // Sự kiện open/closed còn chưa đến giờ kết thúc vẫn giữ sân qua KhoaSan.MaSuKien.
+  const [cacSuKien] = await ketNoi.query(
+    `SELECT DISTINCT sk.MaSuKien AS maSuKien, sk.TieuDe AS tieuDe,
+       sk.NgaySuKien AS ngay, sk.GioBatDau AS gioBatDau, sk.GioKetThuc AS gioKetThuc,
+       sk.TrangThai AS trangThai
+     FROM KhoaSan k JOIN SuKien sk ON sk.MaSuKien=k.MaSuKien
+     WHERE k.MaSan IN (${cho}) AND sk.TrangThai IN ('open','closed')
+       AND TIMESTAMP(sk.NgaySuKien, sk.GioKetThuc) > NOW()
+     ORDER BY sk.NgaySuKien, sk.GioBatDau, sk.MaSuKien`,
+    cacMaSan);
+  const cacSuKienHopLe = cacSuKien.filter((sk) => sk.maSuKien !== undefined && sk.maSuKien !== null);
+  return {
+    soDon: Number(don.so), soLichCoDinh: Number(lich.so),
+    ...(cacSuKienHopLe.length ? { cacSuKien: cacSuKienHopLe } : {}),
+  };
 }
 
-function chanNeuConKhach({ soDon, soLichCoDinh }, doiTuong, hanhDong) {
+function chanNeuConKhach({ soDon, soLichCoDinh, cacSuKien = [] }, doiTuong, hanhDong) {
+  if (cacSuKien.length) {
+    const tenSuKien = cacSuKien.slice(0, 3).map((sk) => `“${sk.tieuDe}” (${sk.ngay} ${String(sk.gioBatDau).slice(0, 5)}–${String(sk.gioKetThuc).slice(0, 5)})`);
+    const conLai = cacSuKien.length > 3 ? ` và ${cacSuKien.length - 3} sự kiện khác` : '';
+    throw new AppError(409,
+      `Không thể ${hanhDong} ${doiTuong}: sân đang được giữ cho ${tenSuKien.join(', ')}${conLai}. Hãy chỉnh sửa hoặc hủy sự kiện trước.`,
+      'HAS_ACTIVE_EVENTS', { cacSuKien });
+  }
   if (!soDon && !soLichCoDinh) return;
   const phan = [];
   if (soDon) phan.push(`${soDon} đơn đặt hiện tại/sắp tới`);

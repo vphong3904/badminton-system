@@ -2,6 +2,7 @@ const dichVu = require('../services/ownerBookingService');
 const dichVuThanhToan = require('../services/paymentService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const { thanhCong, daTao } = require('../utils/response');
+const { phatCapNhatDatSan, phatNhieuCapNhatDatSan } = require('../realtime/datSan');
 
 exports.lietKeDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
   thanhCong(phanHoi, await dichVu.lietKeDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.query));
@@ -19,32 +20,32 @@ exports.hoanThanhHoanTien = xuLyBatDongBo(async (yeuCau, phanHoi) => {
 });
 // Khách gửi ảnh chuyển khoản → chủ sân xem ảnh ở chi tiết đơn rồi xác nhận hoặc từ chối.
 exports.xacNhanThanhToan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVuThanhToan.xacNhanThanhToan(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, 'owner'));
+  const r = await dichVuThanhToan.xacNhanThanhToan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, 'owner');
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });
 exports.tuChoiThanhToan = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVuThanhToan.tuChoiThanhToan(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo, 'owner'));
+  const r = await dichVuThanhToan.tuChoiThanhToan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo, 'owner');
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });
 
 // Chủ sân tạo đơn cho khách đặt tại chỗ / khách cố định (Nguon='owner', xác nhận ngay, không qua QR).
 exports.taoDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  daTao(phanHoi, await dichVu.taoDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.body));
+  const r = await dichVu.taoDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.body);
+  await phatNhieuCapNhatDatSan((r.cacDon || []).map(x => x.maDatSan)); daTao(phanHoi, r);
 });
 
 // Chủ sân huỷ đơn đã đặt: khách được hoàn 100% (vào hàng đợi hoàn tiền của chủ sân).
 exports.huyDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVu.huyDon(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo));
+  const r = await dichVu.huyDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo);
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });
 
 // Đơn chủ sân tự tạo: đánh dấu đã thu tiền ngoài hệ thống / huỷ (không hoàn tiền).
 exports.daThuDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVu.danhDauDaThu(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.query.tatCaBuoi === true));
+  const r = await dichVu.danhDauDaThu(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.query.tatCaBuoi === true);
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });
 exports.huyDonOwner = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  thanhCong(phanHoi, await dichVu.huyDonOwner(
-    yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan,
-    { lyDo: yeuCau.body.lyDo, tatCaBuoi: yeuCau.query.tatCaBuoi === true }));
+  const r = await dichVu.huyDonOwner(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, { lyDo: yeuCau.body.lyDo, tatCaBuoi: yeuCau.query.tatCaBuoi === true });
+  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
 });

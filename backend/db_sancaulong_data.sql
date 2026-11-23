@@ -27,19 +27,30 @@ INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
   ('overpay_refund_hours',    '48',  'Hạn hoàn khoản chuyển dư/trùng (giờ) (đề xuất, cần chốt)'),
   ('refund_deadline_hours',   '24',  'Hạn chủ sân chuyển khoản hoàn tiền (giờ) (đề xuất, cần chốt)'),
   ('refund_grace_hours',      '24',  'Gia hạn (giờ) sau hạn hoàn trước khi khoá nhận đặt mới'),
+  ('refund_complaint_wait_minutes','30','Chủ sân chưa hoàn tiền sau bao nhiêu phút thì khách được báo chưa nhận được tiền hoàn (khiếu nại)'),
+  ('complaint_owner_reply_hours','24','Hạn chủ sân phản hồi/giải trình khiếu nại (giờ) kể từ lúc khách gửi'),
   ('owner_cancel_reply_hours','24',  'Hạn khách phản hồi khi chủ sân huỷ lịch (giờ); rút ngắn khi sát giờ (đề xuất)'),
   ('noshow_wait_minutes',     '30',  'Chờ khách đến trễ bao lâu (phút) thì chủ sân được đánh dấu không đến (đề xuất 15–30)'),
   ('checkin_open_minutes',    '30',  'Mở check-in trước giờ chơi (phút)'),
   ('incident_admin_minutes',  '30',  'Chủ sân không phản hồi sự cố tại sân sau bao lâu (phút) thì Admin hỗ trợ (đề xuất 15–30)'),
   ('complaint_days',          '7',   'Số ngày khách được khiếu nại sau giờ chơi'),
   ('owner_response_hours',    '24',  'Hạn chủ sân giải trình khiếu nại (giờ) (đề xuất 24–48)'),
+  ('hold_reminder_minutes',   '5',   'Nhắc khách khi còn ≤ bấy nhiêu phút là hết hạn giữ chỗ (chưa gửi ảnh chuyển khoản)'),
+  ('confirm_reminder_minutes','5',   'Nhắc chủ sân khi còn ≤ bấy nhiêu phút là hết hạn xác nhận thanh toán'),
   ('appeal_hours',            '48',  'Hạn kháng nghị quyết định của Admin (giờ) (đề xuất)'),
   ('strike_lock_count',       '3',   'Số "gậy" tích luỹ thì khoá nhận đặt mới'),
   ('abuse_threshold',         '5',   'Số lần huỷ/hết hạn giữ chỗ trong abuse_window_hours bị coi là giữ sân ảo (đề xuất)'),
   ('abuse_window_hours',      '24',  'Cửa sổ thời gian (giờ) để đếm giữ sân ảo (đề xuất)'),
   ('reschedule_min_hours',    '24',  'Đổi lịch: phải cách giờ chơi ít nhất bao nhiêu giờ (đã chốt 0.8 #3)'),
   ('reschedule_max_count',    '1',   'Đổi lịch: số lần đổi tối đa mỗi đơn (đã chốt 0.8 #3)'),
-  ('reschedule_range_days',   '7',   'Đổi lịch: được dời trong ±bao nhiêu ngày so với ngày cũ (đã chốt 0.8 #3)');
+  ('reschedule_range_days',   '7',   'Đổi lịch: được dời trong ±bao nhiêu ngày so với ngày cũ (đã chốt 0.8 #3)'),
+  ('event_max_per_venue',     '10',       'Số sự kiện open/closed tối đa mỗi cơ sở cùng lúc (G7)'),
+  ('event_min_register_lead_minutes','60', 'Hạn đăng ký sự kiện phải trước giờ bắt đầu tối thiểu bấy nhiêu phút (G7)'),
+  ('event_max_active_regs_per_customer','10','Số đăng ký sự kiện pending/accepted chưa diễn ra tối đa mỗi khách (G7)'),
+  ('event_reminder_hours',     '24',       'Nhắc người đã đăng ký trước giờ diễn ra bấy nhiêu giờ (G7)'),
+  ('event_max_fee',            '10000000', 'Phí sự kiện tối đa (đồng) (G7)'),
+  ('event_payment_hold_minutes','30',      'Hạn khách chuyển khoản + gửi ảnh (phút) sau khi đăng ký sự kiện được nhận (G7)'),
+  ('event_commission_rate',    '0',        'Hoa hồng hệ thống (%) trên phí sự kiện; 0 = chưa thu (G7)');
 
 -- ---------------------------------------------------------------------
 -- Tài khoản admin (MaNguoiDung = 1)
@@ -1665,3 +1676,10 @@ JOIN (SELECT 1 AS Thu UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
   ON (b.LoaiNgay = 'weekday' AND t.Thu <= 5) OR (b.LoaiNgay = 'weekend' AND t.Thu >= 6)
 WHERE b.Thu = 0;
 DELETE FROM BangGia WHERE Thu = 0;
+
+-- G8.1: cấu hình mặc định cho tính năng cộng đồng.
+INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
+ ('community_max_open_posts','5','Số bài tìm người đang mở tối đa mỗi người'),
+ ('community_max_owned_teams','3','Số đội nhóm tối đa một người đang làm trưởng nhóm'),
+ ('community_post_max_days','60','Số ngày tối đa từ hôm nay đến ngày chơi của bài tìm người')
+ON DUPLICATE KEY UPDATE MoTa=VALUES(MoTa);

@@ -1,6 +1,7 @@
 const { thucHienGiaoDich } = require('../config/db');
 const cauHinh = require('../config/env');
 const { guiThongBao } = require('../services/notificationService');
+const { phatNhieuCapNhatDatSan } = require('../realtime/datSan');
 
 // Job nền: đơn đã xác nhận (confirmed) hoặc đã check-in mà qua giờ kết thúc của khung đã đặt → completed, rồi nhắc khách đánh giá.
 // Các lệnh cập nhật "lười" trong customerService.hetHanDatSan vẫn giữ làm phương án dự phòng.
@@ -11,7 +12,7 @@ let dangChay = false;
 // Một lần quét, trong MỘT giao dịch. `FOR UPDATE` (chỉ khoá dòng DatSan; không dùng `OF`/`SKIP LOCKED` vì MariaDB không hỗ trợ)
 // để hai tiến trình không giẫm lên nhau; câu UPDATE bên dưới còn kiểm lại `TrangThai IN ('confirmed','checked_in')`.
 async function chayMotLan() {
-  return thucHienGiaoDich(async (ketNoi) => {
+  const ketQua = await thucHienGiaoDich(async (ketNoi) => {
     const [cacDon] = await ketNoi.query(
       `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaKhachHang AS maKhachHang, d.Nguon AS nguon,
          d.MaLichCoDinh AS maLichCoDinh,
@@ -21,7 +22,7 @@ async function chayMotLan() {
        ORDER BY d.MaDatSan LIMIT ?
        FOR UPDATE`,
       [SO_DON_TOI_DA_MOI_LAN]);
-    if (!cacDon.length) return { soDonHoanThanh: 0, soThongBao: 0 };
+    if (!cacDon.length) return { soDonHoanThanh: 0, soThongBao: 0, cacMaDatSan: [] };
 
     await ketNoi.query(
       `UPDATE DatSan SET TrangThai='completed'
@@ -51,8 +52,11 @@ async function chayMotLan() {
       });
       soThongBao += 1;
     }
-    return { soDonHoanThanh: cacDon.length, soThongBao };
+    return { soDonHoanThanh: cacDon.length, soThongBao, cacMaDatSan: cacDon.map(x => Number(x.maDatSan)) };
   });
+  await phatNhieuCapNhatDatSan(ketQua.cacMaDatSan);
+  const { cacMaDatSan, ...congKhai } = ketQua;
+  return congKhai;
 }
 
 // Chạy định kỳ bằng setInterval (mặc định 5 phút, đổi bằng JOB_HOAN_THANH_PHUT). Không chạy khi NODE_ENV=test.
