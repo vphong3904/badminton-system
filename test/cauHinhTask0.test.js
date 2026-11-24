@@ -9,10 +9,11 @@ const doc = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8');
 const schema = doc('db_sancaulong.sql');
 const migration = doc('scripts', 'migration-task0-nen-tang.sql');
 
+// G9.C1: bỏ refund_deadline_hours (thay bằng refund_deadline_minutes_*) và appeal_hours (48→24) khỏi danh sách đối chiếu.
 const KHOA_MOI = [
   'confirm_urgent_minutes', 'urgent_threshold_minutes', 'reconcile_hold_minutes', 'topup_minutes', 'overpay_refund_hours',
-  'refund_deadline_hours', 'refund_grace_hours', 'owner_cancel_reply_hours', 'noshow_wait_minutes', 'checkin_open_minutes',
-  'incident_admin_minutes', 'complaint_days', 'owner_response_hours', 'appeal_hours', 'strike_lock_count',
+  'refund_grace_hours', 'owner_cancel_reply_hours', 'noshow_wait_minutes', 'checkin_open_minutes',
+  'incident_admin_minutes', 'complaint_days', 'owner_response_hours', 'strike_lock_count',
   'abuse_threshold', 'abuse_window_hours', 'reschedule_min_hours', 'reschedule_max_count', 'reschedule_range_days',
 ];
 const giaTri = (sql, khoa) => sql.match(new RegExp(`\\('${khoa}',\\s*'([^']*)'`))?.[1];

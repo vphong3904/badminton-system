@@ -16,6 +16,7 @@ const xuLyLoi = (loi, _yeuCau, phanHoi, _goiTiep) => {
   let loiHienThi = loi;
   if (loi.code === 'ER_DUP_ENTRY') loiHienThi = AppError.biTrung('Dữ liệu đã tồn tại');
   else if (loi.code === 'LIMIT_FILE_SIZE') loiHienThi = AppError.duLieuKhongHopLe('Tệp quá lớn (tối đa 5MB)');
+  else if (loi.code === 'LIMIT_UNEXPECTED_FILE') loiHienThi = AppError.duLieuKhongHopLe('Mỗi lần tải tối đa 12 ảnh.');
   else if (MA_LOI_CSDL_KHONG_SAN_SANG.has(loi.code)) {
     console.error('Cơ sở dữ liệu không sẵn sàng:', loi.code, loi.message);
     loiHienThi = AppError.khongSanSang();

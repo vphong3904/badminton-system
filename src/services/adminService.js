@@ -6,6 +6,8 @@ const fs = require('fs/promises');
 const { layMucConThieuHoSo } = require('../utils/hoSoChuSan');
 const nhatKy = require('./nhatKyService');
 const chungTu = require('./chungTuService');
+const suKienAdmin = require('./suKienAdminService');
+const { ngatKetNoiNguoiDung } = require('../realtime/phat');
 
 const ghiNhatKy = (ketNoi, maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet) =>
   nhatKy.ghiNhatKy(ketNoi, { maNguoiThucHien: maQuanTri, hanhDong, doiTuong, maDoiTuong, chiTiet });
@@ -246,6 +248,13 @@ async function lietKeNguoiDung({ vaiTro, trangThai = 'all', tuKhoa, trang = 1, s
 }
 
 async function khoaTaiKhoan(maQuanTri, maNguoiDung, { lyDo }) {
+  const ketQuaKhoa = await khoaTaiKhoanTrongGiaoDich(maQuanTri, maNguoiDung, { lyDo });
+  // Sau commit: ngắt mọi socket của người bị khóa (G8.0).
+  ngatKetNoiNguoiDung(maNguoiDung);
+  return ketQuaKhoa;
+}
+
+async function khoaTaiKhoanTrongGiaoDich(maQuanTri, maNguoiDung, { lyDo }) {
   return thucHienGiaoDich(async (ketNoi) => {
     const [[taiKhoan]] = await ketNoi.query(
       `SELECT MaNguoiDung AS maNguoiDung, VaiTro AS vaiTro, HoTen AS hoTen, TrangThai AS trangThai
@@ -260,15 +269,23 @@ async function khoaTaiKhoan(maQuanTri, maNguoiDung, { lyDo }) {
     await ketNoi.query(
       "UPDATE NguoiDung SET TrangThai='locked', LyDoKhoa=? WHERE MaNguoiDung=?", [lyDo, maNguoiDung]);
     let soCoSoBiKhoa = 0;
+    let ketQuaSuKien = { soSuKienBiHuy: 0, soDangKyBiHuy: 0, soCanHoanPhi: 0 };
     if (taiKhoan.vaiTro === 'owner') {
       const [ketQua] = await ketNoi.query(
         "UPDATE CoSo SET TrangThai='locked', LyDoKhoa=? WHERE MaChuSan=? AND TrangThai='active'",
         [LY_DO_KHOA_CO_SO, maNguoiDung]);
       soCoSoBiKhoa = ketQua.affectedRows;
+      ketQuaSuKien = await suKienAdmin.huySuKienSapToi(ketNoi, {
+        maQuanTri, maChuSan: maNguoiDung,
+        lyDo: `Tài khoản chủ sân đã bị quản trị viên khóa. Lý do: ${lyDo}`,
+      });
     }
     await ghiNhatKy(ketNoi, maQuanTri, 'khoa_tai_khoan', 'NguoiDung', maNguoiDung,
       `Khóa ${taiKhoan.vaiTro === 'owner' ? 'chủ sân' : 'khách hàng'} ${taiKhoan.hoTen}: ${lyDo}`);
-    return { maNguoiDung: Number(maNguoiDung), trangThai: 'locked', lyDoKhoa: lyDo, soCoSoBiKhoa };
+    return {
+      maNguoiDung: Number(maNguoiDung), trangThai: 'locked', lyDoKhoa: lyDo,
+      soCoSoBiKhoa, ...ketQuaSuKien,
+    };
   });
 }
 
@@ -302,6 +319,52 @@ async function moKhoaTaiKhoan(maQuanTri, maNguoiDung) {
       noiDung: 'Quản trị viên đã mở khóa tài khoản của bạn. Bạn có thể sử dụng hệ thống bình thường.',
     });
     return { maNguoiDung: Number(maNguoiDung), trangThai: 'active', soCoSoMoLai };
+  });
+}
+
+// Admin khóa cơ sở độc lập: các sự kiện chưa bắt đầu bị hủy hệ thống và giải phóng sân.
+async function khoaCoSo(maQuanTri, maCoSo, { lyDo }) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[coSo]] = await ketNoi.query(
+      `SELECT MaCoSo AS maCoSo, MaChuSan AS maChuSan, TenCoSo AS tenCoSo, TrangThai AS trangThai
+       FROM CoSo WHERE MaCoSo=? FOR UPDATE`, [maCoSo]);
+    if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở');
+    if (coSo.trangThai === 'locked') {
+      throw AppError.biTrung('Cơ sở này đã bị khóa rồi.', 'VENUE_ALREADY_LOCKED');
+    }
+    await ketNoi.query("UPDATE CoSo SET TrangThai='locked', LyDoKhoa=? WHERE MaCoSo=?", [lyDo, maCoSo]);
+    const ketQuaSuKien = await suKienAdmin.huySuKienSapToi(ketNoi, {
+      maQuanTri, maCoSo,
+      lyDo: `Cơ sở “${coSo.tenCoSo}” đã bị quản trị viên khóa. Lý do: ${lyDo}`,
+    });
+    await ghiNhatKy(ketNoi, maQuanTri, 'khoa_co_so', 'CoSo', maCoSo, lyDo);
+    await guiThongBao(ketNoi, {
+      maNguoiDung: coSo.maChuSan, loai: 'system', tieuDe: 'Cơ sở đã bị khóa',
+      noiDung: `Cơ sở “${coSo.tenCoSo}” đã bị quản trị viên khóa. Lý do: ${lyDo}`,
+      loaiThamChieu: 'venue', maThamChieu: Number(maCoSo), khoa: `khoa_co_so:${maCoSo}`,
+    });
+    return { maCoSo: Number(maCoSo), trangThai: 'locked', ...ketQuaSuKien };
+  });
+}
+
+// Mở khóa không tự công khai cơ sở: trả về `closed`, chủ sân chủ động mở lại sau.
+async function moKhoaCoSo(maQuanTri, maCoSo) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[coSo]] = await ketNoi.query(
+      `SELECT MaCoSo AS maCoSo, MaChuSan AS maChuSan, TenCoSo AS tenCoSo, TrangThai AS trangThai
+       FROM CoSo WHERE MaCoSo=? FOR UPDATE`, [maCoSo]);
+    if (!coSo) throw AppError.khongTimThay('Không tìm thấy cơ sở');
+    if (coSo.trangThai !== 'locked') {
+      throw AppError.biTrung('Cơ sở này không ở trạng thái bị khóa.', 'VENUE_NOT_LOCKED');
+    }
+    await ketNoi.query("UPDATE CoSo SET TrangThai='closed', LyDoKhoa=NULL WHERE MaCoSo=?", [maCoSo]);
+    await ghiNhatKy(ketNoi, maQuanTri, 'mo_khoa_co_so', 'CoSo', maCoSo, coSo.tenCoSo);
+    await guiThongBao(ketNoi, {
+      maNguoiDung: coSo.maChuSan, loai: 'system', tieuDe: 'Cơ sở đã được mở khóa',
+      noiDung: `Cơ sở “${coSo.tenCoSo}” đã được quản trị viên mở khóa. Cơ sở đang ở trạng thái đóng; hãy mở lại khi sẵn sàng hoạt động.`,
+      loaiThamChieu: 'venue', maThamChieu: Number(maCoSo), khoa: `mo_khoa_co_so:${maCoSo}`,
+    });
+    return { maCoSo: Number(maCoSo), trangThai: 'closed' };
   });
 }
 
@@ -342,5 +405,7 @@ module.exports = {
   lietKeNguoiDung,
   khoaTaiKhoan,
   moKhoaTaiKhoan,
+  khoaCoSo,
+  moKhoaCoSo,
   lietKeCoSo,
 };

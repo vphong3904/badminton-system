@@ -10,7 +10,8 @@ const truongCoSo = {
   email: quyTac.email,
 };
 
-exports.dangKy = { body: z.object(truongCoSo) };
+// Giới tính của khách: FE bắt buộc chọn; BE vẫn nhận thiếu (client cũ) và để NULL — lúc đăng ký sự kiện sẽ đòi lại.
+exports.dangKy = { body: z.object({ ...truongCoSo, gioiTinh: quyTac.gioiTinh.optional() }) };
 
 // Đăng ký chủ sân: thêm tên doanh nghiệp + tài khoản nhận tiền + xác nhận mật khẩu.
 // maNganHang phải nằm trong danh sách ngân hàng của BE (tên ngân hàng BE tự lấy theo mã).
@@ -71,5 +72,7 @@ exports.capNhatThongTinCaNhan = {
     // nếu SĐT bị ĐỔI thì authService bắt buộc số di động (giống FE edit_profile_screen).
     soDienThoai: quyTac.soDienThoaiLienHe,
     email: quyTac.email,
+    soDienThoaiPhu: quyTac.soDienThoaiPhu, // chỉ chủ sân (authService chặn vai trò khác)
+    gioiTinh: quyTac.gioiTinh,
   }).partial().refine((duLieu) => Object.keys(duLieu).length > 0, 'Không có dữ liệu cập nhật'),
 };

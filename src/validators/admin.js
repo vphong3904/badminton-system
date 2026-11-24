@@ -39,6 +39,14 @@ exports.dongXoaSan = { params: z.object({ maSan: maSo }), body: lyDoTuyChon };
 exports.dongXoaCoSo = { params: z.object({ maCoSo: maSo }), body: lyDoTuyChon };
 exports.maSan = { params: z.object({ maSan: maSo }) };
 exports.maCoSo = { params: z.object({ maCoSo: maSo }) };
+exports.khoaCoSo = {
+  params: z.object({ maCoSo: maSo }),
+  body: z.object({
+    lyDo: z.string({ error: 'Cần nêu lý do khóa cơ sở.' }).trim()
+      .min(3, 'Lý do tối thiểu 3 ký tự.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
+exports.moKhoaCoSo = { params: z.object({ maCoSo: maSo }) };
 exports.danhSachNhatKy = {
   query: z.object({
     tuNgay: ngay.optional(),
@@ -53,14 +61,45 @@ exports.danhSachKhieuNai = {
     gioiHan: z.coerce.number().int().min(1).max(100).default(50),
   }),
 };
+// G5.4: Admin quyết định khiếu nại — BẮT BUỘC lý do (cả chấp nhận lẫn bác bỏ); ảnh bằng chứng tùy chọn (≤3, multipart `anhBangChung`).
 exports.xuLyKhieuNai = {
   params: z.object({ maKhieuNai: maSo }),
   body: z.object({
-    quyetDinh: z.enum(['upheld', 'rejected']),
-    ghiChu: z.string().trim().min(3, 'Ghi chú tối thiểu 3 ký tự.').max(500, 'Ghi chú tối đa 500 ký tự.').optional(),
-  }).refine((duLieu) => duLieu.quyetDinh !== 'rejected' || !!duLieu.ghiChu, {
-    message: 'Cần nêu lý do khi bác bỏ khiếu nại',
-    path: ['ghiChu'],
+    quyetDinh: z.enum(['upheld', 'rejected'], { error: 'quyetDinh chỉ nhận upheld hoặc rejected.' }),
+    ghiChu: z.string({ error: 'Cần nêu lý do quyết định.' })
+      .trim().min(3, 'Lý do tối thiểu 3 ký tự.').max(500, 'Lý do tối đa 500 ký tự.'),
+  }),
+};
+
+// G9.D3: thu hồi (xoá mềm) khiếu nại — BẮT BUỘC lý do (1–255 ký tự, lưu KhieuNai.LyDoXoa). Body của DELETE do JSON parser đọc.
+exports.thuHoiKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    lyDo: z.string({ error: 'Cần nêu lý do thu hồi khiếu nại.' })
+      .trim().min(3, 'Lý do tối thiểu 3 ký tự.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
+
+// G5.5: kháng nghị + khóa nhận đặt mới.
+exports.danhSachKhangNghi = {
+  query: z.object({
+    trangThai: z.enum(['pending', 'accepted', 'rejected', 'all']).default('pending'),
+    gioiHan: z.coerce.number().int().min(1).max(100).default(50),
+  }),
+};
+exports.xuLyKhangNghi = {
+  params: z.object({ maKhangNghi: maSo }),
+  body: z.object({
+    quyetDinh: z.enum(['accepted', 'rejected'], { error: 'quyetDinh chỉ nhận accepted hoặc rejected.' }),
+    ghiChu: z.string({ error: 'Cần nêu lý do quyết định.' }).trim()
+      .min(3, 'Lý do tối thiểu 3 ký tự.').max(500, 'Lý do tối đa 500 ký tự.'),
+  }),
+};
+exports.khoaDatMoi = {
+  params: z.object({ maNguoiDung: maSo }),
+  body: z.object({
+    khoa: z.boolean({ error: 'khoa phải là true hoặc false.' }),
+    lyDo: z.string({ error: 'Cần nêu lý do.' }).trim().min(3, 'Lý do tối thiểu 3 ký tự.').max(500, 'Lý do tối đa 500 ký tự.'),
   }),
 };
 
@@ -115,3 +154,52 @@ exports.khoaTaiKhoan = {
 exports.danhSachCoSo = {
   query: z.object({ tuKhoa: z.string().trim().max(100).optional() }),
 };
+
+// G7.12: hàng đợi báo cáo sự kiện và quyết định xử lý.
+exports.danhSachBaoCaoSuKien = {
+  query: z.object({
+    trangThai: z.enum(['pending', 'upheld', 'dismissed', 'all']).default('pending'),
+    trang: z.coerce.number().int().min(1).default(1),
+    soLuong: z.coerce.number().int().min(1).max(50).default(20),
+  }),
+};
+exports.xuLyBaoCaoSuKien = {
+  params: z.object({ maBaoCao: maSo }),
+  body: z.object({
+    quyetDinh: z.enum(['upheld', 'rejected']),
+    hanhDong: z.enum(['none', 'hide', 'cancel']).default('none'),
+    congViPham: z.boolean().default(false),
+    ghiChu: z.string().trim().min(3, 'Ghi chú tối thiểu 3 ký tự.')
+      .max(500, 'Ghi chú tối đa 500 ký tự.'),
+  }).superRefine((duLieu, ctx) => {
+    if (duLieu.quyetDinh === 'rejected' && (duLieu.hanhDong !== 'none' || duLieu.congViPham)) {
+      ctx.addIssue({ code: 'custom', path: ['hanhDong'], message: 'Báo cáo bị bác không được ẩn/hủy sự kiện hoặc cộng vi phạm.' });
+    }
+  }),
+};
+exports.anSuKien = {
+  params: z.object({ maSuKien: maSo }),
+  body: z.object({
+    lyDo: z.string().trim().min(3, 'Lý do tối thiểu 3 ký tự.')
+      .max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
+exports.boAnSuKien = { params: z.object({ maSuKien: maSo }) };
+
+
+// G8.5b: hàng đợi báo cáo bài/nhóm và quản lý nội dung cộng đồng.
+exports.danhSachBaoCaoCongDong = { query: z.object({
+  trangThai: z.enum(['pending','upheld','rejected','all']).default('pending'),
+  loaiDoiTuong: z.enum(['player_post','team']).optional(),
+  trang: z.coerce.number().int().min(1).default(1), soLuong: z.coerce.number().int().min(1).max(50).default(20),
+}) };
+exports.xuLyBaoCaoCongDong = { params: z.object({ maBaoCao: maSo }), body: z.object({
+  quyetDinh: z.enum(['upheld','rejected']), hanhDong: z.enum(['hide','remove','none']).default('none'),
+  ghiChu: z.string().trim().min(3,'Lý do tối thiểu 3 ký tự.').max(500,'Lý do tối đa 500 ký tự.'),
+}).superRefine((d,ctx)=>{
+  if (d.quyetDinh==='upheld' && !['hide','remove'].includes(d.hanhDong)) ctx.addIssue({code:'custom',path:['hanhDong'],message:'Báo cáo được chấp nhận phải chọn ẩn hoặc xóa.'});
+  if (d.quyetDinh==='rejected' && d.hanhDong!=='none') ctx.addIssue({code:'custom',path:['hanhDong'],message:'Báo cáo bị bác không được ẩn hoặc xóa.'});
+}) };
+exports.danhSachNoiDungCongDong = { query: z.object({ trangThai: z.enum(['all','open','full','closed','ended','cancelled','active','disbanded','hidden','removed']).default('all'), trang: z.coerce.number().int().min(1).default(1), soLuong: z.coerce.number().int().min(1).max(50).default(20) }) };
+exports.maNoiDungCongDong = { params: z.object({ maDoiTuong: maSo }), body: z.object({ lyDo: z.string().trim().min(3,'Lý do tối thiểu 3 ký tự.').max(500,'Lý do tối đa 500 ký tự.') }) };
+exports.boAnNoiDungCongDong = { params: z.object({ maDoiTuong: maSo }) };

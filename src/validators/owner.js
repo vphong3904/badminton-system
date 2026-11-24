@@ -28,18 +28,39 @@ const coSo = z.object({
   path: ['gioDongCua'],
 });
 
+const giaMoiGio = z.number().int().min(0).max(10_000_000);
+// Giá riêng cho từng thứ: thu 1 = Thứ 2 … 7 = Chủ nhật.
+const giaMotThu = z.object({
+  thu: z.number().int().min(1).max(7),
+  giaKhachVangLai: giaMoiGio,
+  giaKhachCoDinh: giaMoiGio,
+});
+// Một khung giờ: gửi `giaTheoThu` (7 thứ riêng biệt) HOẶC 4 trường cũ (T2–T6 / T7–CN, tương thích API cũ).
 const khungGia = z.object({
   gioBatDau: gioPhut,
   gioKetThuc: gioPhut,
-  giaNgayThuongKhachVangLai: z.number().int().min(0).max(10_000_000),
-  giaNgayThuongKhachCoDinh: z.number().int().min(0).max(10_000_000),
-  giaCuoiTuanKhachVangLai: z.number().int().min(0).max(10_000_000),
-  giaCuoiTuanKhachCoDinh: z.number().int().min(0).max(10_000_000),
+  giaTheoThu: z.array(giaMotThu).length(7, 'Phải có đủ giá cho 7 thứ').optional(),
+  giaNgayThuongKhachVangLai: giaMoiGio.optional(),
+  giaNgayThuongKhachCoDinh: giaMoiGio.optional(),
+  giaCuoiTuanKhachVangLai: giaMoiGio.optional(),
+  giaCuoiTuanKhachCoDinh: giaMoiGio.optional(),
+}).superRefine((khung, ctx) => {
+  if (khung.giaTheoThu) {
+    const cacThu = new Set(khung.giaTheoThu.map((g) => g.thu));
+    if (cacThu.size !== 7) ctx.addIssue({ code: 'custom', path: ['giaTheoThu'], message: 'Mỗi thứ (1–7) chỉ xuất hiện một lần' });
+    return;
+  }
+  const cu = [khung.giaNgayThuongKhachVangLai, khung.giaNgayThuongKhachCoDinh,
+    khung.giaCuoiTuanKhachVangLai, khung.giaCuoiTuanKhachCoDinh];
+  if (cu.some((g) => g === undefined)) {
+    ctx.addIssue({ code: 'custom', path: ['giaTheoThu'], message: 'Cần giaTheoThu (7 thứ) hoặc đủ 4 trường giá T2–T6 / T7–CN' });
+  }
 });
 
 exports.coSo = { body: coSo };
 const maCoSoTrongDuongDan = z.object({ maCoSo: maSo });
 exports.maCoSo = { params: maCoSoTrongDuongDan };
+exports.anhCoSo = { params: z.object({ maCoSo: maSo, maAnh: maSo }) };
 exports.capNhatCoSoTheoMa = { params: maCoSoTrongDuongDan, body: coSo };
 // Thêm MỘT khung giá tuỳ chỉnh vào cơ sở (trang quản lý bảng giá → nút "Thêm bảng giá").
 exports.themKhungGia = { params: maCoSoTrongDuongDan, body: khungGia };
@@ -101,6 +122,18 @@ exports.khoaSan = {
     gioBatDau: gioPhut.optional(),
     gioKetThuc: gioPhut.optional(),
     lyDo: z.string().max(255).optional(),
+    // G9.E3: xử lý các đơn vướng cùng lúc với khoá. Huỷ bắt buộc có lý do; maSanMoi chỉ đi với chuyen-san.
+    xuLyDonVuong: z.array(z.object({
+      maDatSan: maSo,
+      hanhDong: z.enum(['chuyen-san', 'huy'], { error: "hanhDong phải là 'chuyen-san' hoặc 'huy'." }),
+      maSanMoi: maSo.optional(),
+      lyDo: z.string().trim().min(1, 'Lý do không được để trống.').max(255).optional(),
+    }).superRefine((muc, ngCanh) => {
+      if (muc.hanhDong === 'huy' && !muc.lyDo) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['lyDo'], message: 'Huỷ đơn phải có lý do.' });
+      if (muc.hanhDong === 'huy' && muc.maSanMoi !== undefined) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['maSanMoi'], message: 'maSanMoi chỉ dùng khi chuyển sân.' });
+    })).max(300, 'Mỗi lần xử lý tối đa 300 đơn.')
+      .refine((ds) => new Set(ds.map((x) => x.maDatSan)).size === ds.length, 'Danh sách đơn bị trùng mã.')
+      .optional(),
   }).superRefine((duLieu, ngCanh) => {
     const dangCu = duLieu.thoiGianBatDau !== undefined || duLieu.thoiGianKetThuc !== undefined;
     const dangMoi = duLieu.tuNgay !== undefined || duLieu.denNgay !== undefined
@@ -122,9 +155,22 @@ exports.khoaSan = {
     return undefined;
   }),
 };
+exports.xemTruocKhoaSan = {
+  query: z.object({
+    maSan: maSo,
+    tuNgay: ngayKhoa,
+    denNgay: ngayKhoa.optional(),
+    gioBatDau: gioPhut,
+    gioKetThuc: gioPhut,
+  }).superRefine((duLieu, ngCanh) => {
+    if (duLieu.gioBatDau >= duLieu.gioKetThuc) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['gioKetThuc'], message: 'Giờ kết thúc phải sau giờ bắt đầu' });
+    if (duLieu.denNgay && duLieu.denNgay < duLieu.tuNgay) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['denNgay'], message: 'Ngày kết thúc phải từ ngày bắt đầu trở đi' });
+  }),
+};
 exports.danhSachKhoaSan = {
   query: z.object({
     maSan: maSo.optional(),
+    maCoSo: maSo.optional(),
     tuNgay: z.string().optional(),
     denNgay: z.string().optional(),
   }),
@@ -155,3 +201,23 @@ exports.phanHoiDanhGia = {
   }),
 };
 exports.xoaPhanHoiDanhGia = { params: z.object({ maDanhGia: maSo }) };
+
+// Khiếu nại gửi tới chủ sân: xem danh sách + giải trình 1 lần.
+exports.danhSachKhieuNai = {
+  query: z.object({ trangThai: z.enum(['pending', 'upheld', 'rejected', 'all']).default('all') }),
+};
+// G9.C9: body là multipart (text field `noiDung`; ảnh `anhBangChung` 1–3 do multer + service kiểm).
+exports.khangNghiKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    noiDung: z.string({ error: 'Vui lòng nhập nội dung kháng nghị.' }).trim()
+      .min(10, 'Nội dung kháng nghị tối thiểu 10 ký tự.').max(1000, 'Nội dung kháng nghị tối đa 1000 ký tự.'),
+  }),
+};
+exports.phanHoiKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    noiDung: z.string({ error: 'Vui lòng nhập nội dung phản hồi.' }).trim()
+      .min(10, 'Nội dung phản hồi tối thiểu 10 ký tự.').max(1000, 'Nội dung phản hồi tối đa 1000 ký tự.'),
+  }),
+};

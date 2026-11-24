@@ -149,6 +149,28 @@ exports.hoanTienKhach = {
   params: z.object({ maHoanTien: maSo }),
   body: z.object({ ghiChu: z.string().trim().max(255, 'Ghi chú tối đa 255 ký tự.').optional() }).default({}),
 };
+// Huỷ đơn: có tiền hoàn thì body PHẢI có taiKhoanHoan (BE kiểm tra lại theo số tiền hoàn thật).
+exports.huyDatSan = {
+  params: z.object({ maDatSan: maSo }),
+  body: z.object({
+    taiKhoanHoan: z.object({
+      maNganHang: z.string({ error: 'Vui lòng chọn ngân hàng.' }).trim().min(2, 'Vui lòng chọn ngân hàng.').max(20),
+      soTaiKhoan: z.string({ error: 'Số tài khoản chỉ gồm 6–30 chữ số.' })
+        .transform((giaTri) => giaTri.replace(/[\s-]/g, ''))
+        .pipe(z.string().regex(/^\d{6,30}$/, 'Số tài khoản chỉ gồm 6–30 chữ số.')),
+      chuTaiKhoan: z.string({ error: 'Vui lòng nhập tên chủ tài khoản.' }).trim()
+        .min(2, 'Vui lòng nhập tên chủ tài khoản.').max(100, 'Tên chủ tài khoản tối đa 100 ký tự.'),
+    }).optional(),
+  }).default({}),
+};
+// Khách báo "Chưa nhận được tiền hoàn" (khiếu nại gửi chủ sân + Admin) — chỉ khi chủ sân chưa hoàn quá 30 phút.
+exports.khieuNaiHoanTien = {
+  params: z.object({ maHoanTien: maSo }),
+  body: z.object({
+    lyDo: z.string({ error: 'Vui lòng nhập lý do khiếu nại.' }).trim()
+      .min(10, 'Lý do khiếu nại tối thiểu 10 ký tự.').max(800, 'Lý do khiếu nại tối đa 800 ký tự.'),
+  }),
+};
 exports.thongTinHoanTien = {
   params: z.object({ maDatSan: maSo }),
   body: z.object({
@@ -192,3 +214,18 @@ exports.suaDanhGia = {
   }),
 };
 exports.xoaDanhGia = { params: z.object({ maDatSan: maSo }) };
+
+// G7.12: báo cáo một sự kiện; UNIQUE trong BaoCaoViPham bảo đảm mỗi khách chỉ báo một lần/sự kiện.
+exports.baoCaoSuKien = {
+  body: z.object({
+    maSuKien: maSo.optional(),
+    loaiDoiTuong: z.enum(['event', 'player_post', 'team']).optional(),
+    maDoiTuong: maSo.optional(),
+    lyDo: z.enum(['misleading', 'fraud', 'inappropriate', 'other', 'slow_approval'], { error: 'Vui lòng chọn lý do báo cáo.' }),
+    noiDung: z.string().trim().max(500, 'Nội dung tối đa 500 ký tự.').optional(),
+  }).superRefine((d, ctx) => {
+    const loai = d.loaiDoiTuong || 'event';
+    const ma = loai === 'event' ? (d.maSuKien || d.maDoiTuong) : d.maDoiTuong;
+    if (!ma) ctx.addIssue({ code: 'custom', path: [loai === 'event' ? 'maSuKien' : 'maDoiTuong'], message: 'Thiếu mã nội dung cần báo cáo.' });
+  }),
+};

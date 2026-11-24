@@ -10,9 +10,9 @@ const pool = mysql.createPool({
   database: cauHinh.coSoDuLieu.ten,
 
   // SSL/TLS cho TiDB Cloud
-  ssl: {
-    minVersion: 'TLSv1.2',
-  },
+  // ssl: {
+  //   minVersion: 'TLSv1.2',
+  // },
 
   waitForConnections: true,
   connectionLimit: 10,

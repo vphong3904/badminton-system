@@ -7,7 +7,9 @@ const AppError = require('../utils/AppError');
 // QUY TẮC LƯU ẢNH (xem docs/agent/01-rules.md):
 //   uploads/avatar/  ảnh đại diện   tên: u<maNguoiDung>-<ms>-<4hex>.<jpg|png|webp>
 //   uploads/coso/    ảnh cơ sở      tên: cs<maCoSo>-<ms>-<4hex>.<jpg|png|webp>
-//   uploads/         (gốc) ảnh chuyển khoản — giữ cách cũ
+//   uploads/su-kien/ ảnh bìa sự kiện tên: sk<maSuKien>-<ms>-<4hex>.<jpg|png|webp>
+//   uploads/cong-dong/ ảnh bìa bài tìm người / ảnh đại diện nhóm  tên: cd<maNguoiDung>-<ms>-<4hex>.<jpg|png|webp>
+//   uploads/         (gốc) ảnh chứng từ chuyển khoản — giữ cách cũ
 // DB lưu đường dẫn tương đối `/tep-tai-len/<thuMuc>/<tên>`; chưa có ảnh → DB NULL, API trả ảnh mặc định.
 // Ảnh mặc định (có sẵn, KHÔNG BAO GIỜ xoá/ghi đè): avatar/default-user.jpg, coso/coso.jpg.
 const thuMucTepTaiLen = path.join(__dirname, '../../uploads');
@@ -34,7 +36,9 @@ const taiTep = multer({
 });
 
 // Nhận file vào thư mục con với tên TẠM; tên chính thức đặt bởi luuAnh() khi đã biết mã (cơ sở / người dùng).
-const taoTaiAnh = (thuMuc) => multer({
+const taoTaiAnh = (thuMuc) => {
+  require('fs').mkdirSync(path.join(thuMucTepTaiLen, thuMuc), { recursive: true });
+  return multer({
   storage: multer.diskStorage({
     destination: path.join(thuMucTepTaiLen, thuMuc),
     filename: (_req, tep, goiLai) =>
@@ -43,8 +47,11 @@ const taoTaiAnh = (thuMuc) => multer({
   limits: GIOI_HAN,
   fileFilter: locAnh,
 });
+};
 const taiAnhDaiDien = taoTaiAnh('avatar');
 const taiAnhCoSo = taoTaiAnh('coso');
+const taiAnhSuKien = taoTaiAnh('su-kien');
+const taiAnhCongDong = taoTaiAnh('cong-dong');
 
 const layDuongDanTep = (tep) => (tep ? `${TIEN_TO_URL}/${tep.filename}` : null);
 
@@ -90,7 +97,13 @@ async function xoaAnh(duongDan) {
   await fs.unlink(path.join(thuMucTepTaiLen, m[1], m[2])).catch(() => {});
 }
 
+async function xoaAnhSuKien(duongDan) {
+  const m = /^\/tep-tai-len\/su-kien\/([\w.-]+)$/.exec(duongDan || '');
+  if (!m) return;
+  await fs.unlink(path.join(thuMucTepTaiLen, 'su-kien', m[1])).catch(() => {});
+}
+
 module.exports = {
-  taiTep, taiAnhDaiDien, taiAnhCoSo, layDuongDanTep, thuMucTepTaiLen,
-  ANH_MAC_DINH, laAnhThat, luuAnh, xoaAnh, taoTenAnh,
+  taiTep, taiAnhDaiDien, taiAnhCoSo, taiAnhSuKien, taiAnhCongDong, layDuongDanTep, thuMucTepTaiLen,
+  ANH_MAC_DINH, laAnhThat, luuAnh, xoaAnh, xoaAnhSuKien, taoTenAnh,
 };

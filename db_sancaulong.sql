@@ -1,10 +1,17 @@
 -- =====================================================================
-SET NAMES utf8mb4;
--- HỆ THỐNG ĐẶT SÂN CẦU LÔNG - SCHEMA HOÀN CHỈNH (khách + chủ sân + admin)
--- Quy ước: tên bảng, tên cột viết tiếng Việt không dấu, viết hoa chữ cái đầu mỗi từ (PascalCase)
+-- HỆ THỐNG ĐẶT SÂN CẦU LÔNG - db_sancaulong (CHỈ CẤU TRÚC)
+-- File này chỉ chứa CREATE DATABASE + CREATE TABLE (đã gộp toàn bộ migration).
+-- Dữ liệu (cấu hình hệ thống, tài khoản admin, dữ liệu mẫu) nằm ở: db_sancaulong_data.sql
+-- Thứ tự chạy: 1) db_sancaulong.sql   2) db_sancaulong_data.sql
+-- Quy ước: tên bảng, tên cột viết tiếng Việt không dấu, PascalCase
 -- Giá trị ENUM và khóa trong CauHinhHeThong giữ nguyên tiếng Anh
--- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực)
+-- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực) hoặc MariaDB 10.2.1+ (cột sinh STORED + CHECK; khuyến nghị 10.6+)
+-- Bảng (29): NguoiDung, HoSoChuSan, CoSo, AnhCoSo, San, SuKien, KhoaSan, BangGia, LichCoDinh,
+--   DatSan, ThanhToan, HoanTien, ChungTuThanhToan, DanhGia, YeuThich, KhieuNai, Gay, KhangNghi,
+--   LichSuQrSan, CheckIn, HangMucSuKien, DangKySuKien, ThanhToanSuKien, ChungTuSuKien,
+--   BaoCaoViPham, ThongBao, CauHinhHeThong, NhatKyHeThong
 -- =====================================================================
+SET NAMES utf8mb4;
 CREATE DATABASE IF NOT EXISTS db_sancaulong
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE db_sancaulong;
@@ -17,7 +24,9 @@ CREATE TABLE NguoiDung (
   MaNguoiDung   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   HoTen         VARCHAR(100) NOT NULL,
   Email         VARCHAR(150) NOT NULL,
-  SoDienThoai   VARCHAR(20),
+  SoDienThoai   VARCHAR(20) COMMENT 'SĐT chính (chủ sân bắt buộc)',
+  SoDienThoaiPhu VARCHAR(20) NULL COMMENT 'SĐT phụ, chỉ chủ sân dùng, không bắt buộc (tối đa 2 số/chủ sân)',
+  GioiTinh      ENUM('male','female') NULL COMMENT 'male = Nam, female = Nữ; NULL = chưa khai (tài khoản cũ/khách chưa chọn). App bắt buộc chọn khi đăng ký tài khoản và khi đăng ký sự kiện',
   MatKhauMaHoa  VARCHAR(255) NOT NULL,
   VaiTro        ENUM('customer','owner','admin') NOT NULL DEFAULT 'customer',
   AnhDaiDien    VARCHAR(255) NOT NULL DEFAULT '/tep-tai-len/avatar/default-user.jpg'
@@ -51,6 +60,7 @@ CREATE TABLE HoSoChuSan (
   MaQuanTriDuyet  INT UNSIGNED NULL COMMENT 'admin duyệt hoặc từ chối',
   LyDoTuChoi      VARCHAR(255) NULL,
   SoLanViPham     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'số khiếu nại admin xác nhận đúng: 1 cảnh cáo, 2 cảnh cáo nghiêm trọng, 3 khóa tài khoản',
+  KhoaDatMoi      TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = chặn khách đặt mới vào cơ sở của chủ sân; lịch đã đặt giữ nguyên. Admin đặt/gỡ, ghi nhật ký (G5)',
   CONSTRAINT FK_HoSoChuSan_NguoiDung FOREIGN KEY (MaNguoiDung)    REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
   CONSTRAINT FK_HoSoChuSan_QuanTri   FOREIGN KEY (MaQuanTriDuyet) REFERENCES NguoiDung(MaNguoiDung),
   KEY IDX_HoSoChuSan_Duyet (TrangThaiDuyet, NgayGuiDuyet)
@@ -115,8 +125,57 @@ CREATE TABLE San (
   TrangThai  ENUM('active','maintenance') NOT NULL DEFAULT 'maintenance' COMMENT 'maintenance = chưa hoạt động/đã đóng; sân mới tạo ở maintenance, chủ sân bật thì mới nhận khách',
   QrToken    CHAR(64) NULL COMMENT 'token QR check-in (ngẫu nhiên 32 byte hex); NULL = chưa tạo, backend tạo lười lần đầu chủ sân mở trang QR',
   QrPhienBan INT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'tăng 1 mỗi lần chủ sân đổi QR; QR cũ mất hiệu lực ngay',
+  DaXoa      TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = đã xoá mềm (G9.F); sân đã xoá không hiện ở truy vấn hiện hành, vẫn giữ để hiện tên cũ trong lịch sử',
+  NgayXoa    DATETIME NULL COMMENT 'thời điểm xoá mềm; NULL = chưa xoá',
+  TenDangDung VARCHAR(50) GENERATED ALWAYS AS (IF(DaXoa = 0, TenSan, NULL)) STORED COMMENT 'cột sinh: tên đang dùng (NULL khi đã xoá) — UNIQUE chỉ áp cho sân chưa xoá; STORED để chạy cả MySQL lẫn MariaDB',
   CONSTRAINT FK_San_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
-  UNIQUE KEY UQ_San_Ten (MaCoSo, TenSan)
+  UNIQUE KEY UQ_San_TenDangDung (MaCoSo, TenDangDung)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- G7. SuKien: Loai social = Giao lưu (sức chứa ở SoLuongToiDa) · tournament = Giải đấu (sức chứa theo HangMucSuKien)
+--    Giờ VN, bội 30 phút. Phi = 0 là miễn phí. Sân tham gia = các dòng KhoaSan có MaSuKien (mọi sân cùng một cơ sở).
+--    TrangThai: open → closed → finished | cancelled. BiAn là cờ riêng do Admin, không đổi TrangThai.
+CREATE TABLE SuKien (
+  MaSuKien        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaCoSo          INT UNSIGNED NOT NULL,
+  MaChuSan        INT UNSIGNED NOT NULL,
+  Loai            ENUM('social','tournament') NOT NULL,
+  TieuDe          VARCHAR(150) NOT NULL,
+  MoTa            TEXT NULL,
+  DieuLe          TEXT NULL COMMENT 'điều lệ / thể thức (chủ yếu cho giải đấu)',
+  AnhBia          VARCHAR(255) NULL COMMENT 'đường dẫn tương đối ảnh bìa',
+  NgaySuKien      DATE NOT NULL,
+  GioBatDau       TIME NOT NULL,
+  GioKetThuc      TIME NOT NULL,
+  HanDangKy       DATETIME NOT NULL COMMENT 'hạn đăng ký; phải trước giờ bắt đầu',
+  SoLuongToiDa    SMALLINT UNSIGNED NULL COMMENT 'sức chứa của Giao lưu; NULL với Giải đấu (dùng HangMucSuKien.SoLuongToiDa)',
+  TrinhDoTu       TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '1–8: Y, TBY, TB-, TB, TB+, K, BC, CN',
+  TrinhDoDen      TINYINT UNSIGNED NOT NULL DEFAULT 8,
+  CheDoDuyet      ENUM('auto','manual') NOT NULL DEFAULT 'auto' COMMENT 'auto = đăng ký vào thẳng accepted; manual = chủ sân duyệt',
+  Phi             DECIMAL(12,0) NOT NULL DEFAULT 0 COMMENT '0 = miễn phí; có phí thì thu qua hệ thống như đặt sân (ThanhToanSuKien)',
+  GhiChuPhi       VARCHAR(255) NULL COMMENT 'ghi chú thêm về khoản phí (tùy chọn)',
+  TrangThai       ENUM('open','closed','finished','cancelled') NOT NULL DEFAULT 'open',
+  NguoiHuy        ENUM('owner','system') NULL,
+  LyDoHuy         VARCHAR(255) NULL,
+  NgayHuy         DATETIME NULL,
+  BiAn            TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = Admin ẩn khỏi khách; bỏ ẩn thì TrangThai cũ giữ nguyên',
+  LyDoAn          VARCHAR(255) NULL,
+  MaQuanTriAn     INT UNSIGNED NULL,
+  NgayAn          DATETIME NULL,
+  NgayTao         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_SuKien_CoSo    FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo),
+  CONSTRAINT FK_SuKien_ChuSan  FOREIGN KEY (MaChuSan)    REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_SuKien_QuanTri FOREIGN KEY (MaQuanTriAn) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT CHK_SuKien_Gio     CHECK (GioKetThuc > GioBatDau),
+  CONSTRAINT CHK_SuKien_TrinhDo CHECK (TrinhDoTu BETWEEN 1 AND 8 AND TrinhDoDen BETWEEN 1 AND 8 AND TrinhDoTu <= TrinhDoDen),
+  CONSTRAINT CHK_SuKien_Phi     CHECK (Phi >= 0),
+  CONSTRAINT CHK_SuKien_SoLuong CHECK (SoLuongToiDa IS NULL OR SoLuongToiDa >= 1),
+  KEY IDX_SuKien_ChuSan (MaChuSan, TrangThai),
+  KEY IDX_SuKien_CoSo (MaCoSo, TrangThai, NgaySuKien),
+  KEY IDX_SuKien_Ngay (TrangThai, BiAn, NgaySuKien),           -- danh sách khách + job finished
+  KEY IDX_SuKien_HanDangKy (TrangThai, HanDangKy)              -- job đóng quá hạn đăng ký
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -129,8 +188,11 @@ CREATE TABLE KhoaSan (
   GioBatDau   TIME NOT NULL,
   GioKetThuc  TIME NOT NULL,
   LyDo        VARCHAR(255) NULL,
+  MaSuKien    INT UNSIGNED NULL COMMENT 'có giá trị = khóa do sự kiện (G7) tạo; không xóa tay ở màn Khóa sân',
   CONSTRAINT FK_KhoaSan_San FOREIGN KEY (MaSan) REFERENCES San(MaSan) ON DELETE CASCADE,
+  CONSTRAINT FK_KhoaSan_SuKien FOREIGN KEY (MaSuKien) REFERENCES SuKien(MaSuKien) ON DELETE CASCADE,
   CONSTRAINT CHK_KhoaSan_Gio CHECK (GioKetThuc > GioBatDau),
+  KEY IDX_KhoaSan_SuKien (MaSuKien),
   KEY IDX_KhoaSan_Khung (MaSan, NgayKhoa, GioBatDau, GioKetThuc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -141,7 +203,8 @@ CREATE TABLE KhoaSan (
 CREATE TABLE BangGia (
   MaBangGia    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaCoSo       INT UNSIGNED NOT NULL,
-  LoaiNgay     ENUM('weekday','weekend') NOT NULL COMMENT 'T2-T6 / T7-CN',
+  Thu          TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '1=Thứ 2 … 7=Chủ nhật; 0 = dòng chưa tách thứ (seed), sẽ được nhân ra 7 thứ',
+  LoaiNgay     ENUM('weekday','weekend') NOT NULL COMMENT 'T2-T6 / T7-CN (suy ra từ Thu, giữ để tương thích)',
   LoaiKhach    ENUM('walk_in','fixed') NOT NULL DEFAULT 'walk_in',
   GioBatDau    TIME NOT NULL,
   GioKetThuc   TIME NOT NULL,
@@ -149,7 +212,9 @@ CREATE TABLE BangGia (
   CONSTRAINT FK_BangGia_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   CONSTRAINT CHK_BangGia_Gio CHECK (GioKetThuc > GioBatDau),
   CONSTRAINT CHK_BangGia_Gia CHECK (GiaMoiGio >= 0),
-  KEY IDX_BangGia_CoSo (MaCoSo)
+  CONSTRAINT CHK_BangGia_Thu CHECK (Thu BETWEEN 0 AND 7),
+  KEY IDX_BangGia_CoSo (MaCoSo),
+  KEY IDX_BangGia_CoSo_Thu (MaCoSo, Thu, LoaiKhach)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -198,6 +263,9 @@ CREATE TABLE DatSan (
   MaLichCoDinh        INT UNSIGNED NULL COMMENT 'có giá trị nếu đơn sinh từ lịch cố định',
   MaNhomDat           INT UNSIGNED NULL COMMENT 'nhóm đặt (đơn tổng) = MaDatSan của đơn con đầu nhóm; đơn lẻ = chính MaDatSan',
   MaSan               INT UNSIGNED NOT NULL,
+  MaSanCu             INT UNSIGNED NULL COMMENT 'sân trước khi chủ sân chuyển sân (G9.E); NULL = chưa chuyển',
+  NgayChuyenSan       DATETIME NULL COMMENT 'thời điểm chuyển sân gần nhất (G9.E); NULL = chưa chuyển',
+  NgayKhachDongYChuyen DATETIME NULL COMMENT 'khách bấm Đồng ý chuyển sân (G9.H); NULL = chưa phản hồi; chủ sân chuyển lại thì reset NULL',
   NgayChoi            DATE NOT NULL,
   GioBatDau           TIME NOT NULL,
   GioKetThuc          TIME NOT NULL,
@@ -217,6 +285,7 @@ CREATE TABLE DatSan (
   NgayCapNhat         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT FK_DatSan_KhachHang  FOREIGN KEY (MaKhachHang)     REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_DatSan_San        FOREIGN KEY (MaSan)           REFERENCES San(MaSan),
+  CONSTRAINT FK_DatSan_SanCu      FOREIGN KEY (MaSanCu)         REFERENCES San(MaSan),
   CONSTRAINT FK_DatSan_LichCoDinh FOREIGN KEY (MaLichCoDinh)    REFERENCES LichCoDinh(MaLichCoDinh),
   CONSTRAINT CHK_DatSan_Gio       CHECK (GioKetThuc > GioBatDau),
   CONSTRAINT CHK_DatSan_SoPhut    CHECK (SoPhut >= 30),
@@ -283,7 +352,7 @@ CREATE TABLE HoanTien (
   MaNganHang        VARCHAR(20)  NULL,
   SoTaiKhoan        VARCHAR(30)  NULL,
   ChuTaiKhoan       VARCHAR(100) NULL,
-  HanHoan           DATETIME NULL COMMENT 'hạn chuyển hoàn = lúc tạo + refund_deadline_hours (giờ máy chủ)',
+  HanHoan           DATETIME NULL COMMENT 'hạn chuyển hoàn = lúc tạo + refund_deadline_minutes_* theo HoanTien.Loai (phút, giờ máy chủ)',
   AnhChungTu        VARCHAR(255) NULL COMMENT 'ảnh chuyển khoản hoàn (bắt buộc khi đánh dấu đã hoàn): /tep-tai-len/<tên>',
   MaNguoiHoan       INT UNSIGNED NULL COMMENT 'chủ sân hoặc Admin bấm đã hoàn',
   VaiTroHoan        ENUM('owner','admin') NULL,
@@ -369,23 +438,83 @@ CREATE TABLE KhieuNai (
   MaKhachHang    INT UNSIGNED NOT NULL,
   MaChuSan       INT UNSIGNED NOT NULL,
   MaCoSo         INT UNSIGNED NOT NULL,
+  Loai           ENUM('service','refund') NOT NULL DEFAULT 'service' COMMENT 'service = chủ sân chậm duyệt thanh toán; refund = chưa nhận được tiền hoàn (khi HanHoan đã qua)',
+  MaHoanTien     INT UNSIGNED NULL COMMENT 'khoản hoàn bị khiếu nại (Loai=refund)',
   GiaiDoan       ENUM('after_payment','at_cancel','after_cancel') NOT NULL COMMENT 'khách bấm khiếu nại ở màn nào',
   NoiDung        VARCHAR(1000) NOT NULL,
   TrangThai      ENUM('pending','upheld','rejected') NOT NULL DEFAULT 'pending',
+  PhanHoiChuSan  VARCHAR(1000) NULL COMMENT 'chủ sân giải trình (1 lần, trong complaint_owner_reply_hours kể từ NgayTao)',
+  NgayPhanHoi    DATETIME NULL,
+  HanPhanHoi     DATETIME NULL COMMENT 'hạn chủ sân giải trình = NgayTao + complaint_owner_reply_hours; NULL = dòng cũ',
   GhiChuQuanTri  VARCHAR(500) NULL,
+  BangChungQuanTri VARCHAR(1500) NULL COMMENT 'JSON mảng ảnh bằng chứng Admin đính kèm khi quyết định (tối đa 3)',
   MucXuLy        ENUM('none','warning','severe_warning','banned') NOT NULL DEFAULT 'none',
   MaQuanTri      INT UNSIGNED NULL,
   NgayXuLy       DATETIME NULL,
   NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  DaXoa          TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = Admin đã thu hồi (xoá mềm), ẩn khỏi mọi danh sách (G9.D)',
+  NgayXoa        DATETIME NULL,
+  LyDoXoa        VARCHAR(255) NULL,
+  MaQuanTriXoa   INT UNSIGNED NULL,
   CONSTRAINT FK_KhieuNai_DatSan   FOREIGN KEY (MaDatSan)    REFERENCES DatSan(MaDatSan),
   CONSTRAINT FK_KhieuNai_Khach    FOREIGN KEY (MaKhachHang) REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_KhieuNai_ChuSan   FOREIGN KEY (MaChuSan)    REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_KhieuNai_CoSo     FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   CONSTRAINT FK_KhieuNai_QuanTri  FOREIGN KEY (MaQuanTri)   REFERENCES NguoiDung(MaNguoiDung),
-  UNIQUE KEY UQ_KhieuNai_DatSan (MaDatSan),
+  CONSTRAINT FK_KhieuNai_QuanTriXoa FOREIGN KEY (MaQuanTriXoa) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_KhieuNai_HoanTien FOREIGN KEY (MaHoanTien)  REFERENCES HoanTien(MaHoanTien) ON DELETE SET NULL,
+  UNIQUE KEY UQ_KhieuNai_DatSan_Loai (MaDatSan, Loai),
   KEY IDX_KhieuNai_TrangThai (TrangThai, NgayTao),
   KEY IDX_KhieuNai_ChuSan (MaChuSan, TrangThai),
   KEY IDX_KhieuNai_Khach (MaKhachHang, NgayTao)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+-- 13c. Gay: gậy vi phạm của chủ sân. Mỗi khiếu nại upheld = tối đa 1 gậy.
+--      active = có hiệu lực; appealed = đang kháng nghị; revoked = đã thu hồi (không tính vào HoSoChuSan.SoLanViPham)
+CREATE TABLE Gay (
+  MaGay          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaChuSan       INT UNSIGNED NOT NULL,
+  MaKhieuNai     INT UNSIGNED NULL COMMENT 'Nguồn vi phạm từ khiếu nại đặt sân; NULL nếu từ báo cáo sự kiện',
+  MaBaoCao       INT UNSIGNED NULL COMMENT 'Nguồn vi phạm từ báo cáo sự kiện; NULL nếu từ khiếu nại đặt sân',
+  TrangThai      ENUM('active','appealed','revoked') NOT NULL DEFAULT 'active',
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  HetHieuLuc     DATETIME NULL COMMENT 'tùy chọn: gậy tự hết hiệu lực; NULL = không hết hạn',
+  NgayThuHoi     DATETIME NULL,
+  LyDoThuHoi     VARCHAR(500) NULL,
+  MaQuanTriThuHoi INT UNSIGNED NULL,
+  CONSTRAINT FK_Gay_ChuSan    FOREIGN KEY (MaChuSan)        REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_Gay_KhieuNai  FOREIGN KEY (MaKhieuNai)      REFERENCES KhieuNai(MaKhieuNai),
+  CONSTRAINT FK_Gay_QuanTri   FOREIGN KEY (MaQuanTriThuHoi) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_Gay_KhieuNai (MaKhieuNai),
+  UNIQUE KEY UQ_Gay_BaoCao (MaBaoCao),
+  CONSTRAINT CHK_Gay_Nguon CHECK (
+    (MaKhieuNai IS NOT NULL AND MaBaoCao IS NULL) OR
+    (MaKhieuNai IS NULL AND MaBaoCao IS NOT NULL)
+  ),
+  KEY IDX_Gay_ChuSan (MaChuSan, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 13d. KhangNghi: chủ sân kháng nghị quyết định chấp nhận khiếu nại (trong appeal_hours = 24h); mỗi khiếu nại 1 lần, kèm 1–3 ảnh bằng chứng (BangChung).
+--      accepted = Admin thu hồi gậy; rejected = giữ gậy; cancelled = khiếu nại gốc bị Admin thu hồi (G9.D)
+CREATE TABLE KhangNghi (
+  MaKhangNghi    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaKhieuNai     INT UNSIGNED NOT NULL,
+  MaGay          INT UNSIGNED NOT NULL,
+  MaChuSan       INT UNSIGNED NOT NULL,
+  NoiDung        VARCHAR(1000) NOT NULL,
+  BangChung      VARCHAR(1500) NULL COMMENT 'JSON mảng đường dẫn 1–3 ảnh bằng chứng chủ sân đính kèm khi kháng nghị (G9.C)',
+  TrangThai      ENUM('pending','accepted','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  GhiChuQuanTri  VARCHAR(500) NULL,
+  MaQuanTri      INT UNSIGNED NULL,
+  NgayXuLy       DATETIME NULL,
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_KhangNghi_KhieuNai FOREIGN KEY (MaKhieuNai) REFERENCES KhieuNai(MaKhieuNai),
+  CONSTRAINT FK_KhangNghi_Gay      FOREIGN KEY (MaGay)      REFERENCES Gay(MaGay),
+  CONSTRAINT FK_KhangNghi_ChuSan   FOREIGN KEY (MaChuSan)   REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_KhangNghi_QuanTri  FOREIGN KEY (MaQuanTri)  REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_KhangNghi_KhieuNai (MaKhieuNai),
+  KEY IDX_KhangNghi_TrangThai (TrangThai, NgayTao)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -423,6 +552,136 @@ CREATE TABLE CheckIn (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
+-- G7. HangMucSuKien: hạng mục của Giải đấu (vd "Đơn nam", "Đôi nam nữ"); LaDoi = 1 thì đăng ký phải có đồng đội
+CREATE TABLE HangMucSuKien (
+  MaHangMuc     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaSuKien      INT UNSIGNED NOT NULL,
+  TenHangMuc    VARCHAR(100) NOT NULL,
+  LaDoi         TINYINT(1) NOT NULL DEFAULT 0,
+  SoLuongToiDa  SMALLINT UNSIGNED NOT NULL,
+  NgayTao       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_HangMuc_SuKien FOREIGN KEY (MaSuKien) REFERENCES SuKien(MaSuKien) ON DELETE CASCADE,
+  CONSTRAINT CHK_HangMuc_SoLuong CHECK (SoLuongToiDa >= 1),
+  UNIQUE KEY UQ_HangMuc_Ten (MaSuKien, TenHangMuc)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. DangKySuKien: 1 khách × 1 sự kiện (Giao lưu) hoặc × 1 hạng mục (Giải đấu), dùng lại dòng cũ khi đăng ký lại.
+--    KhoaHangMuc = IFNULL(MaHangMuc,0) để UNIQUE chặn trùng cả khi MaHangMuc NULL (MySQL coi NULL ≠ NULL).
+--    TrangThai: pending (chế độ duyệt, chưa chiếm chỗ) → accepted (chiếm chỗ) → cancelled | rejected.
+--    Sự kiện có phí: accepted nhưng chưa trả vẫn chiếm chỗ đến hết ThanhToanSuKien.HanThanhToan, quá hạn thì job hủy (system).
+CREATE TABLE DangKySuKien (
+  MaDangKy       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaSuKien       INT UNSIGNED NOT NULL,
+  MaHangMuc      INT UNSIGNED NULL,
+  KhoaHangMuc    INT UNSIGNED AS (IFNULL(MaHangMuc, 0)) STORED,
+  MaKhachHang    INT UNSIGNED NOT NULL,
+  TenKhach       VARCHAR(100) NOT NULL COMMENT 'lưu cứng tên lúc đăng ký',
+  SoDienThoai    VARCHAR(20)  NOT NULL COMMENT 'SĐT khách nhập lúc đăng ký',
+  GioiTinh       ENUM('male','female') NULL COMMENT 'giới tính khách khai lúc đăng ký (lưu cứng); NULL chỉ với dữ liệu cũ, đăng ký mới luôn có',
+  TrinhDoKhai    TINYINT UNSIGNED NULL COMMENT '1–8, khách tự khai; ngoài khoảng sự kiện chỉ cảnh báo',
+  TenDongDoi     VARCHAR(100) NULL COMMENT 'bắt buộc với hạng mục đôi',
+  SdtDongDoi     VARCHAR(20)  NULL,
+  TrangThai      ENUM('pending','accepted','cancelled','rejected') NOT NULL,
+  NguoiHuy       ENUM('customer','owner','system') NULL,
+  LyDo           VARCHAR(255) NULL COMMENT 'lý do từ chối / loại / hủy',
+  SoLanRut       TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'số lần rút đăng ký của khách ở sự kiện này (tối đa 3)',
+  NgayDangKy     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayXuLy       DATETIME NULL COMMENT 'lúc chủ sân chấp nhận / từ chối',
+  NgayHuy        DATETIME NULL,
+  NgayNhacNho    DATETIME NULL COMMENT 'đã gửi nhắc trước giờ diễn ra (chống gửi lặp)',
+  NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_DangKySK_SuKien   FOREIGN KEY (MaSuKien)    REFERENCES SuKien(MaSuKien) ON DELETE CASCADE,
+  CONSTRAINT FK_DangKySK_HangMuc  FOREIGN KEY (MaHangMuc)   REFERENCES HangMucSuKien(MaHangMuc),
+  CONSTRAINT FK_DangKySK_Khach    FOREIGN KEY (MaKhachHang) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT CHK_DangKySK_TrinhDo CHECK (TrinhDoKhai IS NULL OR TrinhDoKhai BETWEEN 1 AND 8),
+  UNIQUE KEY UQ_DangKySK_Khach (MaSuKien, KhoaHangMuc, MaKhachHang),
+  KEY IDX_DangKySK_SuKien (MaSuKien, TrangThai),
+  KEY IDX_DangKySK_HangMuc (MaHangMuc, TrangThai),
+  KEY IDX_DangKySK_Khach (MaKhachHang, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. ThanhToanSuKien: phí sự kiện thu như đặt sân (QR vào TK chủ sân, khách gửi ảnh, chủ sân xác nhận đã nhận tiền).
+--    Chỉ có dòng cho đăng ký của sự kiện có phí, tạo khi đăng ký thành accepted. Nền tảng không giữ/chuyển tiền.
+--    pending: chờ khách chuyển + gửi ảnh | confirming: đã gửi ảnh, đợi chủ sân | success: chủ sân đã xác nhận
+--    expired: quá HanThanhToan | cancelled: đăng ký/sự kiện bị hủy khi chưa trả
+--    TrangThaiHoan: none | pending (đã trả mà đăng ký/sự kiện bị hủy: chủ sân tự chuyển khoản hoàn) | refunded
+CREATE TABLE ThanhToanSuKien (
+  MaThanhToan         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaDangKy            INT UNSIGNED NOT NULL,
+  SoTien              DECIMAL(12,0) NOT NULL COMMENT 'lưu cứng = SuKien.Phi lúc chấp nhận',
+  PhiNenTang          DECIMAL(12,0) NOT NULL DEFAULT 0 COMMENT 'hoa hồng hệ thống theo event_commission_rate, lưu cứng (mặc định 0)',
+  TienChuSan          DECIMAL(12,0) NOT NULL DEFAULT 0 COMMENT '= SoTien - PhiNenTang',
+  TrangThai           ENUM('pending','confirming','success','expired','cancelled') NOT NULL DEFAULT 'pending',
+  NoiDungChuyenKhoan  VARCHAR(100) NULL COMMENT 'nội dung chuyển khoản để đối chiếu',
+  HanThanhToan        DATETIME NULL COMMENT 'hạn khách chuyển + gửi ảnh (event_payment_hold_minutes, mặc định 10 phút)',
+  HanXacNhan          DATETIME NULL COMMENT 'hạn chủ sân xác nhận sau khi khách gửi ảnh',
+  NgayBatDauThanhToan DATETIME NULL COMMENT 'lúc khách bấm Xác nhận & thanh toán: bắt đầu đếm ngược event_payment_hold_minutes (10 phút); NULL = chưa bắt đầu',
+  LyDoLoi             VARCHAR(255) NULL COMMENT 'lý do chủ sân từ chối ảnh',
+  NgayGuiAnh          DATETIME NULL,
+  MaNguoiXacNhan      INT UNSIGNED NULL,
+  NgayThanhToan       DATETIME NULL COMMENT 'thời điểm chủ sân xác nhận',
+  TrangThaiHoan       ENUM('none','pending','refunded') NOT NULL DEFAULT 'none',
+  SoTienHoan          DECIMAL(12,0) NULL COMMENT 'số tiền chủ sân cần hoàn khi khách tự hủy theo chính sách hoàn tiền; NULL = hoàn toàn bộ SoTien',
+  MaNganHangHoan      VARCHAR(20)  NULL COMMENT 'mã VietQR ngân hàng khách nhận hoàn (bắt buộc nhập khi khách hủy có hoàn)',
+  TenNganHangHoan     VARCHAR(100) NULL,
+  SoTaiKhoanHoan      VARCHAR(30)  NULL,
+  ChuTaiKhoanHoan     VARCHAR(100) NULL,
+  NgayHoan            DATETIME NULL,
+  NgayTao             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_TTSK_DangKy   FOREIGN KEY (MaDangKy)       REFERENCES DangKySuKien(MaDangKy) ON DELETE CASCADE,
+  CONSTRAINT FK_TTSK_NguoiXN  FOREIGN KEY (MaNguoiXacNhan) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_TTSK_DangKy (MaDangKy),
+  KEY IDX_TTSK_TrangThai (TrangThai, HanThanhToan),
+  KEY IDX_TTSK_Hoan (TrangThaiHoan)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. ChungTuSuKien: ảnh chuyển khoản khách gửi (mỗi lần gửi 1 dòng, tối đa 5 ảnh/đăng ký), cùng dạng ChungTuThanhToan
+CREATE TABLE ChungTuSuKien (
+  MaChungTu       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaThanhToan     INT UNSIGNED NOT NULL,
+  SoTien          DECIMAL(12,0) NULL COMMENT 'số tiền phải chuyển của lần gửi này (backend lấy từ ThanhToanSuKien)',
+  ThoiDiemChuyen  DATETIME NULL COMMENT 'giờ chuyển khoản trên biên lai (khách nhập, tùy chọn, ≤ giờ máy chủ)',
+  NgayGui         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  Anh             VARCHAR(255) NOT NULL COMMENT 'đường dẫn tương đối /tep-tai-len/<tên file>',
+  MaBamAnh        CHAR(64) NOT NULL COMMENT 'SHA-256 nội dung ảnh',
+  KetQua          ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  MaNguoiDuyet    INT UNSIGNED NULL,
+  NgayDuyet       DATETIME NULL,
+  LyDo            VARCHAR(255) NULL COMMENT 'lý do từ chối',
+  CONSTRAINT FK_ChungTuSK_ThanhToan  FOREIGN KEY (MaThanhToan)  REFERENCES ThanhToanSuKien(MaThanhToan) ON DELETE CASCADE,
+  CONSTRAINT FK_ChungTuSK_NguoiDuyet FOREIGN KEY (MaNguoiDuyet) REFERENCES NguoiDung(MaNguoiDung),
+  KEY IDX_ChungTuSK_ThanhToan (MaThanhToan),
+  KEY IDX_ChungTuSK_Bam (MaBamAnh)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- G7. BaoCaoViPham: khách báo cáo vi phạm; mỗi người báo mỗi đối tượng 1 lần. Hiện chỉ LoaiDoiTuong = 'event'.
+--    HanhDong (khi upheld): none | hide (ẩn) | cancel (hủy sự kiện). CongViPham = 1: cộng vào SoLanViPham của chủ sân (chờ chốt #4).
+CREATE TABLE BaoCaoViPham (
+  MaBaoCao         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaNguoiBaoCao    INT UNSIGNED NOT NULL,
+  LoaiDoiTuong     ENUM('event') NOT NULL DEFAULT 'event',
+  MaDoiTuong       INT UNSIGNED NOT NULL,
+  LyDo             ENUM('misleading','fraud','inappropriate','other','slow_approval') NOT NULL COMMENT 'slow_approval = khách khiếu nại chủ sân duyệt chậm phí sự kiện',
+  NoiDung          VARCHAR(500) NULL,
+  TrangThai        ENUM('pending','upheld','dismissed') NOT NULL DEFAULT 'pending',
+  HanhDong         ENUM('none','hide','cancel') NULL,
+  CongViPham       TINYINT(1) NOT NULL DEFAULT 0,
+  GhiChuQuanTri    VARCHAR(500) NULL,
+  MaQuanTriXuLy    INT UNSIGNED NULL,
+  NgayXuLy         DATETIME NULL,
+  NgayTao          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_BaoCao_NguoiBao FOREIGN KEY (MaNguoiBaoCao) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_BaoCao_QuanTri  FOREIGN KEY (MaQuanTriXuLy) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_BaoCao_Moi (MaNguoiBaoCao, LoaiDoiTuong, MaDoiTuong),
+  KEY IDX_BaoCao_TrangThai (TrangThai, NgayTao),
+  KEY IDX_BaoCao_DoiTuong (LoaiDoiTuong, MaDoiTuong)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+ALTER TABLE Gay
+  ADD CONSTRAINT FK_Gay_BaoCao FOREIGN KEY (MaBaoCao) REFERENCES BaoCaoViPham(MaBaoCao);
+
+-- ---------------------------------------------------------------------
 -- 14. ThongBao: thông báo cho khách, chủ sân và admin
 --     KhoaChongTrung UNIQUE để chống gửi trùng
 CREATE TABLE ThongBao (
@@ -434,11 +693,17 @@ CREATE TABLE ThongBao (
                        'complaint_resolved','owner_warning','owner_banned',
                        'review_received','review_replied','review_hidden','review_sent',
                        'review_reminder',
-                       'refund_reminder','refund_escalated','refund_received','refund_not_received')
+                       'refund_reminder','refund_escalated','refund_received','refund_not_received',
+                       'hold_expiring','confirm_expiring','checkin_success',
+                       'event_registered','event_accepted','event_rejected','event_removed',
+                       'event_updated','event_cancelled','event_reminder','event_hidden',
+                       'event_payment_submitted','event_payment_confirmed','event_payment_rejected',
+                       'event_payment_expired',
+                       'refund_expiring','booking_moved','payment_auto_confirmed')
                   NOT NULL,
   TieuDe          VARCHAR(150) NOT NULL,
   NoiDung         VARCHAR(500) NOT NULL,
-  LoaiThamChieu   ENUM('booking','payment','venue','complaint') NULL COMMENT 'để app/web điều hướng khi bấm vào',
+  LoaiThamChieu   ENUM('booking','payment','venue','complaint','event','registration') NULL COMMENT 'để app/web điều hướng khi bấm vào',
   MaThamChieu     INT UNSIGNED NULL,
   DaDoc           TINYINT(1) NOT NULL DEFAULT 0,
   KhoaChongTrung  VARCHAR(100) NULL,
@@ -456,34 +721,6 @@ CREATE TABLE CauHinhHeThong (
   MoTa         VARCHAR(255) NULL,
   NgayCapNhat  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
-  ('commission_rate',          '10',     'Hoa hồng hệ thống (%) trên đơn app'),
-  ('hold_minutes',             '10',     'Thời gian giữ chỗ (phút)'),
-  ('confirm_minutes',          '30',     'Thời gian giữ chỗ (phút) sau khi khách gửi ảnh chuyển khoản, chờ chủ sân xác nhận'),
-  ('cancel_free_hours',        '24',     'Khách hủy trước giờ chơi từ bao nhiêu giờ trở lên thì được hoàn 100%'),
-  ('cancel_half_hours',        '12',     'Khách hủy trước giờ chơi từ bấy nhiêu giờ đến dưới cancel_free_hours thì được hoàn một phần; dưới mức này không hoàn'),
-  ('late_cancel_refund_percent','50',    'Tỷ lệ hoàn (%) khi khách hủy trong khoảng cancel_half_hours đến cancel_free_hours (chủ sân hủy luôn hoàn 100%)'),
-  ('confirm_urgent_minutes',  '15',  'Hạn chủ sân xác nhận (phút) với đơn đặt gấp'),
-  ('urgent_threshold_minutes','60',  'Còn dưới số phút này đến giờ chơi thì coi là đặt gấp'),
-  ('reconcile_hold_minutes',  '30',  'Thời gian giữ chỗ/đối soát (phút) khi khách báo bị trừ tiền mà chưa ghi nhận (đề xuất, cần chốt)'),
-  ('topup_minutes',           '30',  'Hạn khách bổ sung tiền chuyển thiếu (phút) (đề xuất, cần chốt)'),
-  ('overpay_refund_hours',    '48',  'Hạn hoàn khoản chuyển dư/trùng (giờ) (đề xuất, cần chốt)'),
-  ('refund_deadline_hours',   '24',  'Hạn chủ sân chuyển khoản hoàn tiền (giờ) (đề xuất, cần chốt)'),
-  ('refund_grace_hours',      '24',  'Gia hạn (giờ) sau hạn hoàn trước khi khoá nhận đặt mới'),
-  ('owner_cancel_reply_hours','24',  'Hạn khách phản hồi khi chủ sân huỷ lịch (giờ); rút ngắn khi sát giờ (đề xuất)'),
-  ('noshow_wait_minutes',     '30',  'Chờ khách đến trễ bao lâu (phút) thì chủ sân được đánh dấu không đến (đề xuất 15–30)'),
-  ('checkin_open_minutes',    '30',  'Mở check-in trước giờ chơi (phút)'),
-  ('incident_admin_minutes',  '30',  'Chủ sân không phản hồi sự cố tại sân sau bao lâu (phút) thì Admin hỗ trợ (đề xuất 15–30)'),
-  ('complaint_days',          '7',   'Số ngày khách được khiếu nại sau giờ chơi'),
-  ('owner_response_hours',    '24',  'Hạn chủ sân giải trình khiếu nại (giờ) (đề xuất 24–48)'),
-  ('appeal_hours',            '48',  'Hạn kháng nghị quyết định của Admin (giờ) (đề xuất)'),
-  ('strike_lock_count',       '3',   'Số "gậy" tích luỹ thì khoá nhận đặt mới'),
-  ('abuse_threshold',         '5',   'Số lần huỷ/hết hạn giữ chỗ trong abuse_window_hours bị coi là giữ sân ảo (đề xuất)'),
-  ('abuse_window_hours',      '24',  'Cửa sổ thời gian (giờ) để đếm giữ sân ảo (đề xuất)'),
-  ('reschedule_min_hours',    '24',  'Đổi lịch: phải cách giờ chơi ít nhất bao nhiêu giờ (đã chốt 0.8 #3)'),
-  ('reschedule_max_count',    '1',   'Đổi lịch: số lần đổi tối đa mỗi đơn (đã chốt 0.8 #3)'),
-  ('reschedule_range_days',   '7',   'Đổi lịch: được dời trong ±bao nhiêu ngày so với ngày cũ (đã chốt 0.8 #3)');
 
 -- ---------------------------------------------------------------------
 -- 17. NhatKyHeThong: nhật ký thao tác của admin / chủ sân với các việc nhạy cảm
@@ -504,1637 +741,160 @@ CREATE TABLE NhatKyHeThong (
   KEY IDX_NhatKy_NguoiThucHien (MaNguoiThucHien, NgayTao)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- Seed: tài khoản admin (thay MatKhauMaHoa bằng hash bcrypt thật trước khi dùng)
--- ---------------------------------------------------------------------
-INSERT INTO NguoiDung (HoTen, Email, MatKhauMaHoa, VaiTro)
-VALUES ('Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 'admin');
-
--- ---------------------------------------------------------------------
--- TRUY VẤN GỢI Ý CHO CÁC HÀNG CHỜ (tham khảo, không chạy cùng file)
--- ---------------------------------------------------------------------
--- Hồ sơ chủ sân chờ duyệt:
---   SELECT * FROM HoSoChuSan WHERE TrangThaiDuyet = 'pending' ORDER BY NgayGuiDuyet;
--- Hàng chờ hoàn tiền của admin:
---   SELECT * FROM ThanhToan
---   WHERE (TrangThai = 'late_payment' AND TrangThaiHoanTien = 'none')
---      OR TrangThaiHoanTien IN ('waiting_info','processing');
-
--- =====================================================================
--- SEED DATA - HỆ THỐNG ĐẶT SÂN CẦU LÔNG
--- Chạy SAU khi đã import db_sancaulong.sql (schema đã tự tạo admin MaNguoiDung = 1)
--- Không seed: ThanhToan (theo yêu cầu)
--- Mật khẩu mọi tài khoản demo: "password"
---   (bcrypt hash dưới đây là hash phổ biến của chuỗi "password", chỉ dùng để dev/test)
--- Ngày "hiện tại" của dữ liệu mẫu: 2026-10-31 (thứ Bảy)
--- =====================================================================
-SET NAMES utf8mb4;
+-- G8.1: schema Cộng đồng (bài tìm người chơi, đội nhóm, phòng chat).
+-- Chạy sau db_sancaulong.sql hiện tại. Có thể chạy lại an toàn.
 USE db_sancaulong;
 
--- Cập nhật mật khẩu admin (seed trong schema đang là CHANGE_ME_BCRYPT_HASH)
-UPDATE NguoiDung
-SET MatKhauMaHoa = '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni'
-WHERE MaNguoiDung = 1;
+CREATE TABLE IF NOT EXISTS PhongChat (
+  MaPhong INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  Loai ENUM('player_post','team') NOT NULL,
+  TrangThai ENUM('open','readonly') NOT NULL DEFAULT 'open',
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY IDX_PhongChat_LoaiTrangThai (Loai, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- 1. NguoiDung: 4 chủ sân (id 2-5) + 6 khách (id 6-11)
--- ---------------------------------------------------------------------
-INSERT INTO NguoiDung
-  (MaNguoiDung, HoTen, Email, SoDienThoai, MatKhauMaHoa, VaiTro, TrangThai, LyDoKhoa, NgayTao)
-VALUES
-  (2,  'Nguyễn Minh Khoa', 'khoa.owner@badminton.local', '0912345671', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-07-30 09:00:00'),
-  (3,  'Trần Thị Lan',     'lan.owner@badminton.local',  '0912345672', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-08-05 10:30:00'),
-  (4,  'Lê Quốc Bảo',      'bao.owner@badminton.local',  '0912345673', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-29 08:45:00'),
-  (5,  'Phạm Hữu Đức',     'duc.owner@badminton.local',  '0912345674', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-18 15:20:00'),
-  (6,  'Nguyễn Thị Mai',  'mai.nguyen@gmail.com',  '0901234561', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-08-20 19:00:00'),
-  (7,  'Trần Văn Nam',    'nam.tran@gmail.com',    '0901234562', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-08-25 20:10:00'),
-  (8,  'Lê Hoàng Phúc',   'phuc.le@gmail.com',     '0901234563', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-09-02 08:30:00'),
-  (9,  'Phạm Thu Hà',     'ha.pham@gmail.com',     '0901234564', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-09-10 21:00:00'),
-  (10, 'Nguyễn Văn Hùng', 'hung.nguyen@gmail.com', '0903456789', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'active', NULL, '2026-09-15 18:00:00'),
-  (11, 'Đỗ Quang Vinh',   'vinh.do@gmail.com',     '0901234566', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'customer', 'locked', 'Nhiều lần đặt sân nhưng không đến', '2026-09-20 12:00:00');
+CREATE TABLE IF NOT EXISTS ThanhVienPhong (
+  MaPhong INT UNSIGNED NOT NULL,
+  MaNguoiDung INT UNSIGNED NOT NULL,
+  VaiTro ENUM('owner','member') NOT NULL DEFAULT 'member',
+  TrangThai ENUM('active','left','removed') NOT NULL DEFAULT 'active',
+  NgayVao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayRoi DATETIME NULL,
+  PRIMARY KEY (MaPhong, MaNguoiDung),
+  KEY IDX_ThanhVienPhong_NguoiDung (MaNguoiDung, TrangThai),
+  CONSTRAINT FK_ThanhVienPhong_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong) ON DELETE CASCADE,
+  CONSTRAINT FK_ThanhVienPhong_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- 2. HoSoChuSan: đủ 4 trạng thái approved / approved / pending / rejected
--- ---------------------------------------------------------------------
-INSERT INTO HoSoChuSan
-  (MaNguoiDung, TenDoanhNghiep, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan,
-   TrangThaiDuyet, NgayGuiDuyet, NgayDuyet, MaQuanTriDuyet, LyDoTuChoi)
-VALUES
-  (2, 'Công ty TNHH Thể thao Thành Công', 'Vietcombank', 'VCB', '0071001234567', 'NGUYEN MINH KHOA',
-      'approved', '2026-08-01 09:15:00', '2026-08-02 14:30:00', 1, NULL),
-  (3, 'Hộ kinh doanh Lan Sport',          'MB Bank',     'MB', '8888012345',    'TRAN THI LAN',
-      'approved', '2026-08-06 11:00:00', '2026-08-08 10:00:00', 1, NULL),
-  (4, 'Cầu lông Bảo Long',                'Techcombank', 'TCB', '19036789012345', 'LE QUOC BAO',
-      'pending',  '2026-10-30 16:20:00', NULL, NULL, NULL),
-  (5, 'Sân bóng Dương Phát',      'ACB',         'ACB', '245678901',     'PHAM HUU DUONG',
-      'rejected', '2026-10-20 10:00:00', '2026-10-22 09:30:00', 1, 'Tên chủ tài khoản ngân hàng không khớp với hồ sơ đăng ký');
+CREATE TABLE IF NOT EXISTS TinNhan (
+  MaTin INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaPhong INT UNSIGNED NOT NULL,
+  MaNguoiGui INT UNSIGNED NOT NULL,
+  NoiDung VARCHAR(1000) NOT NULL,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT FK_TinNhan_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong) ON DELETE CASCADE,
+  CONSTRAINT FK_TinNhan_NguoiGui FOREIGN KEY (MaNguoiGui) REFERENCES NguoiDung(MaNguoiDung),
+  KEY IDX_TinNhan_PhongMaTin (MaPhong, MaTin),
+  KEY IDX_TinNhan_NguoiGui (MaNguoiGui, NgayTao)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- 3. CoSo (điểm đánh giá khớp với bảng DanhGia bên dưới)
--- ---------------------------------------------------------------------
-INSERT INTO CoSo
-  (MaCoSo, MaChuSan, TenCoSo, DiaChi, SoDienThoai, LinkBanDo, TinhThanh, QuanHuyen, ViDo, KinhDo,
-   MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, GiaThapNhat, TrangThai, LyDoKhoa, DiemTrungBinh, SoDanhGia, NgayTao)
-VALUES
-  (1, 2, 'Cầu Lông Thành Công', '123 Trường Chinh, Phường 13', '0912345671',
-     'https://maps.google.com/?q=10.8012,106.6399', 'TP. Hồ Chí Minh', 'Tân Bình', 10.801200, 106.639900,
-     'Nhà thi đấu 4 sân thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.',
-     '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.7, 3, '2026-08-03 15:00:00'),
-  (2, 2, 'Cầu Lông Thành Công - Gò Vấp', '45 Quang Trung, Phường 10', '0912345679',
-     'https://maps.google.com/?q=10.8385,106.6651', 'TP. Hồ Chí Minh', 'Gò Vấp', 10.838500, 106.665100,
-     'Cơ sở 2 với 3 sân, có căng-tin phục vụ nước uống.',
-     '05:30:00', '22:30:00', 60, 55000, 'active', NULL, 3.0, 1, '2026-08-10 09:00:00'),
-  (3, 3, 'Lan Sport Arena', '88 Võ Văn Ngân, Phường Linh Chiểu', '0912345672',
-     'https://maps.google.com/?q=10.8506,106.7719', 'TP. Hồ Chí Minh', 'TP. Thủ Đức', 10.850600, 106.771900,
-     'Khu liên hợp 4 sân cầu lông chất lượng cao gần các trường đại học, có chỗ để xe rộng.',
-     '06:00:00', '22:00:00', 60, 70000, 'active', NULL, 4.0, 1, '2026-08-12 10:00:00'),
-  (4, 4, 'Bảo Long Badminton', '25 Điện Biên Phủ, Phường 25', '0912345673',
-     'https://maps.google.com/?q=10.797,106.71', 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.797000, 106.710000,
-     'Cơ sở mới đang chờ duyệt hồ sơ chủ sân.',
-     '06:00:00', '22:00:00', 60, 50000, 'hidden', NULL, 0.0, 0, '2026-10-30 16:00:00'),
-  (5, 3, 'Lan Sport Mini', '12 Kha Vạn Cân, Phường Linh Đông', '0912345675',
-     'https://maps.google.com/?q=10.846,106.751', 'TP. Hồ Chí Minh', 'TP. Thủ Đức', 10.846000, 106.751000,
-     'Cơ sở nhỏ 2 sân.',
-     '06:00:00', '21:00:00', 60, 65000, 'locked', 'Nhiều báo cáo về thông tin giá không đúng thực tế', 0.0, 0, '2026-09-01 08:00:00');
+CREATE TABLE IF NOT EXISTS BaiTimNguoi (
+  MaBai INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaNguoiTao INT UNSIGNED NOT NULL,
+  MaPhong INT UNSIGNED NOT NULL,
+  TieuDe VARCHAR(150) NOT NULL,
+  MoTa TEXT NULL,
+  TrinhDoTu TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  TrinhDoDen TINYINT UNSIGNED NOT NULL DEFAULT 8,
+  SoNguoiCan TINYINT UNSIGNED NOT NULL,
+  NgayChoi DATE NOT NULL,
+  GioBatDau TIME NOT NULL,
+  GioKetThuc TIME NOT NULL,
+  KhuVuc VARCHAR(150) NOT NULL,
+  ChiPhi VARCHAR(100) NULL,
+  MaDatSan INT UNSIGNED NULL,
+  AnhBia VARCHAR(255) NULL,
+  TrangThai ENUM('open','full','closed','ended','cancelled','hidden','removed') NOT NULL DEFAULT 'open',
+  LyDoGo VARCHAR(500) NULL,
+  MaNguoiGo INT UNSIGNED NULL,
+  NgayGo DATETIME NULL,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_BaiTimNguoi_NguoiTao FOREIGN KEY (MaNguoiTao) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_BaiTimNguoi_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong),
+  CONSTRAINT FK_BaiTimNguoi_DatSan FOREIGN KEY (MaDatSan) REFERENCES DatSan(MaDatSan),
+  CONSTRAINT FK_BaiTimNguoi_NguoiGo FOREIGN KEY (MaNguoiGo) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_BaiTimNguoi_Phong (MaPhong),
+  KEY IDX_BaiTimNguoi_DanhSach (TrangThai, NgayChoi, NgayTao),
+  KEY IDX_BaiTimNguoi_NguoiTao (MaNguoiTao, TrangThai),
+  CONSTRAINT CHK_BaiTimNguoi_TrinhDo CHECK (TrinhDoTu BETWEEN 1 AND 8 AND TrinhDoDen BETWEEN 1 AND 8 AND TrinhDoTu <= TrinhDoDen),
+  CONSTRAINT CHK_BaiTimNguoi_SoNguoi CHECK (SoNguoiCan BETWEEN 1 AND 20),
+  CONSTRAINT CHK_BaiTimNguoi_Gio CHECK (GioKetThuc > GioBatDau)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- 4. AnhCoSo
--- ---------------------------------------------------------------------
-INSERT INTO AnhCoSo (MaAnh, MaCoSo, DuongDan, LaAnhBia, ThuTu) VALUES
-  (1,  1, '/tep-tai-len/coso/1/bia.jpg', 1, 0),
-  (2,  1, '/tep-tai-len/coso/1/san-1.jpg', 0, 1),
-  (3,  1, '/tep-tai-len/coso/1/khu-thay-do.jpg', 0, 2),
-  (4,  2, '/tep-tai-len/coso/2/bia.jpg', 1, 0),
-  (5,  2, '/tep-tai-len/coso/2/canteen.jpg', 0, 1),
-  (6,  3, '/tep-tai-len/coso/3/bia.jpg', 1, 0),
-  (7,  3, '/tep-tai-len/coso/3/san-2.jpg', 0, 1),
-  (8,  3, '/tep-tai-len/coso/3/bai-xe.jpg', 0, 2),
-  (9,  4, '/tep-tai-len/coso/4/bia.jpg', 1, 0),
-  (10, 5, '/tep-tai-len/coso/5/bia.jpg', 1, 0);
+CREATE TABLE IF NOT EXISTS DoiNhom (
+  MaDoi INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaTruongNhom INT UNSIGNED NOT NULL,
+  MaPhong INT UNSIGNED NOT NULL,
+  TenNhom VARCHAR(120) NOT NULL,
+  AnhDaiDien VARCHAR(255) NULL,
+  MoTa TEXT NULL,
+  KhuVuc VARCHAR(150) NULL,
+  TrinhDoTu TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  TrinhDoDen TINYINT UNSIGNED NOT NULL DEFAULT 8,
+  SoThanhVienToiDa SMALLINT UNSIGNED NOT NULL DEFAULT 20,
+  CheDoThamGia ENUM('free','approval') NOT NULL DEFAULT 'free',
+  NoiQuy TEXT NULL,
+  TrangThai ENUM('active','disbanded','hidden','removed') NOT NULL DEFAULT 'active',
+  LyDoGo VARCHAR(500) NULL,
+  MaNguoiGo INT UNSIGNED NULL,
+  NgayGo DATETIME NULL,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayCapNhat DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT FK_DoiNhom_TruongNhom FOREIGN KEY (MaTruongNhom) REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_DoiNhom_Phong FOREIGN KEY (MaPhong) REFERENCES PhongChat(MaPhong),
+  CONSTRAINT FK_DoiNhom_NguoiGo FOREIGN KEY (MaNguoiGo) REFERENCES NguoiDung(MaNguoiDung),
+  UNIQUE KEY UQ_DoiNhom_Phong (MaPhong),
+  KEY IDX_DoiNhom_DanhSach (TrangThai, NgayTao),
+  KEY IDX_DoiNhom_TruongNhom (MaTruongNhom, TrangThai),
+  CONSTRAINT CHK_DoiNhom_TrinhDo CHECK (TrinhDoTu BETWEEN 1 AND 8 AND TrinhDoDen BETWEEN 1 AND 8 AND TrinhDoTu <= TrinhDoDen),
+  CONSTRAINT CHK_DoiNhom_SoThanhVien CHECK (SoThanhVienToiDa >= 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- 5. San (id 1-4: CS1 | 5-7: CS2 | 8-11: CS3 | 12-13: CS4 | 14-15: CS5)
--- ---------------------------------------------------------------------
-INSERT INTO San (MaSan, MaCoSo, TenSan, TrangThai) VALUES
-  (1, 1, 'Sân 1', 'active'),
-  (2, 1, 'Sân 2', 'active'),
-  (3, 1, 'Sân 3', 'active'),
-  (4, 1, 'Sân 4', 'active'),
-  (5, 2, 'Sân 1', 'active'),
-  (6, 2, 'Sân 2', 'active'),
-  (7, 2, 'Sân 3', 'maintenance'),
-  (8, 3, 'Sân A', 'active'),
-  (9, 3, 'Sân B', 'active'),
-  (10, 3, 'Sân C', 'active'),
-  (11, 3, 'Sân D', 'active'),
-  (12, 4, 'Sân 1', 'active'),
-  (13, 4, 'Sân 2', 'active'),
-  (14, 5, 'Sân 1', 'active'),
-  (15, 5, 'Sân 2', 'active');
+CREATE TABLE IF NOT EXISTS YeuCauVaoDoi (
+  MaYeuCau INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  MaDoi INT UNSIGNED NOT NULL,
+  MaNguoiDung INT UNSIGNED NOT NULL,
+  TrangThai ENUM('pending','accepted','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  MaNguoiDungPending INT UNSIGNED AS (CASE WHEN TrangThai='pending' THEN MaNguoiDung ELSE NULL END) STORED,
+  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  NgayXuLy DATETIME NULL,
+  CONSTRAINT FK_YeuCauVaoDoi_Doi FOREIGN KEY (MaDoi) REFERENCES DoiNhom(MaDoi) ON DELETE CASCADE,
+  CONSTRAINT FK_YeuCauVaoDoi_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
+  UNIQUE KEY UQ_YeuCauVaoDoi_Pending (MaDoi, MaNguoiDungPending),
+  KEY IDX_YeuCauVaoDoi_DoiTrangThai (MaDoi, TrangThai, NgayTao),
+  KEY IDX_YeuCauVaoDoi_NguoiTrangThai (MaNguoiDung, TrangThai)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------------------------------------------------------------------
--- 6. KhoaSan
--- ---------------------------------------------------------------------
-INSERT INTO KhoaSan (MaKhoa, MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUES
-  (1, 3,  '2026-11-10', '14:00:00', '18:00:00', 'Bảo trì mặt sân'),
-  (2, 11, '2026-11-14', '06:00:00', '12:00:00', 'Tổ chức giải nội bộ'),
-  (3, 11, '2026-11-14', '13:00:00', '17:00:00', 'Tổ chức giải nội bộ'),
-  (4, 6,  '2026-11-12', '08:00:00', '10:00:00', 'Thay lưới và kẻ lại vạch');
+-- Mỗi người chỉ được một báo cáo trên mỗi đối tượng; UNIQUE hiện hữu được giữ nguyên.
+ALTER TABLE BaoCaoViPham
+  MODIFY LoaiDoiTuong ENUM('event','player_post','team') NOT NULL DEFAULT 'event',
+  MODIFY TrangThai ENUM('pending','upheld','dismissed','rejected') NOT NULL DEFAULT 'pending',
+  MODIFY HanhDong ENUM('none','hide','cancel','remove') NULL;
 
--- ---------------------------------------------------------------------
--- 7. BangGia
--- ---------------------------------------------------------------------
-INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES
-  -- CS1
-  (1, 'weekday', 'walk_in', '06:00:00', '16:00:00',  60000),
-  (1, 'weekday', 'walk_in', '16:00:00', '22:00:00', 100000),
-  (1, 'weekend', 'walk_in', '06:00:00', '16:00:00',  90000),
-  (1, 'weekend', 'walk_in', '16:00:00', '22:00:00', 130000),
-  (1, 'weekday', 'fixed',   '06:00:00', '16:00:00',  50000),
-  (1, 'weekday', 'fixed',   '16:00:00', '22:00:00',  80000),
-  (1, 'weekend', 'fixed',   '06:00:00', '22:00:00', 100000),
-  -- CS2
-  (2, 'weekday', 'walk_in', '05:30:00', '16:00:00',  55000),
-  (2, 'weekday', 'walk_in', '16:00:00', '22:30:00',  90000),
-  (2, 'weekend', 'walk_in', '05:30:00', '16:00:00',  85000),
-  (2, 'weekend', 'walk_in', '16:00:00', '22:30:00', 120000),
-  (2, 'weekday', 'fixed',   '05:30:00', '22:30:00',  70000),
-  (2, 'weekend', 'fixed',   '05:30:00', '22:30:00',  95000),
-  -- CS3
-  (3, 'weekday', 'walk_in', '06:00:00', '16:00:00',  70000),
-  (3, 'weekday', 'walk_in', '16:00:00', '22:00:00', 110000),
-  (3, 'weekend', 'walk_in', '06:00:00', '16:00:00', 100000),
-  (3, 'weekend', 'walk_in', '16:00:00', '22:00:00', 140000),
-  (3, 'weekday', 'fixed',   '06:00:00', '16:00:00',  55000),
-  (3, 'weekday', 'fixed',   '16:00:00', '22:00:00',  90000),
-  (3, 'weekend', 'fixed',   '06:00:00', '22:00:00', 110000),
-  -- CS4
-  (4, 'weekday', 'walk_in', '06:00:00', '16:00:00',  50000),
-  (4, 'weekday', 'walk_in', '16:00:00', '22:00:00',  80000),
-  (4, 'weekend', 'walk_in', '06:00:00', '22:00:00', 100000),
-  (4, 'weekday', 'fixed',   '06:00:00', '22:00:00',  45000),
-  -- CS5
-  (5, 'weekday', 'walk_in', '06:00:00', '21:00:00',  65000),
-  (5, 'weekend', 'walk_in', '06:00:00', '21:00:00',  90000);
 
--- ---------------------------------------------------------------------
--- 9. LichCoDinh
--- ---------------------------------------------------------------------
-INSERT INTO LichCoDinh
-  (MaLichCoDinh, MaSan, MaKhachHang, TenKhach, SoDienThoai, CacThu, NgayBatDau, NgayKetThuc,
-   GioBatDau, GioKetThuc, SoPhut, DonGiaMoiBuoi, GhiChu, TrangThai, MaNguoiTao)
-VALUES
-  (1, 1, 10,   'Nguyễn Văn Hùng',        '0903456789', 'T3,T5', '2026-10-06', NULL,
-     '19:00:00', '21:00:00', 120, 160000, 'Nhóm đồng nghiệp chơi cố định', 'active', 2),
-  (2, 8, NULL, 'CLB Cầu Lông Sáng Sớm',  '0988777666', 'T7,CN', '2026-10-03', '2027-03-31',
-     '06:00:00', '08:00:00', 120, 220000, 'Khách chưa có tài khoản app', 'active', 3);
+DELIMITER $$
+DROP PROCEDURE IF EXISTS migration_g8_community_unique_report$$
+CREATE PROCEDURE migration_g8_community_unique_report()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='BaoCaoViPham' AND INDEX_NAME='UQ_BaoCao_Moi'
+  ) THEN
+    ALTER TABLE BaoCaoViPham
+      ADD UNIQUE KEY UQ_BaoCao_Moi (MaNguoiBaoCao, LoaiDoiTuong, MaDoiTuong);
+  END IF;
+END$$
+CALL migration_g8_community_unique_report()$$
+DROP PROCEDURE migration_g8_community_unique_report$$
+DELIMITER ;
 
--- ---------------------------------------------------------------------
--- 10. DatSan
---   Công thức: TongTien theo BangGia; PhiNenTang = 10% (đơn app), 0 (đơn owner)
--- ---------------------------------------------------------------------
-INSERT INTO DatSan
-  (MaDatSan, MaDon, MaKhachHang, TenKhach, SoDienThoaiLienHe, GhiChu, Nguon, LoaiKhach, MaLichCoDinh,
-   MaSan, NgayChoi, GioBatDau, GioKetThuc, SoPhut, TongTien, PhiNenTang, TienChuSan,
-   TrangThaiThu, NgayThu, TrangThai, HetHanGiuCho, NguoiHuy, LyDoHuy, NgayHuy, NgayTao)
-VALUES
-  -- Đơn app đã hoàn thành
-  (1,  'BK20261020001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
-       1, '2026-10-20', '18:00:00', '20:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-18 20:00:00'),
-  (2,  'BK20261022001', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
-       2, '2026-10-22', '07:00:00', '08:30:00', 90, 90000, 9000, 81000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-21 21:00:00'),
-  (3,  'BK20261024001', 8, 'Lê Hoàng Phúc',   '0901234563', 'Cần thêm 1 hộp cầu', 'app', 'walk_in', NULL,
-       3, '2026-10-24', '17:00:00', '19:00:00', 120, 260000, 26000, 234000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-22 09:30:00'),
-  (4,  'BK20261025001', 9, 'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
-       8, '2026-10-25', '09:00:00', '11:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-23 18:00:00'),
-  (5,  'BK20261026001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
-       5, '2026-10-26', '19:00:00', '20:00:00', 60, 90000, 9000, 81000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-25 22:00:00'),
-  -- Đơn owner: lịch cố định đã chơi
-  (6,  'BK20261029001', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'owner', 'fixed', 1,
-       1, '2026-10-29', '19:00:00', '21:00:00', 120, 160000, 0, 160000,
-       'paid', '2026-10-29 21:05:00', 'completed', NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
-  (7,  'BK20261031001', NULL, 'CLB Cầu Lông Sáng Sớm', '0988777666', NULL, 'owner', 'fixed', 2,
-       8, '2026-10-31', '06:00:00', '08:00:00', 120, 220000, 0, 220000,
-       'unpaid', NULL, 'completed', NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
-  -- Đơn owner: khách vãng lai tại chỗ
-  (8,  'BK20261030001', NULL, 'Anh Tuấn', '0977123456', 'Khách đặt trực tiếp', 'owner', 'walk_in', NULL,
-       2, '2026-10-30', '18:00:00', '19:30:00', 90, 150000, 0, 150000,
-       'paid', '2026-10-30 19:35:00', 'completed', NULL, NULL, NULL, NULL, '2026-10-30 17:50:00'),
-  -- Đơn owner: lịch cố định sắp tới
-  (9,  'BK20261101001', NULL, 'CLB Cầu Lông Sáng Sớm', '0988777666', NULL, 'owner', 'fixed', 2,
-       8, '2026-11-01', '06:00:00', '08:00:00', 120, 220000, 0, 220000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
-  (10, 'BK20261103001', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'owner', 'fixed', 1,
-       1, '2026-11-03', '19:00:00', '21:00:00', 120, 160000, 0, 160000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
-  (11, 'BK20261105001', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'owner', 'fixed', 1,
-       1, '2026-11-05', '19:00:00', '21:00:00', 120, 160000, 0, 160000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-06 09:00:00'),
-  (12, 'BK20261107001', NULL, 'CLB Cầu Lông Sáng Sớm', '0988777666', NULL, 'owner', 'fixed', 2,
-       8, '2026-11-07', '06:00:00', '08:00:00', 120, 220000, 0, 220000,
-       'unpaid', NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-03 09:00:00'),
-  -- Đơn app sắp tới đã thanh toán
-  (13, 'BK20261102001', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
-       3, '2026-11-02', '18:00:00', '20:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-30 21:00:00'),
-  (14, 'BK20261107002', 8, 'Lê Hoàng Phúc',   '0901234563', NULL, 'app', 'walk_in', NULL,
-       4, '2026-11-07', '15:00:00', '17:00:00', 120, 220000, 22000, 198000,
-       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-31 08:00:00'),
-  (15, 'BK20261101002', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'app', 'walk_in', NULL,
-       6, '2026-11-01', '08:00:00', '10:00:00', 120, 170000, 17000, 153000,
-       NULL, NULL, 'confirmed', NULL, NULL, NULL, NULL, '2026-10-31 09:30:00'),
-  -- Đơn đang giữ chỗ (chưa thanh toán)
-  (16, 'BK20261031002', 9, 'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
-       9, '2026-11-02', '20:00:00', '21:00:00', 60, 110000, 11000, 99000,
-       NULL, NULL, 'pending_payment', '2026-10-31 13:45:00', NULL, NULL, NULL, '2026-10-31 13:35:00'),
-  -- Đơn bị hủy bởi khách (hủy sớm, hoàn 100%)
-  (17, 'BK20261028001', 6, 'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
-       1, '2026-11-04', '18:00:00', '19:00:00', 60, 100000, 10000, 90000,
-       NULL, NULL, 'cancelled', NULL, 'customer', 'Khách bận đột xuất', '2026-10-28 20:00:00', '2026-10-28 09:00:00'),
-  -- Đơn hết hạn giữ chỗ
-  (18, 'BK20261029002', 7, 'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
-       2, '2026-11-01', '10:00:00', '11:00:00', 60, 90000, 9000, 81000,
-       NULL, NULL, 'expired', '2026-10-29 10:10:00', 'system', 'Hết hạn giữ chỗ', '2026-10-29 10:10:00', '2026-10-29 10:00:00'),
-  -- Đơn app bị chủ sân hủy (hoàn 100%)
-  (19, 'BK20261027001', 8, 'Lê Hoàng Phúc',   '0901234563', NULL, 'app', 'walk_in', NULL,
-       4, '2026-11-06', '19:00:00', '21:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'cancelled', NULL, 'owner', 'Sân bảo trì đột xuất', '2026-10-30 08:00:00', '2026-10-27 19:00:00');
+ALTER TABLE ThongBao
+  MODIFY Loai ENUM(
+    'booking_created','payment_success','payment_failed','booking_cancelled','new_booking_for_owner','system',
+    'refund_requested','refund_completed','complaint_received','complaint_resolved','owner_warning','owner_banned',
+    'review_received','review_replied','review_hidden','review_sent','review_reminder',
+    'refund_reminder','refund_escalated','refund_received','refund_not_received','hold_expiring','confirm_expiring','checkin_success',
+    'event_registered','event_accepted','event_rejected','event_removed','event_updated','event_cancelled','event_reminder','event_hidden',
+    'event_payment_submitted','event_payment_confirmed','event_payment_rejected','event_payment_expired',
+    'post_joined','post_left','post_cancelled','post_ended','member_removed',
+    'team_request','team_accepted','team_rejected','team_disbanded','team_owner_changed',
+    'community_hidden','community_removed','report_processed'
+  ) NOT NULL,
+  MODIFY LoaiThamChieu ENUM('booking','payment','venue','complaint','event','registration','player_post','team') NULL;
 
--- ---------------------------------------------------------------------
--- 11. DanhGia (đơn app đã completed) - khớp DiemTrungBinh/SoDanhGia của CoSo
--- ---------------------------------------------------------------------
-INSERT INTO DanhGia (MaDanhGia, MaDatSan, MaKhachHang, MaCoSo, SoSao, NoiDung, BiAn, PhanHoiChuSan, NgayPhanHoi, NgayTao) VALUES
-  (1, 1, 6, 1, 5, 'Sân đẹp, đèn sáng, chủ sân nhiệt tình.', 0, 'Cảm ơn bạn đã ủng hộ, hẹn gặp lại!', '2026-10-21 08:00:00', '2026-10-20 21:30:00'),
-  (2, 2, 7, 1, 4, 'Sân sạch sẽ, buổi sáng mát mẻ. Hơi ít chỗ để xe máy.', 0, NULL, NULL, '2026-10-22 09:00:00'),
-  (3, 3, 8, 1, 5, 'Chất lượng thảm tốt, chơi êm chân.', 0, 'Cảm ơn bạn!', '2026-10-25 09:00:00', '2026-10-24 19:30:00'),
-  (4, 4, 9, 3, 4, 'Khu vực rộng rãi, có máy lạnh nhưng giá hơi cao.', 0, NULL, NULL, '2026-10-25 11:30:00'),
-  (5, 5, 6, 2, 3, 'Sân tạm ổn nhưng đèn hơi tối ở góc sân.', 0, 'Cảm ơn góp ý, bên mình sẽ thay đèn trong tuần này.', '2026-10-27 09:00:00', '2026-10-26 20:30:00');
-
--- ---------------------------------------------------------------------
--- 12. YeuThich
--- ---------------------------------------------------------------------
-INSERT INTO YeuThich (MaKhachHang, MaCoSo, NgayTao) VALUES
-  (6,  1, '2026-09-01 10:00:00'),
-  (6,  3, '2026-09-05 10:00:00'),
-  (7,  1, '2026-09-03 18:00:00'),
-  (8,  2, '2026-09-10 12:00:00'),
-  (9,  3, '2026-10-01 09:00:00'),
-  (10, 1, '2026-10-06 19:00:00'),
-  (11, 2, '2026-09-25 08:00:00');
-
--- ---------------------------------------------------------------------
--- 14. ThongBao (đủ cho khách, chủ sân và admin)
--- ---------------------------------------------------------------------
-INSERT INTO ThongBao (MaNguoiDung, Loai, TieuDe, NoiDung, LoaiThamChieu, MaThamChieu, DaDoc, KhoaChongTrung, NgayTao) VALUES
-  -- Khách
-  (6,  'booking_created',  'Đã giữ chỗ', 'Bạn đã giữ chỗ đơn BK20261020001, vui lòng thanh toán trong 10 phút.', 'booking', 1, 1, 'booking_created_1', '2026-10-18 20:00:00'),
-  (6,  'payment_success',  'Thanh toán thành công', 'Đơn BK20261020001 đã được xác nhận.', 'booking', 1, 1, 'payment_success_1', '2026-10-18 20:02:00'),
-  (7,  'payment_success',  'Thanh toán thành công', 'Đơn BK20261102001 đã được xác nhận.', 'booking', 13, 0, 'payment_success_13', '2026-10-30 21:03:00'),
-  (6,  'booking_cancelled','Hủy đơn thành công', 'Đơn BK20261028001 đã hủy, bạn được hoàn 100% số tiền.', 'booking', 17, 1, 'booking_cancelled_17', '2026-10-28 20:00:00'),
-  (8,  'booking_cancelled','Chủ sân hủy đơn', 'Đơn BK20261027001 bị chủ sân hủy do bảo trì sân, bạn được hoàn 100%.', 'booking', 19, 0, 'booking_cancelled_19', '2026-10-30 08:00:00'),
-  (7,  'payment_failed',   'Hết hạn giữ chỗ', 'Đơn BK20261029002 đã hết hạn do chưa thanh toán.', 'booking', 18, 1, 'payment_failed_18', '2026-10-29 10:10:00'),
-  (6,  'system',           'Chào mừng', 'Chào mừng bạn đến với hệ thống đặt sân cầu lông!', NULL, NULL, 1, 'system_welcome_6', '2026-08-20 19:00:00'),
-  -- Chủ sân
-  (2,  'new_booking_for_owner', 'Có đơn đặt mới', 'Đơn BK20261107002 vừa được đặt tại Sân 4.', 'booking', 14, 0, 'new_booking_14', '2026-10-31 08:00:00'),
-  (3,  'new_booking_for_owner', 'Có đơn đặt mới', 'Đơn BK20261102001 vừa được đặt tại Cầu Lông Thành Công.', 'booking', 13, 1, 'new_booking_13', '2026-10-30 21:03:00');
-
--- ---------------------------------------------------------------------
--- 15. NhatKyHeThong
--- ---------------------------------------------------------------------
-INSERT INTO NhatKyHeThong (MaNguoiThucHien, HanhDong, DoiTuong, MaDoiTuong, ChiTiet, NgayTao) VALUES
-  (1, 'duyet_chu_san',   'NguoiDung', 2, 'Duyệt hồ sơ chủ sân Nguyễn Minh Khoa', '2026-08-02 14:30:00'),
-  (1, 'duyet_chu_san',   'NguoiDung', 3, 'Duyệt hồ sơ chủ sân Trần Thị Lan', '2026-08-08 10:00:00'),
-  (1, 'tu_choi_chu_san', 'NguoiDung', 5, 'Từ chối: tên chủ tài khoản không khớp hồ sơ', '2026-10-22 09:30:00'),
-  (1, 'khoa_co_so',      'CoSo',      5, 'Khóa cơ sở Lan Sport Mini: báo cáo sai thông tin giá', '2026-10-10 09:00:00'),
-  (1, 'khoa_tai_khoan',  'NguoiDung', 11, 'Khóa tài khoản: nhiều lần đặt sân không đến', '2026-10-12 14:00:00'),
-  (2, 'huy_don_uu_tien', 'DatSan',    19, 'Chủ sân hủy đơn BK20261027001, hoàn 100% cho khách', '2026-10-30 08:00:00');
-
--- =====================================================================
--- SEED BỔ SUNG (TP. Hồ Chí Minh): chủ sân id 12-23, cơ sở id 6-29, sân id 16-108, bảng giá
--- Dùng để test tìm kiếm/lọc. Mật khẩu tài khoản mới: "password"
--- Cơ sở id 16 (closed), 21 (locked), 28-29 (hidden) cố ý KHÔNG hiện trong tìm kiếm.
--- =====================================================================
-
--- ---------------------------------------------------------------------
--- 1. NguoiDung (chủ sân)
--- ---------------------------------------------------------------------
-INSERT INTO NguoiDung (MaNguoiDung, HoTen, Email, SoDienThoai, MatKhauMaHoa, VaiTro, TrangThai, LyDoKhoa, NgayTao) VALUES
-  (12, 'Võ Thành Long', 'long.owner@badminton.local', '0912345681', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-01 09:00:00'),
-  (13, 'Đặng Thị Hồng', 'hong.owner@badminton.local', '0912345682', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-02 09:00:00'),
-  (14, 'Bùi Anh Tuấn', 'tuan.owner@badminton.local', '0912345683', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-03 09:00:00'),
-  (15, 'Hoàng Mỹ Linh', 'linh.owner@badminton.local', '0912345684', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-04 09:00:00'),
-  (16, 'Ngô Văn Sơn', 'son.owner@badminton.local', '0912345685', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-05 09:00:00'),
-  (17, 'Đinh Thị Thu', 'thu.owner@badminton.local', '0912345686', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-06 09:00:00'),
-  (18, 'Lý Quốc Vinh', 'vinh.owner@badminton.local', '0912345687', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-07 09:00:00'),
-  (19, 'Trương Minh Châu', 'chau.owner@badminton.local', '0912345688', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-08 09:00:00'),
-  (20, 'Phan Đức Huy', 'huy.owner@badminton.local', '0912345689', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-09 09:00:00'),
-  (21, 'Mai Thị Ngọc', 'ngoc.owner@badminton.local', '0912345690', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-10 09:00:00'),
-  (22, 'Lưu Gia Bảo', 'gbao.owner@badminton.local', '0912345691', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-11 09:00:00'),
-  (23, 'Cao Thanh Tùng', 'tung.owner@badminton.local', '0912345692', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-12 09:00:00');
-
--- ---------------------------------------------------------------------
--- 2. HoSoChuSan
--- ---------------------------------------------------------------------
-INSERT INTO HoSoChuSan
-  (MaNguoiDung, TenDoanhNghiep, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan, TrangThaiDuyet, NgayGuiDuyet, NgayDuyet, MaQuanTriDuyet, LyDoTuChoi)
-VALUES
-  (12, 'Cầu lông Thành Long', 'Vietcombank', 'VCB', '0071009876501', 'VO THANH LONG', 'approved', '2026-09-01 10:00:00', '2026-09-02 09:00:00', 1, NULL),
-  (13, 'Hộ kinh doanh Hồng Phát', 'MB Bank', 'MB', '8888100200', 'DANG THI HONG', 'approved', '2026-09-02 10:00:00', '2026-09-03 09:00:00', 1, NULL),
-  (14, 'Công ty TNHH Thể thao Anh Tuấn', 'Techcombank', 'TCB', '19037777001122', 'BUI ANH TUAN', 'approved', '2026-09-03 10:00:00', '2026-09-04 09:00:00', 1, NULL),
-  (15, 'Linh Sport Club', 'ACB', 'ACB', '245100300', 'HOANG MY LINH', 'approved', '2026-09-04 10:00:00', '2026-09-05 09:00:00', 1, NULL),
-  (16, 'Sơn Badminton Center', 'BIDV', 'BIDV', '31410001234567', 'NGO VAN SON', 'approved', '2026-09-05 10:00:00', '2026-09-06 09:00:00', 1, NULL),
-  (17, 'Cầu lông Thu Hà', 'VietinBank', 'CTG', '107871234567', 'DINH THI THU', 'approved', '2026-09-06 10:00:00', '2026-09-07 09:00:00', 1, NULL),
-  (18, 'Công ty CP Thể thao Quốc Vinh', 'Sacombank', 'STB', '060123456789', 'LY QUOC VINH', 'approved', '2026-09-07 10:00:00', '2026-09-08 09:00:00', 1, NULL),
-  (19, 'Châu Sport', 'TPBank', 'TPB', '00112233445', 'TRUONG MINH CHAU', 'approved', '2026-09-08 10:00:00', '2026-09-09 09:00:00', 1, NULL),
-  (20, 'Huy Hoàng Sport', 'VPBank', 'VPB', '1234567890', 'PHAN DUC HUY', 'approved', '2026-09-09 10:00:00', '2026-09-10 09:00:00', 1, NULL),
-  (21, 'Ngọc Court', 'HDBank', 'HDB', '0123456789012', 'MAI THI NGOC', 'approved', '2026-09-10 10:00:00', '2026-09-11 09:00:00', 1, NULL),
-  (22, 'Gia Bảo Sport', 'OCB', 'OCB', '0004100012345', 'LUU GIA BAO', 'pending', '2026-11-16 15:00:00', NULL, NULL, NULL),
-  (23, 'Thanh Tùng Arena', 'Agribank', 'VBA', '6300205123456', 'CAO THANH TUNG', 'rejected', '2026-11-10 10:00:00', '2026-11-12 09:00:00', 1, 'Số tài khoản ngân hàng không khớp tên chủ sân');
-
--- ---------------------------------------------------------------------
--- 3. CoSo
--- ---------------------------------------------------------------------
-INSERT INTO CoSo
-  (MaCoSo, MaChuSan, TenCoSo, DiaChi, SoDienThoai, LinkBanDo, TinhThanh, QuanHuyen, ViDo, KinhDo,
-   MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, GiaThapNhat, TrangThai, LyDoKhoa, DiemTrungBinh, SoDanhGia, NgayTao)
-VALUES
-  (6, 12, 'Thành Long Badminton Quận 1', '15 Nguyễn Huệ, Phường Bến Nghé', '0912345681',
-     'https://maps.google.com/?q=10.7719,106.6959', 'TP. Hồ Chí Minh', 'Quận 1', 10.771900, 106.695900,
-     'Sân cao cấp trung tâm, thảm Yonex, điều hòa, phòng thay đồ riêng.',
-     '06:00:00', '23:00:00', 60, 80000, 'active', NULL, 4.8, 52, '2026-09-01 10:00:00'),
-  (7, 12, 'Thành Long Badminton Quận 3', '88 Võ Văn Tần, Phường 6', '0912345682',
-     'https://maps.google.com/?q=10.7827,106.6863', 'TP. Hồ Chí Minh', 'Quận 3', 10.782700, 106.686300,
-     'Sân mái che, đèn LED chống chói, gửi xe miễn phí.',
-     '06:00:00', '22:00:00', 60, 70000, 'active', NULL, 4.5, 31, '2026-09-02 10:00:00'),
-  (8, 13, 'Hồng Phát Sport Quận 7', '230 Huỳnh Tấn Phát, Phường Tân Thuận Đông', '0912345683',
-     'https://maps.google.com/?q=10.7364,106.7176', 'TP. Hồ Chí Minh', 'Quận 7', 10.736400, 106.717600,
-     'Khu thể thao gia đình, có căng-tin và bãi giữ xe rộng.',
-     '05:30:00', '22:30:00', 60, 60000, 'active', NULL, 4.3, 24, '2026-09-03 10:00:00'),
-  (9, 13, 'Hồng Phát Sport Bình Thạnh', '72 Phan Văn Trị, Phường 14', '0912345684',
-     'https://maps.google.com/?q=10.8067,106.7100', 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.806700, 106.710000,
-     'Sân bình dân gần chợ, phù hợp nhóm bạn và sinh viên.',
-     '06:00:00', '22:00:00', 60, 45000, 'active', NULL, 4.0, 18, '2026-09-04 10:00:00'),
-  (10, 14, 'Anh Tuấn Arena Gò Vấp', '310 Quang Trung, Phường 11', '0912345685',
-     'https://maps.google.com/?q=10.8384,106.6614', 'TP. Hồ Chí Minh', 'Gò Vấp', 10.838400, 106.661400,
-     'Nhà thi đấu 6 sân tiêu chuẩn thi đấu, có khán đài nhỏ.',
-     '06:00:00', '22:00:00', 60, 65000, 'active', NULL, 4.6, 40, '2026-09-05 10:00:00'),
-  (11, 14, 'Anh Tuấn Arena Quận 12', '45 Nguyễn Ảnh Thủ, Phường Hiệp Thành', '0912345686',
-     'https://maps.google.com/?q=10.8707,106.6428', 'TP. Hồ Chí Minh', 'Quận 12', 10.870700, 106.642800,
-     'Cơ sở mới, giá mềm, đặt tối thiểu 90 phút.',
-     '06:00:00', '21:30:00', 90, 50000, 'active', NULL, 3.8, 9, '2026-09-06 10:00:00'),
-  (12, 15, 'Linh Sport Phú Nhuận', '19 Hoàng Văn Thụ, Phường 9', '0912345687',
-     'https://maps.google.com/?q=10.7964,106.6768', 'TP. Hồ Chí Minh', 'Phú Nhuận', 10.796400, 106.676800,
-     'Sân nhỏ xinh gần sân bay, thuận tiện cho khách Tân Bình.',
-     '06:00:00', '22:00:00', 60, 75000, 'active', NULL, 4.1, 15, '2026-09-07 10:00:00'),
-  (13, 15, 'Linh Sport Tân Phú', '140 Lũy Bán Bích, Phường Hòa Thạnh', '0912345688',
-     'https://maps.google.com/?q=10.7909,106.6301', 'TP. Hồ Chí Minh', 'Tân Phú', 10.790900, 106.630100,
-     'Đặt tối thiểu 30 phút, mở sớm cho nhóm tập sáng.',
-     '05:00:00', '22:00:00', 30, 50000, 'active', NULL, 4.4, 27, '2026-09-08 10:00:00'),
-  (14, 16, 'Sơn Badminton Center Thủ Đức', '26 Võ Văn Ngân, Phường Bình Thọ', '0912345689',
-     'https://maps.google.com/?q=10.8540,106.7511', 'TP. Hồ Chí Minh', 'TP. Thủ Đức', 10.854000, 106.751100,
-     'Trung tâm lớn nhất khu Đông, 8 sân, có huấn luyện viên.',
-     '06:00:00', '22:00:00', 60, 70000, 'active', NULL, 4.7, 63, '2026-09-09 10:00:00'),
-  (15, 16, 'Sơn Badminton Bình Tân', '512 Kinh Dương Vương, Phường An Lạc', '0912345681',
-     'https://maps.google.com/?q=10.7637,106.6061', 'TP. Hồ Chí Minh', 'Bình Tân', 10.763700, 106.606100,
-     'Sân bình dân, giá rẻ nhất khu Tây.',
-     '06:00:00', '22:00:00', 60, 40000, 'active', NULL, 3.5, 6, '2026-09-10 10:00:00'),
-  (16, 16, 'Sơn Badminton Q10 (đang đóng tạm)', '200 Ba Tháng Hai, Phường 12', '0912345682',
-     'https://maps.google.com/?q=10.7699,106.6645', 'TP. Hồ Chí Minh', 'Quận 10', 10.769900, 106.664500,
-     'Đóng tạm để sửa chữa mặt sân - không hiện trong tìm kiếm.',
-     '06:00:00', '22:00:00', 60, 80000, 'closed', NULL, 4.2, 12, '2026-09-11 10:00:00'),
-  (17, 17, 'Thu Hà Sport Quận 5', '101 Trần Hưng Đạo, Phường 11', '0912345683',
-     'https://maps.google.com/?q=10.7497,106.6703', 'TP. Hồ Chí Minh', 'Quận 5', 10.749700, 106.670300,
-     'Sân gần các trường đại học, đông sinh viên buổi tối.',
-     '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.6, 45, '2026-09-12 10:00:00'),
-  (18, 17, 'Thu Hà Sport Quận 6', '35 Hậu Giang, Phường 6', '0912345684',
-     'https://maps.google.com/?q=10.7474,106.6336', 'TP. Hồ Chí Minh', 'Quận 6', 10.747400, 106.633600,
-     'Sân trong nhà, mát mẻ, đèn LED sáng đều.',
-     '06:00:00', '22:00:00', 60, 65000, 'active', NULL, 4.2, 21, '2026-09-13 10:00:00'),
-  (19, 17, 'Thu Hà Sport Quận 8', '8 Phạm Thế Hiển, Phường 4', '0912345685',
-     'https://maps.google.com/?q=10.7271,106.6319', 'TP. Hồ Chí Minh', 'Quận 8', 10.727100, 106.631900,
-     'Khu dân cư đông, bãi xe ô tô rộng.',
-     '06:00:00', '22:00:00', 60, 50000, 'active', NULL, 3.9, 11, '2026-09-14 10:00:00'),
-  (20, 18, 'Quốc Vinh Sport Tân Bình', '66 Cộng Hòa, Phường 12', '0912345686',
-     'https://maps.google.com/?q=10.7978,106.6512', 'TP. Hồ Chí Minh', 'Tân Bình', 10.797800, 106.651200,
-     'Cơ sở cao cấp, thảm thi đấu quốc tế, mở đến 23h.',
-     '05:30:00', '23:00:00', 60, 90000, 'active', NULL, 4.9, 78, '2026-09-15 10:00:00'),
-  (21, 18, 'Quốc Vinh Sport Quận 11 (bị khóa)', '12 Lạc Long Quân, Phường 3', '0912345687',
-     'https://maps.google.com/?q=10.7635,106.6545', 'TP. Hồ Chí Minh', 'Quận 11', 10.763500, 106.654500,
-     'Bị admin khóa do báo cáo vi phạm - không hiện trong tìm kiếm.',
-     '06:00:00', '22:00:00', 60, 70000, 'locked', 'Nhiều báo cáo về giá không đúng niêm yết', 3.2, 4, '2026-09-16 10:00:00'),
-  (22, 19, 'Châu Sport Bình Chánh', '57 Nguyễn Văn Linh, Xã Bình Hưng', '0912345688',
-     'https://maps.google.com/?q=10.6912,106.5928', 'TP. Hồ Chí Minh', 'Bình Chánh', 10.691200, 106.592800,
-     'Sân rộng khu Nam Sài Gòn, bãi xe thoải mái.',
-     '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.5, 33, '2026-09-17 10:00:00'),
-  (23, 19, 'Châu Sport Hóc Môn', '99 Quốc lộ 22, Thị trấn Hóc Môn', '0912345689',
-     'https://maps.google.com/?q=10.8839,106.5871', 'TP. Hồ Chí Minh', 'Hóc Môn', 10.883900, 106.587100,
-     'Sân bình dân ngoại thành, đông nhóm chơi buổi tối.',
-     '06:00:00', '22:00:00', 60, 55000, 'active', NULL, 4.3, 19, '2026-09-18 10:00:00'),
-  (24, 19, 'Châu Sport Nhà Bè', '23 Huỳnh Tấn Phát, Thị trấn Nhà Bè', '0912345681',
-     'https://maps.google.com/?q=10.6966,106.7374', 'TP. Hồ Chí Minh', 'Nhà Bè', 10.696600, 106.737400,
-     'Cơ sở mới khai trương, chưa có đánh giá.',
-     '06:00:00', '21:00:00', 60, 50000, 'active', NULL, 0.0, 0, '2026-09-19 10:00:00'),
-  (25, 20, 'Huy Hoàng Sport Củ Chi', '150 Tỉnh lộ 8, Thị trấn Củ Chi', '0912345682',
-     'https://maps.google.com/?q=10.9683,106.4887', 'TP. Hồ Chí Minh', 'Củ Chi', 10.968300, 106.488700,
-     'Sân rộng, nhiều nhóm chơi buổi tối sau giờ làm.',
-     '06:00:00', '22:00:00', 60, 50000, 'active', NULL, 4.4, 29, '2026-09-20 10:00:00'),
-  (26, 20, 'Huy Hoàng Sport Quận 1', '30 Nguyễn Thị Minh Khai, Phường Đa Kao', '0912345683',
-     'https://maps.google.com/?q=10.7759,106.7019', 'TP. Hồ Chí Minh', 'Quận 1', 10.775900, 106.701900,
-     'Sân nhỏ giữa trung tâm, giá sinh viên buổi sáng.',
-     '06:00:00', '22:00:00', 60, 45000, 'active', NULL, 4.0, 14, '2026-09-21 10:00:00'),
-  (27, 21, 'Ngọc Court Bình Thạnh', '75 Điện Biên Phủ, Phường 25', '0912345694',
-     'https://maps.google.com/?q=10.8133,106.7054', 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.813300, 106.705400,
-     'Sân đẹp, có phòng nghỉ và khu ghế ngồi cho khách.',
-     '06:00:00', '22:00:00', 60, 55000, 'active', NULL, 4.6, 36, '2026-09-22 10:00:00'),
-  (28, 22, 'Gia Bảo Sport Quận 7 (chờ duyệt)', '10 Nguyễn Thị Thập, Phường Tân Phú', '0912345695',
-     'https://maps.google.com/?q=10.7304,106.7236', 'TP. Hồ Chí Minh', 'Quận 7', 10.730400, 106.723600,
-     'Chủ sân đang chờ admin duyệt hồ sơ - không hiện trong tìm kiếm.',
-     '06:00:00', '22:00:00', 60, 70000, 'hidden', NULL, 0.0, 0, '2026-09-23 10:00:00'),
-  (29, 23, 'Thanh Tùng Arena Gò Vấp (bị từ chối)', '5 Phan Văn Trị, Phường 5', '0912345696',
-     'https://maps.google.com/?q=10.8387,106.6621', 'TP. Hồ Chí Minh', 'Gò Vấp', 10.838700, 106.662100,
-     'Hồ sơ chủ sân bị từ chối - không hiện trong tìm kiếm.',
-     '06:00:00', '22:00:00', 60, 60000, 'hidden', NULL, 0.0, 0, '2026-09-24 10:00:00');
-
--- ---------------------------------------------------------------------
--- 4. San
--- ---------------------------------------------------------------------
-INSERT INTO San (MaSan, MaCoSo, TenSan, TrangThai) VALUES
-  (16, 6, 'Sân 1', 'active'),
-  (17, 6, 'Sân 2', 'active'),
-  (18, 6, 'Sân 3', 'active'),
-  (19, 6, 'Sân 4', 'active'),
-  (20, 6, 'Sân 5', 'active'),
-  (21, 7, 'Sân A', 'active'),
-  (22, 7, 'Sân B', 'active'),
-  (23, 7, 'Sân C', 'active'),
-  (24, 7, 'Sân D', 'active'),
-  (25, 8, 'Sân 1', 'active'),
-  (26, 8, 'Sân 2', 'active'),
-  (27, 8, 'Sân 3', 'active'),
-  (28, 8, 'Sân 4', 'active'),
-  (29, 8, 'Sân 5', 'active'),
-  (30, 8, 'Sân 6', 'maintenance'),
-  (31, 9, 'Sân 1', 'active'),
-  (32, 9, 'Sân 2', 'active'),
-  (33, 9, 'Sân 3', 'active'),
-  (34, 10, 'Sân 1', 'active'),
-  (35, 10, 'Sân 2', 'active'),
-  (36, 10, 'Sân 3', 'active'),
-  (37, 10, 'Sân 4', 'active'),
-  (38, 10, 'Sân 5', 'active'),
-  (39, 10, 'Sân 6', 'active'),
-  (40, 11, 'Sân 1', 'active'),
-  (41, 11, 'Sân 2', 'active'),
-  (42, 11, 'Sân 3', 'active'),
-  (43, 12, 'Sân 1', 'active'),
-  (44, 12, 'Sân 2', 'active'),
-  (45, 12, 'Sân 3', 'active'),
-  (46, 12, 'Sân 4', 'active'),
-  (47, 13, 'Sân 1', 'active'),
-  (48, 13, 'Sân 2', 'active'),
-  (49, 13, 'Sân 3', 'active'),
-  (50, 13, 'Sân 4', 'active'),
-  (51, 14, 'Sân 1', 'active'),
-  (52, 14, 'Sân 2', 'active'),
-  (53, 14, 'Sân 3', 'active'),
-  (54, 14, 'Sân 4', 'active'),
-  (55, 14, 'Sân 5', 'active'),
-  (56, 14, 'Sân 6', 'active'),
-  (57, 14, 'Sân 7', 'active'),
-  (58, 14, 'Sân 8', 'maintenance'),
-  (59, 15, 'Sân 1', 'active'),
-  (60, 15, 'Sân 2', 'active'),
-  (61, 16, 'Sân 1', 'active'),
-  (62, 16, 'Sân 2', 'active'),
-  (63, 16, 'Sân 3', 'active'),
-  (64, 17, 'Sân 1', 'active'),
-  (65, 17, 'Sân 2', 'active'),
-  (66, 17, 'Sân 3', 'active'),
-  (67, 17, 'Sân 4', 'active'),
-  (68, 17, 'Sân 5', 'active'),
-  (69, 18, 'Sân 1', 'active'),
-  (70, 18, 'Sân 2', 'active'),
-  (71, 18, 'Sân 3', 'active'),
-  (72, 19, 'Sân 1', 'active'),
-  (73, 19, 'Sân 2', 'active'),
-  (74, 19, 'Sân 3', 'active'),
-  (75, 19, 'Sân 4', 'active'),
-  (76, 20, 'Sân 1', 'active'),
-  (77, 20, 'Sân 2', 'active'),
-  (78, 20, 'Sân 3', 'active'),
-  (79, 20, 'Sân 4', 'active'),
-  (80, 20, 'Sân 5', 'active'),
-  (81, 20, 'Sân 6', 'active'),
-  (82, 21, 'Sân 1', 'active'),
-  (83, 21, 'Sân 2', 'active'),
-  (84, 22, 'Sân 1', 'active'),
-  (85, 22, 'Sân 2', 'active'),
-  (86, 22, 'Sân 3', 'active'),
-  (87, 22, 'Sân 4', 'active'),
-  (88, 23, 'Sân 1', 'active'),
-  (89, 23, 'Sân 2', 'active'),
-  (90, 23, 'Sân 3', 'active'),
-  (91, 24, 'Sân 1', 'active'),
-  (92, 24, 'Sân 2', 'active'),
-  (93, 25, 'Sân 1', 'active'),
-  (94, 25, 'Sân 2', 'active'),
-  (95, 25, 'Sân 3', 'active'),
-  (96, 25, 'Sân 4', 'active'),
-  (97, 26, 'Sân 1', 'active'),
-  (98, 26, 'Sân 2', 'active'),
-  (99, 26, 'Sân 3', 'active'),
-  (100, 27, 'Sân 1', 'active'),
-  (101, 27, 'Sân 2', 'active'),
-  (102, 27, 'Sân 3', 'active'),
-  (103, 27, 'Sân 4', 'active'),
-  (104, 27, 'Sân 5', 'active'),
-  (105, 28, 'Sân 1', 'active'),
-  (106, 28, 'Sân 2', 'active'),
-  (107, 29, 'Sân 1', 'active'),
-  (108, 29, 'Sân 2', 'active');
-
--- ---------------------------------------------------------------------
--- 5. BangGia (walk_in phủ kín giờ mở cửa, khung nối liền; fixed một khung cả ngày)
--- ---------------------------------------------------------------------
-INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES
-  (6, 'weekday', 'walk_in', '06:00:00', '11:00:00', 90000),
-  (6, 'weekend', 'walk_in', '06:00:00', '11:00:00', 120000),
-  (6, 'weekday', 'walk_in', '11:00:00', '17:00:00', 80000),
-  (6, 'weekend', 'walk_in', '11:00:00', '17:00:00', 110000),
-  (6, 'weekday', 'walk_in', '17:00:00', '23:00:00', 150000),
-  (6, 'weekend', 'walk_in', '17:00:00', '23:00:00', 180000),
-  (6, 'weekday', 'fixed', '06:00:00', '23:00:00', 120000),
-  (6, 'weekend', 'fixed', '06:00:00', '23:00:00', 150000),
-  (7, 'weekday', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (7, 'weekend', 'walk_in', '06:00:00', '16:00:00', 100000),
-  (7, 'weekday', 'walk_in', '16:00:00', '22:00:00', 120000),
-  (7, 'weekend', 'walk_in', '16:00:00', '22:00:00', 150000),
-  (7, 'weekday', 'fixed', '06:00:00', '22:00:00', 95000),
-  (7, 'weekend', 'fixed', '06:00:00', '22:00:00', 130000),
-  (8, 'weekday', 'walk_in', '05:30:00', '16:00:00', 60000),
-  (8, 'weekend', 'walk_in', '05:30:00', '16:00:00', 85000),
-  (8, 'weekday', 'walk_in', '16:00:00', '22:30:00', 100000),
-  (8, 'weekend', 'walk_in', '16:00:00', '22:30:00', 130000),
-  (8, 'weekday', 'fixed', '05:30:00', '22:30:00', 80000),
-  (8, 'weekend', 'fixed', '05:30:00', '22:30:00', 110000),
-  (9, 'weekday', 'walk_in', '06:00:00', '16:00:00', 45000),
-  (9, 'weekend', 'walk_in', '06:00:00', '16:00:00', 65000),
-  (9, 'weekday', 'walk_in', '16:00:00', '22:00:00', 70000),
-  (9, 'weekend', 'walk_in', '16:00:00', '22:00:00', 90000),
-  (9, 'weekday', 'fixed', '06:00:00', '22:00:00', 55000),
-  (9, 'weekend', 'fixed', '06:00:00', '22:00:00', 75000),
-  (10, 'weekday', 'walk_in', '06:00:00', '16:00:00', 65000),
-  (10, 'weekend', 'walk_in', '06:00:00', '16:00:00', 95000),
-  (10, 'weekday', 'walk_in', '16:00:00', '22:00:00', 110000),
-  (10, 'weekend', 'walk_in', '16:00:00', '22:00:00', 140000),
-  (10, 'weekday', 'fixed', '06:00:00', '22:00:00', 85000),
-  (10, 'weekend', 'fixed', '06:00:00', '22:00:00', 120000),
-  (11, 'weekday', 'walk_in', '06:00:00', '21:30:00', 50000),
-  (11, 'weekend', 'walk_in', '06:00:00', '21:30:00', 70000),
-  (11, 'weekday', 'fixed', '06:00:00', '21:30:00', 40000),
-  (11, 'weekend', 'fixed', '06:00:00', '21:30:00', 60000),
-  (12, 'weekday', 'walk_in', '06:00:00', '16:00:00', 75000),
-  (12, 'weekend', 'walk_in', '06:00:00', '16:00:00', 105000),
-  (12, 'weekday', 'walk_in', '16:00:00', '22:00:00', 125000),
-  (12, 'weekend', 'walk_in', '16:00:00', '22:00:00', 155000),
-  (12, 'weekday', 'fixed', '06:00:00', '22:00:00', 100000),
-  (12, 'weekend', 'fixed', '06:00:00', '22:00:00', 135000),
-  (13, 'weekday', 'walk_in', '05:00:00', '08:00:00', 55000),
-  (13, 'weekend', 'walk_in', '05:00:00', '08:00:00', 75000),
-  (13, 'weekday', 'walk_in', '08:00:00', '16:00:00', 50000),
-  (13, 'weekend', 'walk_in', '08:00:00', '16:00:00', 70000),
-  (13, 'weekday', 'walk_in', '16:00:00', '22:00:00', 90000),
-  (13, 'weekend', 'walk_in', '16:00:00', '22:00:00', 115000),
-  (13, 'weekday', 'fixed', '05:00:00', '22:00:00', 70000),
-  (13, 'weekend', 'fixed', '05:00:00', '22:00:00', 95000),
-  (14, 'weekday', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (14, 'weekend', 'walk_in', '06:00:00', '16:00:00', 100000),
-  (14, 'weekday', 'walk_in', '16:00:00', '22:00:00', 115000),
-  (14, 'weekend', 'walk_in', '16:00:00', '22:00:00', 145000),
-  (14, 'weekday', 'fixed', '06:00:00', '22:00:00', 90000),
-  (14, 'weekend', 'fixed', '06:00:00', '22:00:00', 125000),
-  (15, 'weekday', 'walk_in', '06:00:00', '22:00:00', 40000),
-  (15, 'weekend', 'walk_in', '06:00:00', '22:00:00', 55000),
-  (16, 'weekday', 'walk_in', '06:00:00', '22:00:00', 80000),
-  (16, 'weekend', 'walk_in', '06:00:00', '22:00:00', 110000),
-  (17, 'weekday', 'walk_in', '06:00:00', '17:00:00', 60000),
-  (17, 'weekend', 'walk_in', '06:00:00', '17:00:00', 85000),
-  (17, 'weekday', 'walk_in', '17:00:00', '22:00:00', 100000),
-  (17, 'weekend', 'walk_in', '17:00:00', '22:00:00', 130000),
-  (17, 'weekday', 'fixed', '06:00:00', '22:00:00', 80000),
-  (17, 'weekend', 'fixed', '06:00:00', '22:00:00', 110000),
-  (18, 'weekday', 'walk_in', '06:00:00', '17:00:00', 65000),
-  (18, 'weekend', 'walk_in', '06:00:00', '17:00:00', 90000),
-  (18, 'weekday', 'walk_in', '17:00:00', '22:00:00', 105000),
-  (18, 'weekend', 'walk_in', '17:00:00', '22:00:00', 135000),
-  (18, 'weekday', 'fixed', '06:00:00', '22:00:00', 85000),
-  (18, 'weekend', 'fixed', '06:00:00', '22:00:00', 115000),
-  (19, 'weekday', 'walk_in', '06:00:00', '17:00:00', 50000),
-  (19, 'weekend', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (19, 'weekday', 'walk_in', '17:00:00', '22:00:00', 85000),
-  (19, 'weekend', 'walk_in', '17:00:00', '22:00:00', 110000),
-  (19, 'weekday', 'fixed', '06:00:00', '22:00:00', 65000),
-  (19, 'weekend', 'fixed', '06:00:00', '22:00:00', 90000),
-  (20, 'weekday', 'walk_in', '05:30:00', '16:00:00', 90000),
-  (20, 'weekend', 'walk_in', '05:30:00', '16:00:00', 120000),
-  (20, 'weekday', 'walk_in', '16:00:00', '23:00:00', 160000),
-  (20, 'weekend', 'walk_in', '16:00:00', '23:00:00', 190000),
-  (20, 'weekday', 'fixed', '05:30:00', '23:00:00', 130000),
-  (20, 'weekend', 'fixed', '05:30:00', '23:00:00', 165000),
-  (21, 'weekday', 'walk_in', '06:00:00', '22:00:00', 70000),
-  (21, 'weekend', 'walk_in', '06:00:00', '22:00:00', 95000),
-  (22, 'weekday', 'walk_in', '06:00:00', '16:00:00', 60000),
-  (22, 'weekend', 'walk_in', '06:00:00', '16:00:00', 85000),
-  (22, 'weekday', 'walk_in', '16:00:00', '22:00:00', 95000),
-  (22, 'weekend', 'walk_in', '16:00:00', '22:00:00', 125000),
-  (22, 'weekday', 'fixed', '06:00:00', '22:00:00', 75000),
-  (22, 'weekend', 'fixed', '06:00:00', '22:00:00', 105000),
-  (23, 'weekday', 'walk_in', '06:00:00', '16:00:00', 55000),
-  (23, 'weekend', 'walk_in', '06:00:00', '16:00:00', 80000),
-  (23, 'weekday', 'walk_in', '16:00:00', '22:00:00', 90000),
-  (23, 'weekend', 'walk_in', '16:00:00', '22:00:00', 120000),
-  (23, 'weekday', 'fixed', '06:00:00', '22:00:00', 70000),
-  (23, 'weekend', 'fixed', '06:00:00', '22:00:00', 100000),
-  (24, 'weekday', 'walk_in', '06:00:00', '21:00:00', 50000),
-  (24, 'weekend', 'walk_in', '06:00:00', '21:00:00', 70000),
-  (25, 'weekday', 'walk_in', '06:00:00', '16:00:00', 50000),
-  (25, 'weekend', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (25, 'weekday', 'walk_in', '16:00:00', '22:00:00', 80000),
-  (25, 'weekend', 'walk_in', '16:00:00', '22:00:00', 100000),
-  (25, 'weekday', 'fixed', '06:00:00', '22:00:00', 65000),
-  (25, 'weekend', 'fixed', '06:00:00', '22:00:00', 85000),
-  (26, 'weekday', 'walk_in', '06:00:00', '16:00:00', 45000),
-  (26, 'weekend', 'walk_in', '06:00:00', '16:00:00', 60000),
-  (26, 'weekday', 'walk_in', '16:00:00', '22:00:00', 70000),
-  (26, 'weekend', 'walk_in', '16:00:00', '22:00:00', 90000),
-  (26, 'weekday', 'fixed', '06:00:00', '22:00:00', 55000),
-  (26, 'weekend', 'fixed', '06:00:00', '22:00:00', 75000),
-  (27, 'weekday', 'walk_in', '06:00:00', '16:00:00', 55000),
-  (27, 'weekend', 'walk_in', '06:00:00', '16:00:00', 80000),
-  (27, 'weekday', 'walk_in', '16:00:00', '22:00:00', 95000),
-  (27, 'weekend', 'walk_in', '16:00:00', '22:00:00', 125000),
-  (27, 'weekday', 'fixed', '06:00:00', '22:00:00', 75000),
-  (27, 'weekend', 'fixed', '06:00:00', '22:00:00', 105000),
-  (28, 'weekday', 'walk_in', '06:00:00', '22:00:00', 70000),
-  (28, 'weekend', 'walk_in', '06:00:00', '22:00:00', 95000),
-  (29, 'weekday', 'walk_in', '06:00:00', '22:00:00', 60000),
-  (29, 'weekend', 'walk_in', '06:00:00', '22:00:00', 85000);
-
--- ---------------------------------------------------------------------
--- 6. KhoaSan: vài khung bị khóa để thử tìm theo lịch trống (tính theo ngày hiện tại)
--- ---------------------------------------------------------------------
-INSERT INTO KhoaSan (MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUES
-  (16, DATE_ADD(CURDATE(), INTERVAL 1 DAY), '17:00:00', '21:00:00', 'Giải nội bộ'),
-  (17, DATE_ADD(CURDATE(), INTERVAL 1 DAY), '17:00:00', '21:00:00', 'Giải nội bộ'),
-  (21, DATE_ADD(CURDATE(), INTERVAL 2 DAY), '06:00:00', '12:00:00', 'Bảo trì mặt sân');
-
--- ---------------------------------------------------------------------
--- SEED BỔ SUNG 2: mỗi quận/huyện TP.HCM (22 đơn vị) có đúng 4 cơ sở ACTIVE
--- Thêm: chủ sân id 24-45, cơ sở id 30-94, sân id 109-357, bảng giá. Mật khẩu tài khoản mới: "password"
--- (Đã thống nhất QuanHuyen 'Thủ Đức' -> 'TP. Thủ Đức' ở seed trên)
--- ---------------------------------------------------------------------
--- 1. NguoiDung (chủ sân id 24-45, mỗi quận/huyện một chủ sân)
-INSERT INTO NguoiDung (MaNguoiDung, HoTen, Email, SoDienThoai, MatKhauMaHoa, VaiTro, TrangThai, LyDoKhoa, NgayTao) VALUES
-  (24, 'Nguyễn Văn Thắng', 'nguyen.van.thang.owner@badminton.local', '0913600000', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-24 09:00:00'),
-  (25, 'Trần Thị Bích', 'tran.thi.bich.owner@badminton.local', '0913600137', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-10 09:00:00'),
-  (26, 'Lê Minh Quân', 'le.minh.quan.owner@badminton.local', '0913600274', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-27 09:00:00'),
-  (27, 'Phạm Ngọc Anh', 'pham.ngoc.anh.owner@badminton.local', '0913600411', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-05 09:00:00'),
-  (28, 'Huỳnh Văn Tài', 'huynh.van.tai.owner@badminton.local', '0913600548', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-22 09:00:00'),
-  (29, 'Võ Thị Kim', 'vo.thi.kim.owner@badminton.local', '0913600685', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-10 09:00:00'),
-  (30, 'Đoàn Quang Hải', 'doan.quang.hai.owner@badminton.local', '0913600822', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-01 09:00:00'),
-  (31, 'Dương Thị Hạnh', 'duong.thi.hanh.owner@badminton.local', '0913600959', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-07 09:00:00'),
-  (32, 'Hồ Đức Thịnh', 'ho.duc.thinh.owner@badminton.local', '0913601096', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-08 09:00:00'),
-  (33, 'Châu Minh Tâm', 'chau.minh.tam.owner@badminton.local', '0913601233', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-21 09:00:00'),
-  (34, 'Tô Thanh Phong', 'to.thanh.phong.owner@badminton.local', '0913601370', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-22 09:00:00'),
-  (35, 'Lâm Thị Yến', 'lam.thi.yen.owner@badminton.local', '0913601507', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-28 09:00:00'),
-  (36, 'Vương Quốc Hưng', 'vuong.quoc.hung.owner@badminton.local', '0913601644', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-09 09:00:00'),
-  (37, 'Diệp Gia Huy', 'diep.gia.huy.owner@badminton.local', '0913601781', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-03 09:00:00'),
-  (38, 'Trịnh Thị Oanh', 'trinh.thi.oanh.owner@badminton.local', '0913601918', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-05 09:00:00'),
-  (39, 'Kiều Văn Lộc', 'kieu.van.loc.owner@badminton.local', '0913602055', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-01 09:00:00'),
-  (40, 'La Hoàng Nam', 'la.hoang.nam.owner@badminton.local', '0913602192', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-26 09:00:00'),
-  (41, 'Từ Thị Thủy', 'tu.thi.thuy.owner@badminton.local', '0913602329', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-10 09:00:00'),
-  (42, 'Ông Minh Trí', 'ong.minh.tri.owner@badminton.local', '0913602466', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-25 09:00:00'),
-  (43, 'Thái Bảo Ngân', 'thai.bao.ngan.owner@badminton.local', '0913602603', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-10-10 09:00:00'),
-  (44, 'Bạch Văn Khải', 'bach.van.khai.owner@badminton.local', '0913602740', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-23 09:00:00'),
-  (45, 'Quách Thị Tuyết', 'quach.thi.tuyet.owner@badminton.local', '0913602877', '$2a$12$9q.owCBgiPzgWtDnNIs1uuDlXUAmQyAPaxIRDK1uRLY1pt0OV6.Ni', 'owner', 'active', NULL, '2026-09-28 09:00:00');
-
--- 2. HoSoChuSan (approved)
-INSERT INTO HoSoChuSan (MaNguoiDung, TenDoanhNghiep, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan, TrangThaiDuyet, NgayGuiDuyet, NgayDuyet, MaQuanTriDuyet, LyDoTuChoi) VALUES
-  (24, 'Hộ kinh doanh Thắng Lợi', 'Vietcombank', 'VCB', '3998698797', 'NGUYEN VAN THANG', 'approved', '2026-09-24 10:00:00', '2026-09-25 09:00:00', 1, NULL),
-  (25, 'Hộ kinh doanh Bích Ngọc', 'MB Bank', 'MB', '8469788093208', 'TRAN THI BICH', 'approved', '2026-10-10 10:00:00', '2026-10-11 09:00:00', 1, NULL),
-  (26, 'Công ty TNHH Thể thao Quân Phát', 'Techcombank', 'TCB', '2701079819331', 'LE MINH QUAN', 'approved', '2026-09-27 10:00:00', '2026-09-28 09:00:00', 1, NULL),
-  (27, 'Công ty TNHH Thể thao Ngọc Anh', 'ACB', 'ACB', '70283822264', 'PHAM NGOC ANH', 'approved', '2026-10-05 10:00:00', '2026-10-06 09:00:00', 1, NULL),
-  (28, 'Hộ kinh doanh Tài Lộc', 'BIDV', 'BIDV', '18549145244', 'HUYNH VAN TAI', 'approved', '2026-09-22 10:00:00', '2026-09-23 09:00:00', 1, NULL),
-  (29, 'Kim Cương Sport', 'VietinBank', 'CTG', '0285940692', 'VO THI KIM', 'approved', '2026-10-10 10:00:00', '2026-10-11 09:00:00', 1, NULL),
-  (30, 'Hải Đăng Sport', 'Sacombank', 'STB', '577879432627', 'DOAN QUANG HAI', 'approved', '2026-10-01 10:00:00', '2026-10-02 09:00:00', 1, NULL),
-  (31, 'Hạnh Phúc Sport', 'TPBank', 'TPB', '58220180515', 'DUONG THI HANH', 'approved', '2026-10-07 10:00:00', '2026-10-08 09:00:00', 1, NULL),
-  (32, 'Thịnh Vượng Sport', 'VPBank', 'VPB', '497660856517', 'HO DUC THINH', 'approved', '2026-10-08 10:00:00', '2026-10-09 09:00:00', 1, NULL),
-  (33, 'Hộ kinh doanh Tâm Việt', 'HDBank', 'HDB', '473548643906', 'CHAU MINH TAM', 'approved', '2026-09-21 10:00:00', '2026-09-22 09:00:00', 1, NULL),
-  (34, 'Hộ kinh doanh Phong Vân', 'OCB', 'OCB', '224852722022', 'TO THANH PHONG', 'approved', '2026-09-22 10:00:00', '2026-09-23 09:00:00', 1, NULL),
-  (35, 'Công ty TNHH Thể thao Yến Nhi', 'Agribank', 'VBA', '3528667534789', 'LAM THI YEN', 'approved', '2026-09-28 10:00:00', '2026-09-29 09:00:00', 1, NULL),
-  (36, 'Hưng Thịnh Sport', 'Vietcombank', 'VCB', '417758881440', 'VUONG QUOC HUNG', 'approved', '2026-10-09 10:00:00', '2026-10-10 09:00:00', 1, NULL),
-  (37, 'Công ty TNHH Thể thao Gia Huy', 'MB Bank', 'MB', '8724385469', 'DIEP GIA HUY', 'approved', '2026-10-03 10:00:00', '2026-10-04 09:00:00', 1, NULL),
-  (38, 'Công ty TNHH Thể thao Hoa Mai', 'Techcombank', 'TCB', '5780370412', 'TRINH THI OANH', 'approved', '2026-10-05 10:00:00', '2026-10-06 09:00:00', 1, NULL),
-  (39, 'Công ty TNHH Thể thao Lộc Phát', 'ACB', 'ACB', '190431634999', 'KIEU VAN LOC', 'approved', '2026-10-01 10:00:00', '2026-10-02 09:00:00', 1, NULL),
-  (40, 'Nam Việt Sport', 'BIDV', 'BIDV', '3346352136', 'LA HOANG NAM', 'approved', '2026-09-26 10:00:00', '2026-09-27 09:00:00', 1, NULL),
-  (41, 'Công ty TNHH Thể thao Thủy Tiên', 'VietinBank', 'CTG', '568306866953', 'TU THI THUY', 'approved', '2026-10-10 10:00:00', '2026-10-11 09:00:00', 1, NULL),
-  (42, 'Trí Dũng Sport', 'Sacombank', 'STB', '7617707751', 'ONG MINH TRI', 'approved', '2026-09-25 10:00:00', '2026-09-26 09:00:00', 1, NULL),
-  (43, 'Ngân Hà Sport', 'TPBank', 'TPB', '3995515669', 'THAI BAO NGAN', 'approved', '2026-10-10 10:00:00', '2026-10-11 09:00:00', 1, NULL),
-  (44, 'Công ty TNHH Thể thao Khải Hoàn', 'VPBank', 'VPB', '0278046587306', 'BACH VAN KHAI', 'approved', '2026-09-23 10:00:00', '2026-09-24 09:00:00', 1, NULL),
-  (45, 'Hộ kinh doanh Tuyết Sơn', 'HDBank', 'HDB', '222384164975', 'QUACH THI TUYET', 'approved', '2026-09-28 10:00:00', '2026-09-29 09:00:00', 1, NULL);
-
--- 3. CoSo (active)
-INSERT INTO CoSo (MaCoSo, MaChuSan, TenCoSo, DiaChi, SoDienThoai, LinkBanDo, TinhThanh, QuanHuyen, ViDo, KinhDo, MoTa, GioMoCua, GioDongCua, SoPhutDatToiThieu, GiaThapNhat, TrangThai, LyDoKhoa, DiemTrungBinh, SoDanhGia, NgayTao) VALUES
-  (30, 24, 'Thắng Lợi Club Quận 1', '57 Lê Lai, Phường Bến Thành', '0913600000', 'https://maps.google.com/?q=10.771794,106.691253', 'TP. Hồ Chí Minh', 'Quận 1', 10.771794, 106.691253, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '05:30:00', '23:00:00', 60, 90000, 'active', NULL, 4.3, 14, '2026-09-26 10:00:00'),
-  (31, 24, 'Thắng Lợi Sport Center Quận 1', '276 Pasteur, Phường Đa Kao', '0913600000', 'https://maps.google.com/?q=10.771911,106.699879', 'TP. Hồ Chí Minh', 'Quận 1', 10.771911, 106.699879, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '06:00:00', '21:30:00', 60, 90000, 'active', NULL, 4.2, 19, '2026-09-26 10:00:00'),
-  (32, 25, 'Bích Ngọc Court Quận 3', '247 Cách Mạng Tháng Tám, Phường 2', '0913600137', 'https://maps.google.com/?q=10.793523,106.692791', 'TP. Hồ Chí Minh', 'Quận 3', 10.793523, 106.692791, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '05:30:00', '23:00:00', 30, 90000, 'active', NULL, 4.3, 66, '2026-10-12 10:00:00'),
-  (33, 25, 'Bích Ngọc Club Quận 3', '151 Nam Kỳ Khởi Nghĩa, Phường 3', '0913600137', 'https://maps.google.com/?q=10.792264,106.672623', 'TP. Hồ Chí Minh', 'Quận 3', 10.792264, 106.672623, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '23:00:00', 90, 85000, 'active', NULL, 4.3, 68, '2026-10-12 10:00:00'),
-  (34, 25, 'Bích Ngọc Arena Quận 3', '465 Lý Chính Thắng, Phường 4', '0913600137', 'https://maps.google.com/?q=10.773107,106.679362', 'TP. Hồ Chí Minh', 'Quận 3', 10.773107, 106.679362, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '21:30:00', 30, 90000, 'active', NULL, 4.8, 39, '2026-10-12 10:00:00'),
-  (35, 26, 'Quân Phát Sport Center Quận 4', '343 Khánh Hội, Phường 3', '0913600274', 'https://maps.google.com/?q=10.763984,106.697874', 'TP. Hồ Chí Minh', 'Quận 4', 10.763984, 106.697874, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '05:30:00', '22:00:00', 30, 65000, 'active', NULL, 4.3, 15, '2026-09-29 10:00:00'),
-  (36, 26, 'Quân Phát Arena Quận 4', '479 Hoàng Diệu, Phường 4', '0913600274', 'https://maps.google.com/?q=10.749048,106.708078', 'TP. Hồ Chí Minh', 'Quận 4', 10.749048, 106.708078, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '23:00:00', 60, 60000, 'active', NULL, 4.1, 14, '2026-09-29 10:00:00'),
-  (37, 26, 'Quân Phát Court Quận 4', '427 Nguyễn Tất Thành, Phường 5', '0913600274', 'https://maps.google.com/?q=10.754128,106.697782', 'TP. Hồ Chí Minh', 'Quận 4', 10.754128, 106.697782, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '05:30:00', '21:30:00', 90, 80000, 'active', NULL, 4.8, 78, '2026-09-29 10:00:00'),
-  (38, 26, 'Quân Phát Badminton Quận 4', '79 Tôn Đản, Phường 6', '0913600274', 'https://maps.google.com/?q=10.75999,106.694268', 'TP. Hồ Chí Minh', 'Quận 4', 10.75999, 106.694268, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '23:00:00', 60, 55000, 'active', NULL, 3.7, 74, '2026-09-29 10:00:00'),
-  (39, 27, 'Ngọc Anh Court Quận 5', '157 An Dương Vương, Phường 4', '0913600411', 'https://maps.google.com/?q=10.746493,106.658493', 'TP. Hồ Chí Minh', 'Quận 5', 10.746493, 106.658493, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '06:00:00', '23:00:00', 60, 65000, 'active', NULL, 4.6, 40, '2026-10-07 10:00:00'),
-  (40, 27, 'Ngọc Anh Arena Quận 5', '435 Nguyễn Trãi, Phường 5', '0913600411', 'https://maps.google.com/?q=10.747144,106.654418', 'TP. Hồ Chí Minh', 'Quận 5', 10.747144, 106.654418, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '05:30:00', '23:00:00', 60, 70000, 'active', NULL, 4.7, 50, '2026-10-07 10:00:00'),
-  (41, 27, 'Ngọc Anh Badminton Quận 5', '406 Trần Phú, Phường 6', '0913600411', 'https://maps.google.com/?q=10.754921,106.656933', 'TP. Hồ Chí Minh', 'Quận 5', 10.754921, 106.656933, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.8, 26, '2026-10-07 10:00:00'),
-  (42, 28, 'Tài Lộc Sport Center Quận 6', '213 Hậu Giang, Phường 5', '0913600548', 'https://maps.google.com/?q=10.75767,106.624375', 'TP. Hồ Chí Minh', 'Quận 6', 10.75767, 106.624375, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '21:30:00', 60, 50000, 'active', NULL, 4.4, 9, '2026-09-24 10:00:00'),
-  (43, 28, 'Tài Lộc Court Quận 6', '111 Minh Phụng, Phường 6', '0913600548', 'https://maps.google.com/?q=10.748757,106.633227', 'TP. Hồ Chí Minh', 'Quận 6', 10.748757, 106.633227, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '05:30:00', '22:00:00', 90, 60000, 'active', NULL, 4.2, 8, '2026-09-24 10:00:00'),
-  (44, 28, 'Tài Lộc Arena Quận 6', '149 Bà Hom, Phường 7', '0913600548', 'https://maps.google.com/?q=10.751951,106.64146', 'TP. Hồ Chí Minh', 'Quận 6', 10.751951, 106.64146, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '05:30:00', '22:00:00', 60, 55000, 'active', NULL, 4.3, 19, '2026-09-24 10:00:00'),
-  (45, 29, 'Kim Cương Badminton Quận 7', '123 Nguyễn Thị Thập, Phường Tân Phong', '0913600685', 'https://maps.google.com/?q=10.740638,106.725902', 'TP. Hồ Chí Minh', 'Quận 7', 10.740638, 106.725902, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '22:00:00', 90, 65000, 'active', NULL, 3.9, 7, '2026-10-12 10:00:00'),
-  (46, 29, 'Kim Cương Club Quận 7', '214 Huỳnh Tấn Phát, Phường Tân Phú', '0913600685', 'https://maps.google.com/?q=10.728332,106.717554', 'TP. Hồ Chí Minh', 'Quận 7', 10.728332, 106.717554, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '05:30:00', '22:00:00', 90, 65000, 'active', NULL, 4.6, 45, '2026-10-12 10:00:00'),
-  (47, 29, 'Kim Cương Arena Quận 7', '337 Lê Văn Lương, Phường Tân Quy', '0913600685', 'https://maps.google.com/?q=10.742176,106.725069', 'TP. Hồ Chí Minh', 'Quận 7', 10.742176, 106.725069, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '23:00:00', 60, 70000, 'active', NULL, 4.8, 34, '2026-10-12 10:00:00'),
-  (48, 30, 'Hải Đăng Club Quận 8', '408 Phạm Thế Hiển, Phường 7', '0913600822', 'https://maps.google.com/?q=10.7129,106.620142', 'TP. Hồ Chí Minh', 'Quận 8', 10.7129, 106.620142, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '22:00:00', 90, 55000, 'active', NULL, 4.4, 78, '2026-10-03 10:00:00'),
-  (49, 30, 'Hải Đăng Arena Quận 8', '202 Dương Bá Trạc, Phường 8', '0913600822', 'https://maps.google.com/?q=10.721134,106.639115', 'TP. Hồ Chí Minh', 'Quận 8', 10.721134, 106.639115, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '21:30:00', 60, 50000, 'active', NULL, 4.4, 29, '2026-10-03 10:00:00'),
-  (50, 30, 'Hải Đăng Sport Center Quận 8', '461 Tạ Quang Bửu, Phường 9', '0913600822', 'https://maps.google.com/?q=10.71903,106.628988', 'TP. Hồ Chí Minh', 'Quận 8', 10.71903, 106.628988, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '22:00:00', 60, 50000, 'active', NULL, 4.7, 73, '2026-10-03 10:00:00'),
-  (51, 31, 'Hạnh Phúc Sport Center Quận 10', '307 Ba Tháng Hai, Phường 8', '0913600959', 'https://maps.google.com/?q=10.77564,106.658237', 'TP. Hồ Chí Minh', 'Quận 10', 10.77564, 106.658237, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '23:00:00', 60, 65000, 'active', NULL, 3.8, 71, '2026-10-09 10:00:00'),
-  (52, 31, 'Hạnh Phúc Badminton Quận 10', '425 Sư Vạn Hạnh, Phường 9', '0913600959', 'https://maps.google.com/?q=10.769608,106.674767', 'TP. Hồ Chí Minh', 'Quận 10', 10.769608, 106.674767, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '21:30:00', 60, 65000, 'active', NULL, 3.8, 60, '2026-10-09 10:00:00'),
-  (53, 31, 'Hạnh Phúc Club Quận 10', '166 Nguyễn Tri Phương, Phường 10', '0913600959', 'https://maps.google.com/?q=10.782771,106.672572', 'TP. Hồ Chí Minh', 'Quận 10', 10.782771, 106.672572, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '23:00:00', 60, 70000, 'active', NULL, 4.1, 80, '2026-10-09 10:00:00'),
-  (54, 31, 'Hạnh Phúc Arena Quận 10', '227 Thành Thái, Phường 11', '0913600959', 'https://maps.google.com/?q=10.778833,106.670964', 'TP. Hồ Chí Minh', 'Quận 10', 10.778833, 106.670964, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '06:00:00', '23:00:00', 60, 75000, 'active', NULL, 4.4, 34, '2026-10-09 10:00:00'),
-  (55, 32, 'Thịnh Vượng Badminton Quận 11', '332 Lạc Long Quân, Phường 9', '0913601096', 'https://maps.google.com/?q=10.758831,106.660149', 'TP. Hồ Chí Minh', 'Quận 11', 10.758831, 106.660149, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '21:30:00', 60, 60000, 'active', NULL, 4.7, 66, '2026-10-10 10:00:00'),
-  (56, 32, 'Thịnh Vượng Court Quận 11', '388 Lê Đại Hành, Phường 10', '0913601096', 'https://maps.google.com/?q=10.756177,106.6409', 'TP. Hồ Chí Minh', 'Quận 11', 10.756177, 106.6409, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '22:00:00', 60, 55000, 'active', NULL, 3.8, 6, '2026-10-10 10:00:00'),
-  (57, 32, 'Thịnh Vượng Sport Center Quận 11', '80 Minh Phụng, Phường 11', '0913601096', 'https://maps.google.com/?q=10.75882,106.643266', 'TP. Hồ Chí Minh', 'Quận 11', 10.75882, 106.643266, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.8, 10, '2026-10-10 10:00:00'),
-  (58, 32, 'Thịnh Vượng Arena Quận 11', '282 Âu Cơ, Phường 12', '0913601096', 'https://maps.google.com/?q=10.768522,106.661724', 'TP. Hồ Chí Minh', 'Quận 11', 10.768522, 106.661724, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 3.6, 67, '2026-10-10 10:00:00'),
-  (59, 33, 'Tâm Việt Sport Center Quận 12', '437 Nguyễn Ảnh Thủ, Phường Đông Hưng Thuận', '0913601233', 'https://maps.google.com/?q=10.867431,106.641839', 'TP. Hồ Chí Minh', 'Quận 12', 10.867431, 106.641839, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '23:00:00', 60, 50000, 'active', NULL, 4.6, 72, '2026-09-23 10:00:00'),
-  (60, 33, 'Tâm Việt Club Quận 12', '323 Hà Huy Giáp, Phường Hiệp Thành', '0913601233', 'https://maps.google.com/?q=10.857753,106.643925', 'TP. Hồ Chí Minh', 'Quận 12', 10.857753, 106.643925, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '21:30:00', 30, 50000, 'active', NULL, 4.6, 67, '2026-09-23 10:00:00'),
-  (61, 33, 'Tâm Việt Arena Quận 12', '287 Tô Ký, Phường Thạnh Xuân', '0913601233', 'https://maps.google.com/?q=10.871484,106.649863', 'TP. Hồ Chí Minh', 'Quận 12', 10.871484, 106.649863, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '23:00:00', 90, 50000, 'active', NULL, 4.6, 78, '2026-09-23 10:00:00'),
-  (62, 34, 'Phong Vân Arena Bình Thạnh', '154 Điện Biên Phủ, Phường 11', '0913601370', 'https://maps.google.com/?q=10.803902,106.70584', 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.803902, 106.70584, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '05:30:00', '23:00:00', 60, 55000, 'active', NULL, 3.6, 17, '2026-09-24 10:00:00'),
-  (63, 34, 'Phong Vân Badminton Bình Thạnh', '361 Xô Viết Nghệ Tĩnh, Phường 12', '0913601370', 'https://maps.google.com/?q=10.815363,106.716706', 'TP. Hồ Chí Minh', 'Bình Thạnh', 10.815363, 106.716706, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '21:30:00', 60, 55000, 'active', NULL, 4.7, 26, '2026-09-24 10:00:00'),
-  (64, 35, 'Yến Nhi Arena Gò Vấp', '60 Quang Trung, Phường 12', '0913601507', 'https://maps.google.com/?q=10.844745,106.661694', 'TP. Hồ Chí Minh', 'Gò Vấp', 10.844745, 106.661694, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '21:30:00', 60, 50000, 'active', NULL, 3.6, 23, '2026-09-30 10:00:00'),
-  (65, 35, 'Yến Nhi Court Gò Vấp', '187 Phạm Văn Chiêu, Phường 13', '0913601507', 'https://maps.google.com/?q=10.836159,106.664638', 'TP. Hồ Chí Minh', 'Gò Vấp', 10.836159, 106.664638, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.9, 63, '2026-09-30 10:00:00'),
-  (66, 36, 'Hưng Thịnh Court Phú Nhuận', '289 Phan Xích Long, Phường 13', '0913601644', 'https://maps.google.com/?q=10.789811,106.687179', 'TP. Hồ Chí Minh', 'Phú Nhuận', 10.789811, 106.687179, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '23:00:00', 90, 65000, 'active', NULL, 3.8, 37, '2026-10-11 10:00:00'),
-  (67, 36, 'Hưng Thịnh Arena Phú Nhuận', '24 Nguyễn Kiệm, Phường 1', '0913601644', 'https://maps.google.com/?q=10.805174,106.669707', 'TP. Hồ Chí Minh', 'Phú Nhuận', 10.805174, 106.669707, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '05:30:00', '22:00:00', 60, 70000, 'active', NULL, 4.5, 56, '2026-10-11 10:00:00'),
-  (68, 36, 'Hưng Thịnh Sport Center Phú Nhuận', '264 Hồ Văn Huê, Phường 2', '0913601644', 'https://maps.google.com/?q=10.807868,106.675503', 'TP. Hồ Chí Minh', 'Phú Nhuận', 10.807868, 106.675503, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '05:30:00', '23:00:00', 60, 70000, 'active', NULL, 4.3, 68, '2026-10-11 10:00:00'),
-  (69, 37, 'Gia Huy Arena Tân Bình', '272 Trường Chinh, Phường 14', '0913601781', 'https://maps.google.com/?q=10.791932,106.649544', 'TP. Hồ Chí Minh', 'Tân Bình', 10.791932, 106.649544, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '21:30:00', 90, 65000, 'active', NULL, 4.1, 5, '2026-10-05 10:00:00'),
-  (70, 37, 'Gia Huy Club Tân Bình', '101 Cộng Hòa, Phường 15', '0913601781', 'https://maps.google.com/?q=10.790227,106.658742', 'TP. Hồ Chí Minh', 'Tân Bình', 10.790227, 106.658742, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '22:00:00', 60, 60000, 'active', NULL, 4.6, 76, '2026-10-05 10:00:00'),
-  (71, 38, 'Hoa Mai Arena Tân Phú', '147 Lũy Bán Bích, Phường Sơn Kỳ', '0913601918', 'https://maps.google.com/?q=10.792826,106.617047', 'TP. Hồ Chí Minh', 'Tân Phú', 10.792826, 106.617047, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '21:30:00', 90, 55000, 'active', NULL, 4.3, 34, '2026-10-07 10:00:00'),
-  (72, 38, 'Hoa Mai Sport Center Tân Phú', '45 Tân Kỳ Tân Quý, Phường Tân Sơn Nhì', '0913601918', 'https://maps.google.com/?q=10.783815,106.616363', 'TP. Hồ Chí Minh', 'Tân Phú', 10.783815, 106.616363, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '06:00:00', '21:30:00', 30, 50000, 'active', NULL, 4.1, 26, '2026-10-07 10:00:00'),
-  (73, 38, 'Hoa Mai Club Tân Phú', '177 Thoại Ngọc Hầu, Phường Phú Thọ Hòa', '0913601918', 'https://maps.google.com/?q=10.779784,106.634069', 'TP. Hồ Chí Minh', 'Tân Phú', 10.779784, 106.634069, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '23:00:00', 60, 60000, 'active', NULL, 3.7, 68, '2026-10-07 10:00:00'),
-  (74, 39, 'Lộc Phát Club Bình Tân', '15 Kinh Dương Vương, Phường An Lạc', '0913602055', 'https://maps.google.com/?q=10.761521,106.60957', 'TP. Hồ Chí Minh', 'Bình Tân', 10.761521, 106.60957, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '21:30:00', 60, 50000, 'active', NULL, 4.2, 13, '2026-10-03 10:00:00'),
-  (75, 39, 'Lộc Phát Badminton Bình Tân', '3 Tên Lửa, Phường Bình Trị Đông', '0913602055', 'https://maps.google.com/?q=10.768012,106.599366', 'TP. Hồ Chí Minh', 'Bình Tân', 10.768012, 106.599366, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '22:00:00', 60, 55000, 'active', NULL, 4.2, 20, '2026-10-03 10:00:00'),
-  (76, 39, 'Lộc Phát Sport Center Bình Tân', '117 Lê Văn Quới, Phường Tân Tạo', '0913602055', 'https://maps.google.com/?q=10.773267,106.602552', 'TP. Hồ Chí Minh', 'Bình Tân', 10.773267, 106.602552, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '05:30:00', '23:00:00', 60, 55000, 'active', NULL, 4.4, 65, '2026-10-03 10:00:00'),
-  (77, 40, 'Nam Việt Badminton Thủ Đức', '107 Võ Văn Ngân, Phường Hiệp Bình Chánh', '0913602192', 'https://maps.google.com/?q=10.852794,106.766969', 'TP. Hồ Chí Minh', 'TP. Thủ Đức', 10.852794, 106.766969, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '22:00:00', 60, 70000, 'active', NULL, 4.0, 60, '2026-09-28 10:00:00'),
-  (78, 40, 'Nam Việt Club Thủ Đức', '193 Kha Vạn Cân, Phường Long Thạnh Mỹ', '0913602192', 'https://maps.google.com/?q=10.853273,106.776042', 'TP. Hồ Chí Minh', 'TP. Thủ Đức', 10.853273, 106.776042, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '21:30:00', 90, 65000, 'active', NULL, 4.7, 70, '2026-09-28 10:00:00'),
-  (79, 41, 'Thủy Tiên Court Bình Chánh', '55 Nguyễn Văn Linh, Xã Tân Kiên', '0913602329', 'https://maps.google.com/?q=10.683667,106.562196', 'TP. Hồ Chí Minh', 'Bình Chánh', 10.683667, 106.562196, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '23:00:00', 60, 55000, 'active', NULL, 3.9, 20, '2026-10-12 10:00:00'),
-  (80, 41, 'Thủy Tiên Badminton Bình Chánh', '326 Quốc lộ 1A, Xã Phong Phú', '0913602329', 'https://maps.google.com/?q=10.690382,106.579155', 'TP. Hồ Chí Minh', 'Bình Chánh', 10.690382, 106.579155, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '05:30:00', '23:00:00', 60, 45000, 'active', NULL, 4.5, 63, '2026-10-12 10:00:00'),
-  (81, 41, 'Thủy Tiên Arena Bình Chánh', '55 Trần Đại Nghĩa, Thị trấn Tân Túc', '0913602329', 'https://maps.google.com/?q=10.697842,106.562576', 'TP. Hồ Chí Minh', 'Bình Chánh', 10.697842, 106.562576, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '22:00:00', 60, 35000, 'active', NULL, 4.8, 75, '2026-10-12 10:00:00'),
-  (82, 42, 'Trí Dũng Court Hóc Môn', '328 Quốc lộ 22, Xã Xuân Thới Sơn', '0913602466', 'https://maps.google.com/?q=10.877649,106.597109', 'TP. Hồ Chí Minh', 'Hóc Môn', 10.877649, 106.597109, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '06:00:00', '23:00:00', 60, 45000, 'active', NULL, 4.6, 38, '2026-09-27 10:00:00'),
-  (83, 42, 'Trí Dũng Arena Hóc Môn', '356 Lê Thị Hà, Xã Đông Thạnh', '0913602466', 'https://maps.google.com/?q=10.881434,106.602384', 'TP. Hồ Chí Minh', 'Hóc Môn', 10.881434, 106.602384, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '05:30:00', '23:00:00', 60, 50000, 'active', NULL, 4.3, 72, '2026-09-27 10:00:00'),
-  (84, 42, 'Trí Dũng Club Hóc Môn', '285 Nguyễn Ảnh Thủ, Thị trấn Hóc Môn', '0913602466', 'https://maps.google.com/?q=10.89063,106.592656', 'TP. Hồ Chí Minh', 'Hóc Môn', 10.89063, 106.592656, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '06:00:00', '23:00:00', 60, 45000, 'active', NULL, 4.0, 38, '2026-09-27 10:00:00'),
-  (85, 43, 'Ngân Hà Arena Củ Chi', '191 Tỉnh lộ 8, Xã Trung Lập Hạ', '0913602603', 'https://maps.google.com/?q=10.981865,106.504825', 'TP. Hồ Chí Minh', 'Củ Chi', 10.981865, 106.504825, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '22:00:00', 60, 45000, 'active', NULL, 3.6, 57, '2026-10-12 10:00:00'),
-  (86, 43, 'Ngân Hà Badminton Củ Chi', '12 Nguyễn Văn Khạ, Thị trấn Củ Chi', '0913602603', 'https://maps.google.com/?q=10.981728,106.488055', 'TP. Hồ Chí Minh', 'Củ Chi', 10.981728, 106.488055, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '05:30:00', '21:30:00', 60, 50000, 'active', NULL, 3.7, 34, '2026-10-12 10:00:00'),
-  (87, 43, 'Ngân Hà Court Củ Chi', '26 Quốc lộ 22, Xã Tân An Hội', '0913602603', 'https://maps.google.com/?q=10.97801,106.503443', 'TP. Hồ Chí Minh', 'Củ Chi', 10.97801, 106.503443, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '21:30:00', 90, 30000, 'active', NULL, 4.5, 13, '2026-10-12 10:00:00'),
-  (88, 44, 'Khải Hoàn Club Nhà Bè', '311 Huỳnh Tấn Phát, Thị trấn Nhà Bè', '0913602740', 'https://maps.google.com/?q=10.692533,106.727172', 'TP. Hồ Chí Minh', 'Nhà Bè', 10.692533, 106.727172, 'Nhà thi đấu thảm PVC tiêu chuẩn, mái che thoáng mát, đèn LED chống chói.', '06:00:00', '23:00:00', 30, 55000, 'active', NULL, 4.6, 60, '2026-09-25 10:00:00'),
-  (89, 44, 'Khải Hoàn Badminton Nhà Bè', '139 Nguyễn Bình, Xã Phước Kiển', '0913602740', 'https://maps.google.com/?q=10.706121,106.737088', 'TP. Hồ Chí Minh', 'Nhà Bè', 10.706121, 106.737088, 'Sân trong nhà, có điều hòa, phòng thay đồ và khu nghỉ cho khách.', '06:00:00', '22:00:00', 60, 50000, 'active', NULL, 4.2, 14, '2026-09-25 10:00:00'),
-  (90, 44, 'Khải Hoàn Sport Center Nhà Bè', '39 Lê Văn Lương, Xã Phú Xuân', '0913602740', 'https://maps.google.com/?q=10.703579,106.726241', 'TP. Hồ Chí Minh', 'Nhà Bè', 10.703579, 106.726241, 'Cơ sở cao cấp, thảm thi đấu, ánh sáng đều, có cho thuê vợt và bán cầu.', '05:30:00', '22:00:00', 90, 45000, 'active', NULL, 3.7, 74, '2026-09-25 10:00:00'),
-  (91, 45, 'Tuyết Sơn Court Cần Giờ', '243 Rừng Sác, Xã Bình Khánh', '0913602877', 'https://maps.google.com/?q=10.40115,106.957953', 'TP. Hồ Chí Minh', 'Cần Giờ', 10.40115, 106.957953, 'Sân giá mềm, phù hợp nhóm bạn và sinh viên, mở cửa sớm.', '06:00:00', '22:00:00', 90, 35000, 'active', NULL, 4.4, 9, '2026-09-30 10:00:00'),
-  (92, 45, 'Tuyết Sơn Sport Center Cần Giờ', '233 Lương Văn Nho, Xã An Thới Đông', '0913602877', 'https://maps.google.com/?q=10.409022,106.961558', 'TP. Hồ Chí Minh', 'Cần Giờ', 10.409022, 106.961558, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '05:30:00', '22:00:00', 60, 35000, 'active', NULL, 4.0, 21, '2026-09-30 10:00:00'),
-  (93, 45, 'Tuyết Sơn Badminton Cần Giờ', '475 Dương Văn Hạnh, Xã Long Hòa', '0913602877', 'https://maps.google.com/?q=10.401231,106.960753', 'TP. Hồ Chí Minh', 'Cần Giờ', 10.401231, 106.960753, 'Khu sân rộng rãi, có căng-tin phục vụ nước uống, bãi giữ xe thoải mái.', '05:30:00', '22:00:00', 60, 35000, 'active', NULL, 3.7, 68, '2026-09-30 10:00:00'),
-  (94, 45, 'Tuyết Sơn Club Cần Giờ', '350 Duyên Hải, Xã Tam Thôn Hiệp', '0913602877', 'https://maps.google.com/?q=10.407624,106.960502', 'TP. Hồ Chí Minh', 'Cần Giờ', 10.407624, 106.960502, 'Sân gần khu dân cư, nhiều nhóm chơi cố định buổi tối sau giờ làm.', '06:00:00', '21:30:00', 60, 50000, 'active', NULL, 4.0, 51, '2026-09-30 10:00:00');
-
--- 4. San
-INSERT INTO San (MaSan, MaCoSo, TenSan, TrangThai) VALUES
-  (109, 30, 'Sân 1', 'active'),
-  (110, 30, 'Sân 2', 'active'),
-  (111, 30, 'Sân 3', 'active'),
-  (112, 30, 'Sân 4', 'maintenance'),
-  (113, 31, 'Sân 1', 'active'),
-  (114, 31, 'Sân 2', 'active'),
-  (115, 31, 'Sân 3', 'active'),
-  (116, 31, 'Sân 4', 'active'),
-  (117, 31, 'Sân 5', 'active'),
-  (118, 32, 'Sân 1', 'active'),
-  (119, 32, 'Sân 2', 'active'),
-  (120, 32, 'Sân 3', 'active'),
-  (121, 32, 'Sân 4', 'active'),
-  (122, 32, 'Sân 5', 'active'),
-  (123, 33, 'Sân 1', 'active'),
-  (124, 33, 'Sân 2', 'active'),
-  (125, 33, 'Sân 3', 'active'),
-  (126, 33, 'Sân 4', 'active'),
-  (127, 33, 'Sân 5', 'active'),
-  (128, 34, 'Sân 1', 'active'),
-  (129, 34, 'Sân 2', 'active'),
-  (130, 34, 'Sân 3', 'active'),
-  (131, 34, 'Sân 4', 'active'),
-  (132, 34, 'Sân 5', 'active'),
-  (133, 35, 'Sân 1', 'active'),
-  (134, 35, 'Sân 2', 'active'),
-  (135, 35, 'Sân 3', 'active'),
-  (136, 35, 'Sân 4', 'active'),
-  (137, 35, 'Sân 5', 'active'),
-  (138, 36, 'Sân 1', 'active'),
-  (139, 36, 'Sân 2', 'active'),
-  (140, 37, 'Sân 1', 'active'),
-  (141, 37, 'Sân 2', 'active'),
-  (142, 37, 'Sân 3', 'active'),
-  (143, 37, 'Sân 4', 'active'),
-  (144, 37, 'Sân 5', 'active'),
-  (145, 37, 'Sân 6', 'active'),
-  (146, 38, 'Sân 1', 'active'),
-  (147, 38, 'Sân 2', 'active'),
-  (148, 39, 'Sân 1', 'active'),
-  (149, 39, 'Sân 2', 'active'),
-  (150, 40, 'Sân 1', 'active'),
-  (151, 40, 'Sân 2', 'active'),
-  (152, 40, 'Sân 3', 'active'),
-  (153, 40, 'Sân 4', 'active'),
-  (154, 40, 'Sân 5', 'active'),
-  (155, 40, 'Sân 6', 'active'),
-  (156, 41, 'Sân 1', 'active'),
-  (157, 41, 'Sân 2', 'active'),
-  (158, 42, 'Sân 1', 'active'),
-  (159, 42, 'Sân 2', 'active'),
-  (160, 42, 'Sân 3', 'active'),
-  (161, 42, 'Sân 4', 'active'),
-  (162, 42, 'Sân 5', 'active'),
-  (163, 43, 'Sân 1', 'active'),
-  (164, 43, 'Sân 2', 'active'),
-  (165, 43, 'Sân 3', 'active'),
-  (166, 43, 'Sân 4', 'active'),
-  (167, 44, 'Sân 1', 'active'),
-  (168, 44, 'Sân 2', 'active'),
-  (169, 44, 'Sân 3', 'active'),
-  (170, 45, 'Sân 1', 'active'),
-  (171, 45, 'Sân 2', 'active'),
-  (172, 45, 'Sân 3', 'active'),
-  (173, 45, 'Sân 4', 'active'),
-  (174, 46, 'Sân 1', 'active'),
-  (175, 46, 'Sân 2', 'active'),
-  (176, 47, 'Sân 1', 'active'),
-  (177, 47, 'Sân 2', 'active'),
-  (178, 47, 'Sân 3', 'active'),
-  (179, 47, 'Sân 4', 'active'),
-  (180, 47, 'Sân 5', 'active'),
-  (181, 47, 'Sân 6', 'active'),
-  (182, 48, 'Sân 1', 'active'),
-  (183, 48, 'Sân 2', 'active'),
-  (184, 49, 'Sân 1', 'active'),
-  (185, 49, 'Sân 2', 'active'),
-  (186, 49, 'Sân 3', 'active'),
-  (187, 50, 'Sân 1', 'active'),
-  (188, 50, 'Sân 2', 'active'),
-  (189, 50, 'Sân 3', 'active'),
-  (190, 51, 'Sân 1', 'active'),
-  (191, 51, 'Sân 2', 'active'),
-  (192, 51, 'Sân 3', 'active'),
-  (193, 52, 'Sân 1', 'active'),
-  (194, 52, 'Sân 2', 'active'),
-  (195, 52, 'Sân 3', 'active'),
-  (196, 52, 'Sân 4', 'active'),
-  (197, 52, 'Sân 5', 'active'),
-  (198, 52, 'Sân 6', 'active'),
-  (199, 53, 'Sân 1', 'active'),
-  (200, 53, 'Sân 2', 'active'),
-  (201, 53, 'Sân 3', 'active'),
-  (202, 53, 'Sân 4', 'active'),
-  (203, 53, 'Sân 5', 'maintenance'),
-  (204, 54, 'Sân 1', 'active'),
-  (205, 54, 'Sân 2', 'active'),
-  (206, 54, 'Sân 3', 'active'),
-  (207, 54, 'Sân 4', 'active'),
-  (208, 55, 'Sân 1', 'active'),
-  (209, 55, 'Sân 2', 'active'),
-  (210, 55, 'Sân 3', 'active'),
-  (211, 55, 'Sân 4', 'maintenance'),
-  (212, 56, 'Sân 1', 'active'),
-  (213, 56, 'Sân 2', 'active'),
-  (214, 57, 'Sân 1', 'active'),
-  (215, 57, 'Sân 2', 'active'),
-  (216, 57, 'Sân 3', 'active'),
-  (217, 58, 'Sân 1', 'active'),
-  (218, 58, 'Sân 2', 'active'),
-  (219, 58, 'Sân 3', 'active'),
-  (220, 59, 'Sân 1', 'active'),
-  (221, 59, 'Sân 2', 'active'),
-  (222, 59, 'Sân 3', 'active'),
-  (223, 59, 'Sân 4', 'active'),
-  (224, 59, 'Sân 5', 'active'),
-  (225, 59, 'Sân 6', 'active'),
-  (226, 60, 'Sân 1', 'active'),
-  (227, 60, 'Sân 2', 'active'),
-  (228, 60, 'Sân 3', 'active'),
-  (229, 61, 'Sân 1', 'active'),
-  (230, 61, 'Sân 2', 'active'),
-  (231, 62, 'Sân 1', 'active'),
-  (232, 62, 'Sân 2', 'active'),
-  (233, 62, 'Sân 3', 'active'),
-  (234, 62, 'Sân 4', 'active'),
-  (235, 63, 'Sân 1', 'active'),
-  (236, 63, 'Sân 2', 'active'),
-  (237, 63, 'Sân 3', 'active'),
-  (238, 64, 'Sân 1', 'active'),
-  (239, 64, 'Sân 2', 'active'),
-  (240, 64, 'Sân 3', 'active'),
-  (241, 64, 'Sân 4', 'active'),
-  (242, 65, 'Sân 1', 'active'),
-  (243, 65, 'Sân 2', 'active'),
-  (244, 65, 'Sân 3', 'active'),
-  (245, 65, 'Sân 4', 'active'),
-  (246, 65, 'Sân 5', 'active'),
-  (247, 66, 'Sân 1', 'active'),
-  (248, 66, 'Sân 2', 'active'),
-  (249, 67, 'Sân 1', 'active'),
-  (250, 67, 'Sân 2', 'active'),
-  (251, 67, 'Sân 3', 'active'),
-  (252, 68, 'Sân 1', 'active'),
-  (253, 68, 'Sân 2', 'active'),
-  (254, 68, 'Sân 3', 'active'),
-  (255, 69, 'Sân 1', 'active'),
-  (256, 69, 'Sân 2', 'active'),
-  (257, 69, 'Sân 3', 'active'),
-  (258, 70, 'Sân 1', 'active'),
-  (259, 70, 'Sân 2', 'active'),
-  (260, 71, 'Sân 1', 'active'),
-  (261, 71, 'Sân 2', 'active'),
-  (262, 71, 'Sân 3', 'active'),
-  (263, 71, 'Sân 4', 'active'),
-  (264, 71, 'Sân 5', 'active'),
-  (265, 71, 'Sân 6', 'active'),
-  (266, 72, 'Sân 1', 'active'),
-  (267, 72, 'Sân 2', 'active'),
-  (268, 72, 'Sân 3', 'active'),
-  (269, 72, 'Sân 4', 'active'),
-  (270, 72, 'Sân 5', 'maintenance'),
-  (271, 73, 'Sân 1', 'active'),
-  (272, 73, 'Sân 2', 'active'),
-  (273, 73, 'Sân 3', 'active'),
-  (274, 73, 'Sân 4', 'active'),
-  (275, 73, 'Sân 5', 'active'),
-  (276, 74, 'Sân 1', 'active'),
-  (277, 74, 'Sân 2', 'active'),
-  (278, 74, 'Sân 3', 'active'),
-  (279, 75, 'Sân 1', 'active'),
-  (280, 75, 'Sân 2', 'active'),
-  (281, 76, 'Sân 1', 'active'),
-  (282, 76, 'Sân 2', 'active'),
-  (283, 76, 'Sân 3', 'active'),
-  (284, 76, 'Sân 4', 'active'),
-  (285, 77, 'Sân 1', 'active'),
-  (286, 77, 'Sân 2', 'active'),
-  (287, 77, 'Sân 3', 'active'),
-  (288, 77, 'Sân 4', 'active'),
-  (289, 77, 'Sân 5', 'active'),
-  (290, 77, 'Sân 6', 'maintenance'),
-  (291, 78, 'Sân 1', 'active'),
-  (292, 78, 'Sân 2', 'active'),
-  (293, 78, 'Sân 3', 'active'),
-  (294, 78, 'Sân 4', 'active'),
-  (295, 79, 'Sân 1', 'active'),
-  (296, 79, 'Sân 2', 'active'),
-  (297, 79, 'Sân 3', 'active'),
-  (298, 79, 'Sân 4', 'active'),
-  (299, 79, 'Sân 5', 'active'),
-  (300, 80, 'Sân 1', 'active'),
-  (301, 80, 'Sân 2', 'active'),
-  (302, 80, 'Sân 3', 'active'),
-  (303, 80, 'Sân 4', 'active'),
-  (304, 80, 'Sân 5', 'maintenance'),
-  (305, 81, 'Sân 1', 'active'),
-  (306, 81, 'Sân 2', 'active'),
-  (307, 81, 'Sân 3', 'active'),
-  (308, 81, 'Sân 4', 'active'),
-  (309, 81, 'Sân 5', 'active'),
-  (310, 82, 'Sân 1', 'active'),
-  (311, 82, 'Sân 2', 'active'),
-  (312, 82, 'Sân 3', 'active'),
-  (313, 82, 'Sân 4', 'active'),
-  (314, 82, 'Sân 5', 'active'),
-  (315, 83, 'Sân 1', 'active'),
-  (316, 83, 'Sân 2', 'active'),
-  (317, 83, 'Sân 3', 'active'),
-  (318, 83, 'Sân 4', 'active'),
-  (319, 83, 'Sân 5', 'active'),
-  (320, 84, 'Sân 1', 'active'),
-  (321, 84, 'Sân 2', 'active'),
-  (322, 84, 'Sân 3', 'active'),
-  (323, 84, 'Sân 4', 'maintenance'),
-  (324, 85, 'Sân 1', 'active'),
-  (325, 85, 'Sân 2', 'active'),
-  (326, 85, 'Sân 3', 'active'),
-  (327, 85, 'Sân 4', 'active'),
-  (328, 85, 'Sân 5', 'maintenance'),
-  (329, 86, 'Sân 1', 'active'),
-  (330, 86, 'Sân 2', 'active'),
-  (331, 86, 'Sân 3', 'active'),
-  (332, 87, 'Sân 1', 'active'),
-  (333, 87, 'Sân 2', 'active'),
-  (334, 88, 'Sân 1', 'active'),
-  (335, 88, 'Sân 2', 'active'),
-  (336, 88, 'Sân 3', 'active'),
-  (337, 89, 'Sân 1', 'active'),
-  (338, 89, 'Sân 2', 'active'),
-  (339, 89, 'Sân 3', 'active'),
-  (340, 89, 'Sân 4', 'active'),
-  (341, 90, 'Sân 1', 'active'),
-  (342, 90, 'Sân 2', 'active'),
-  (343, 91, 'Sân 1', 'active'),
-  (344, 91, 'Sân 2', 'active'),
-  (345, 91, 'Sân 3', 'active'),
-  (346, 91, 'Sân 4', 'maintenance'),
-  (347, 92, 'Sân 1', 'active'),
-  (348, 92, 'Sân 2', 'active'),
-  (349, 93, 'Sân 1', 'active'),
-  (350, 93, 'Sân 2', 'active'),
-  (351, 93, 'Sân 3', 'active'),
-  (352, 93, 'Sân 4', 'active'),
-  (353, 93, 'Sân 5', 'active'),
-  (354, 93, 'Sân 6', 'active'),
-  (355, 94, 'Sân 1', 'active'),
-  (356, 94, 'Sân 2', 'active'),
-  (357, 94, 'Sân 3', 'active');
-
--- 5. BangGia (walk_in phủ kín giờ mở cửa, khung nối liền; fixed một khung cả ngày)
-INSERT INTO BangGia (MaCoSo, LoaiNgay, LoaiKhach, GioBatDau, GioKetThuc, GiaMoiGio) VALUES
-  (30, 'weekday', 'walk_in', '05:30:00', '17:00:00', 90000),
-  (30, 'weekday', 'walk_in', '17:00:00', '23:00:00', 145000),
-  (30, 'weekend', 'walk_in', '05:30:00', '17:00:00', 125000),
-  (30, 'weekend', 'walk_in', '17:00:00', '23:00:00', 180000),
-  (31, 'weekday', 'walk_in', '06:00:00', '11:00:00', 100000),
-  (31, 'weekday', 'walk_in', '11:00:00', '17:00:00', 90000),
-  (31, 'weekday', 'walk_in', '17:00:00', '21:30:00', 165000),
-  (31, 'weekend', 'walk_in', '06:00:00', '11:00:00', 140000),
-  (31, 'weekend', 'walk_in', '11:00:00', '17:00:00', 120000),
-  (31, 'weekend', 'walk_in', '17:00:00', '21:30:00', 205000),
-  (32, 'weekday', 'walk_in', '05:30:00', '17:00:00', 90000),
-  (32, 'weekday', 'walk_in', '17:00:00', '23:00:00', 150000),
-  (32, 'weekend', 'walk_in', '05:30:00', '17:00:00', 125000),
-  (32, 'weekend', 'walk_in', '17:00:00', '23:00:00', 190000),
-  (32, 'weekday', 'fixed', '05:30:00', '23:00:00', 100000),
-  (32, 'weekend', 'fixed', '05:30:00', '23:00:00', 140000),
-  (33, 'weekday', 'walk_in', '06:00:00', '11:00:00', 95000),
-  (33, 'weekday', 'walk_in', '11:00:00', '17:00:00', 85000),
-  (33, 'weekday', 'walk_in', '17:00:00', '23:00:00', 155000),
-  (33, 'weekend', 'walk_in', '06:00:00', '11:00:00', 135000),
-  (33, 'weekend', 'walk_in', '11:00:00', '17:00:00', 115000),
-  (33, 'weekend', 'walk_in', '17:00:00', '23:00:00', 195000),
-  (33, 'weekday', 'fixed', '06:00:00', '23:00:00', 105000),
-  (33, 'weekend', 'fixed', '06:00:00', '23:00:00', 150000),
-  (34, 'weekday', 'walk_in', '06:00:00', '17:00:00', 90000),
-  (34, 'weekday', 'walk_in', '17:00:00', '21:30:00', 145000),
-  (34, 'weekend', 'walk_in', '06:00:00', '17:00:00', 125000),
-  (34, 'weekend', 'walk_in', '17:00:00', '21:30:00', 180000),
-  (35, 'weekday', 'walk_in', '05:30:00', '16:00:00', 65000),
-  (35, 'weekday', 'walk_in', '16:00:00', '22:00:00', 110000),
-  (35, 'weekend', 'walk_in', '05:30:00', '16:00:00', 90000),
-  (35, 'weekend', 'walk_in', '16:00:00', '22:00:00', 140000),
-  (36, 'weekday', 'walk_in', '06:00:00', '11:00:00', 65000),
-  (36, 'weekday', 'walk_in', '11:00:00', '17:00:00', 60000),
-  (36, 'weekday', 'walk_in', '17:00:00', '23:00:00', 110000),
-  (36, 'weekend', 'walk_in', '06:00:00', '11:00:00', 90000),
-  (36, 'weekend', 'walk_in', '11:00:00', '17:00:00', 80000),
-  (36, 'weekend', 'walk_in', '17:00:00', '23:00:00', 140000),
-  (36, 'weekday', 'fixed', '06:00:00', '23:00:00', 75000),
-  (36, 'weekend', 'fixed', '06:00:00', '23:00:00', 105000),
-  (37, 'weekday', 'walk_in', '05:30:00', '17:00:00', 80000),
-  (37, 'weekday', 'walk_in', '17:00:00', '21:30:00', 130000),
-  (37, 'weekend', 'walk_in', '05:30:00', '17:00:00', 110000),
-  (37, 'weekend', 'walk_in', '17:00:00', '21:30:00', 165000),
-  (38, 'weekday', 'walk_in', '06:00:00', '11:00:00', 60000),
-  (38, 'weekday', 'walk_in', '11:00:00', '17:00:00', 55000),
-  (38, 'weekday', 'walk_in', '17:00:00', '23:00:00', 100000),
-  (38, 'weekend', 'walk_in', '06:00:00', '11:00:00', 85000),
-  (38, 'weekend', 'walk_in', '11:00:00', '17:00:00', 75000),
-  (38, 'weekend', 'walk_in', '17:00:00', '23:00:00', 125000),
-  (38, 'weekday', 'fixed', '06:00:00', '23:00:00', 70000),
-  (38, 'weekend', 'fixed', '06:00:00', '23:00:00', 95000),
-  (39, 'weekday', 'walk_in', '06:00:00', '17:00:00', 65000),
-  (39, 'weekday', 'walk_in', '17:00:00', '23:00:00', 105000),
-  (39, 'weekend', 'walk_in', '06:00:00', '17:00:00', 90000),
-  (39, 'weekend', 'walk_in', '17:00:00', '23:00:00', 130000),
-  (39, 'weekday', 'fixed', '06:00:00', '23:00:00', 70000),
-  (39, 'weekend', 'fixed', '06:00:00', '23:00:00', 100000),
-  (40, 'weekday', 'walk_in', '05:30:00', '16:00:00', 70000),
-  (40, 'weekday', 'walk_in', '16:00:00', '23:00:00', 115000),
-  (40, 'weekend', 'walk_in', '05:30:00', '16:00:00', 100000),
-  (40, 'weekend', 'walk_in', '16:00:00', '23:00:00', 145000),
-  (41, 'weekday', 'walk_in', '06:00:00', '11:00:00', 65000),
-  (41, 'weekday', 'walk_in', '11:00:00', '17:00:00', 60000),
-  (41, 'weekday', 'walk_in', '17:00:00', '22:00:00', 110000),
-  (41, 'weekend', 'walk_in', '06:00:00', '11:00:00', 90000),
-  (41, 'weekend', 'walk_in', '11:00:00', '17:00:00', 80000),
-  (41, 'weekend', 'walk_in', '17:00:00', '22:00:00', 140000),
-  (42, 'weekday', 'walk_in', '06:00:00', '17:00:00', 50000),
-  (42, 'weekday', 'walk_in', '17:00:00', '21:30:00', 75000),
-  (42, 'weekend', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (42, 'weekend', 'walk_in', '17:00:00', '21:30:00', 95000),
-  (42, 'weekday', 'fixed', '06:00:00', '21:30:00', 55000),
-  (42, 'weekend', 'fixed', '06:00:00', '21:30:00', 75000),
-  (43, 'weekday', 'walk_in', '05:30:00', '17:00:00', 60000),
-  (43, 'weekday', 'walk_in', '17:00:00', '22:00:00', 95000),
-  (43, 'weekend', 'walk_in', '05:30:00', '17:00:00', 85000),
-  (43, 'weekend', 'walk_in', '17:00:00', '22:00:00', 120000),
-  (43, 'weekday', 'fixed', '05:30:00', '22:00:00', 65000),
-  (43, 'weekend', 'fixed', '05:30:00', '22:00:00', 90000),
-  (44, 'weekday', 'walk_in', '05:30:00', '11:00:00', 60000),
-  (44, 'weekday', 'walk_in', '11:00:00', '17:00:00', 55000),
-  (44, 'weekday', 'walk_in', '17:00:00', '22:00:00', 100000),
-  (44, 'weekend', 'walk_in', '05:30:00', '11:00:00', 85000),
-  (44, 'weekend', 'walk_in', '11:00:00', '17:00:00', 75000),
-  (44, 'weekend', 'walk_in', '17:00:00', '22:00:00', 125000),
-  (45, 'weekday', 'walk_in', '06:00:00', '17:00:00', 65000),
-  (45, 'weekday', 'walk_in', '17:00:00', '22:00:00', 110000),
-  (45, 'weekend', 'walk_in', '06:00:00', '17:00:00', 90000),
-  (45, 'weekend', 'walk_in', '17:00:00', '22:00:00', 140000),
-  (46, 'weekday', 'walk_in', '05:30:00', '17:00:00', 65000),
-  (46, 'weekday', 'walk_in', '17:00:00', '22:00:00', 110000),
-  (46, 'weekend', 'walk_in', '05:30:00', '17:00:00', 90000),
-  (46, 'weekend', 'walk_in', '17:00:00', '22:00:00', 140000),
-  (46, 'weekday', 'fixed', '05:30:00', '22:00:00', 75000),
-  (46, 'weekend', 'fixed', '05:30:00', '22:00:00', 105000),
-  (47, 'weekday', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (47, 'weekday', 'walk_in', '17:00:00', '23:00:00', 120000),
-  (47, 'weekend', 'walk_in', '06:00:00', '17:00:00', 100000),
-  (47, 'weekend', 'walk_in', '17:00:00', '23:00:00', 150000),
-  (48, 'weekday', 'walk_in', '06:00:00', '16:00:00', 55000),
-  (48, 'weekday', 'walk_in', '16:00:00', '22:00:00', 85000),
-  (48, 'weekend', 'walk_in', '06:00:00', '16:00:00', 75000),
-  (48, 'weekend', 'walk_in', '16:00:00', '22:00:00', 105000),
-  (48, 'weekday', 'fixed', '06:00:00', '22:00:00', 60000),
-  (48, 'weekend', 'fixed', '06:00:00', '22:00:00', 80000),
-  (49, 'weekday', 'walk_in', '06:00:00', '17:00:00', 50000),
-  (49, 'weekday', 'walk_in', '17:00:00', '21:30:00', 85000),
-  (49, 'weekend', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (49, 'weekend', 'walk_in', '17:00:00', '21:30:00', 105000),
-  (49, 'weekday', 'fixed', '06:00:00', '21:30:00', 55000),
-  (49, 'weekend', 'fixed', '06:00:00', '21:30:00', 80000),
-  (50, 'weekday', 'walk_in', '06:00:00', '17:00:00', 50000),
-  (50, 'weekday', 'walk_in', '17:00:00', '22:00:00', 90000),
-  (50, 'weekend', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (50, 'weekend', 'walk_in', '17:00:00', '22:00:00', 115000),
-  (51, 'weekday', 'walk_in', '06:00:00', '16:00:00', 65000),
-  (51, 'weekday', 'walk_in', '16:00:00', '23:00:00', 105000),
-  (51, 'weekend', 'walk_in', '06:00:00', '16:00:00', 90000),
-  (51, 'weekend', 'walk_in', '16:00:00', '23:00:00', 130000),
-  (51, 'weekday', 'fixed', '06:00:00', '23:00:00', 70000),
-  (51, 'weekend', 'fixed', '06:00:00', '23:00:00', 100000),
-  (52, 'weekday', 'walk_in', '06:00:00', '17:00:00', 65000),
-  (52, 'weekday', 'walk_in', '17:00:00', '21:30:00', 115000),
-  (52, 'weekend', 'walk_in', '06:00:00', '17:00:00', 90000),
-  (52, 'weekend', 'walk_in', '17:00:00', '21:30:00', 145000),
-  (53, 'weekday', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (53, 'weekday', 'walk_in', '17:00:00', '23:00:00', 110000),
-  (53, 'weekend', 'walk_in', '06:00:00', '17:00:00', 100000),
-  (53, 'weekend', 'walk_in', '17:00:00', '23:00:00', 140000),
-  (54, 'weekday', 'walk_in', '06:00:00', '17:00:00', 75000),
-  (54, 'weekday', 'walk_in', '17:00:00', '23:00:00', 130000),
-  (54, 'weekend', 'walk_in', '06:00:00', '17:00:00', 105000),
-  (54, 'weekend', 'walk_in', '17:00:00', '23:00:00', 165000),
-  (54, 'weekday', 'fixed', '06:00:00', '23:00:00', 85000),
-  (54, 'weekend', 'fixed', '06:00:00', '23:00:00', 120000),
-  (55, 'weekday', 'walk_in', '06:00:00', '17:00:00', 60000),
-  (55, 'weekday', 'walk_in', '17:00:00', '21:30:00', 90000),
-  (55, 'weekend', 'walk_in', '06:00:00', '17:00:00', 85000),
-  (55, 'weekend', 'walk_in', '17:00:00', '21:30:00', 115000),
-  (56, 'weekday', 'walk_in', '06:00:00', '17:00:00', 55000),
-  (56, 'weekday', 'walk_in', '17:00:00', '22:00:00', 95000),
-  (56, 'weekend', 'walk_in', '06:00:00', '17:00:00', 75000),
-  (56, 'weekend', 'walk_in', '17:00:00', '22:00:00', 120000),
-  (56, 'weekday', 'fixed', '06:00:00', '22:00:00', 65000),
-  (56, 'weekend', 'fixed', '06:00:00', '22:00:00', 90000),
-  (57, 'weekday', 'walk_in', '06:00:00', '16:00:00', 60000),
-  (57, 'weekday', 'walk_in', '16:00:00', '22:00:00', 90000),
-  (57, 'weekend', 'walk_in', '06:00:00', '16:00:00', 85000),
-  (57, 'weekend', 'walk_in', '16:00:00', '22:00:00', 115000),
-  (57, 'weekday', 'fixed', '06:00:00', '22:00:00', 65000),
-  (57, 'weekend', 'fixed', '06:00:00', '22:00:00', 90000),
-  (58, 'weekday', 'walk_in', '06:00:00', '17:00:00', 60000),
-  (58, 'weekday', 'walk_in', '17:00:00', '22:00:00', 95000),
-  (58, 'weekend', 'walk_in', '06:00:00', '17:00:00', 85000),
-  (58, 'weekend', 'walk_in', '17:00:00', '22:00:00', 120000),
-  (59, 'weekday', 'walk_in', '06:00:00', '11:00:00', 55000),
-  (59, 'weekday', 'walk_in', '11:00:00', '17:00:00', 50000),
-  (59, 'weekday', 'walk_in', '17:00:00', '23:00:00', 90000),
-  (59, 'weekend', 'walk_in', '06:00:00', '11:00:00', 75000),
-  (59, 'weekend', 'walk_in', '11:00:00', '17:00:00', 70000),
-  (59, 'weekend', 'walk_in', '17:00:00', '23:00:00', 115000),
-  (59, 'weekday', 'fixed', '06:00:00', '23:00:00', 60000),
-  (59, 'weekend', 'fixed', '06:00:00', '23:00:00', 85000),
-  (60, 'weekday', 'walk_in', '06:00:00', '16:00:00', 50000),
-  (60, 'weekday', 'walk_in', '16:00:00', '21:30:00', 80000),
-  (60, 'weekend', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (60, 'weekend', 'walk_in', '16:00:00', '21:30:00', 100000),
-  (60, 'weekday', 'fixed', '06:00:00', '21:30:00', 55000),
-  (60, 'weekend', 'fixed', '06:00:00', '21:30:00', 75000),
-  (61, 'weekday', 'walk_in', '06:00:00', '16:00:00', 50000),
-  (61, 'weekday', 'walk_in', '16:00:00', '23:00:00', 75000),
-  (61, 'weekend', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (61, 'weekend', 'walk_in', '16:00:00', '23:00:00', 95000),
-  (62, 'weekday', 'walk_in', '05:30:00', '11:00:00', 60000),
-  (62, 'weekday', 'walk_in', '11:00:00', '17:00:00', 55000),
-  (62, 'weekday', 'walk_in', '17:00:00', '23:00:00', 105000),
-  (62, 'weekend', 'walk_in', '05:30:00', '11:00:00', 85000),
-  (62, 'weekend', 'walk_in', '11:00:00', '17:00:00', 75000),
-  (62, 'weekend', 'walk_in', '17:00:00', '23:00:00', 130000),
-  (62, 'weekday', 'fixed', '05:30:00', '23:00:00', 70000),
-  (62, 'weekend', 'fixed', '05:30:00', '23:00:00', 95000),
-  (63, 'weekday', 'walk_in', '06:00:00', '11:00:00', 60000),
-  (63, 'weekday', 'walk_in', '11:00:00', '17:00:00', 55000),
-  (63, 'weekday', 'walk_in', '17:00:00', '21:30:00', 105000),
-  (63, 'weekend', 'walk_in', '06:00:00', '11:00:00', 85000),
-  (63, 'weekend', 'walk_in', '11:00:00', '17:00:00', 75000),
-  (63, 'weekend', 'walk_in', '17:00:00', '21:30:00', 130000),
-  (63, 'weekday', 'fixed', '06:00:00', '21:30:00', 70000),
-  (63, 'weekend', 'fixed', '06:00:00', '21:30:00', 95000),
-  (64, 'weekday', 'walk_in', '06:00:00', '11:00:00', 55000),
-  (64, 'weekday', 'walk_in', '11:00:00', '17:00:00', 50000),
-  (64, 'weekday', 'walk_in', '17:00:00', '21:30:00', 95000),
-  (64, 'weekend', 'walk_in', '06:00:00', '11:00:00', 75000),
-  (64, 'weekend', 'walk_in', '11:00:00', '17:00:00', 70000),
-  (64, 'weekend', 'walk_in', '17:00:00', '21:30:00', 120000),
-  (65, 'weekday', 'walk_in', '06:00:00', '11:00:00', 65000),
-  (65, 'weekday', 'walk_in', '11:00:00', '17:00:00', 60000),
-  (65, 'weekday', 'walk_in', '17:00:00', '22:00:00', 115000),
-  (65, 'weekend', 'walk_in', '06:00:00', '11:00:00', 90000),
-  (65, 'weekend', 'walk_in', '11:00:00', '17:00:00', 80000),
-  (65, 'weekend', 'walk_in', '17:00:00', '22:00:00', 145000),
-  (65, 'weekday', 'fixed', '06:00:00', '22:00:00', 75000),
-  (65, 'weekend', 'fixed', '06:00:00', '22:00:00', 105000),
-  (66, 'weekday', 'walk_in', '06:00:00', '16:00:00', 65000),
-  (66, 'weekday', 'walk_in', '16:00:00', '23:00:00', 100000),
-  (66, 'weekend', 'walk_in', '06:00:00', '16:00:00', 90000),
-  (66, 'weekend', 'walk_in', '16:00:00', '23:00:00', 125000),
-  (66, 'weekday', 'fixed', '06:00:00', '23:00:00', 70000),
-  (66, 'weekend', 'fixed', '06:00:00', '23:00:00', 95000),
-  (67, 'weekday', 'walk_in', '05:30:00', '11:00:00', 75000),
-  (67, 'weekday', 'walk_in', '11:00:00', '17:00:00', 70000),
-  (67, 'weekday', 'walk_in', '17:00:00', '22:00:00', 135000),
-  (67, 'weekend', 'walk_in', '05:30:00', '11:00:00', 105000),
-  (67, 'weekend', 'walk_in', '11:00:00', '17:00:00', 95000),
-  (67, 'weekend', 'walk_in', '17:00:00', '22:00:00', 170000),
-  (68, 'weekday', 'walk_in', '05:30:00', '17:00:00', 70000),
-  (68, 'weekday', 'walk_in', '17:00:00', '23:00:00', 115000),
-  (68, 'weekend', 'walk_in', '05:30:00', '17:00:00', 100000),
-  (68, 'weekend', 'walk_in', '17:00:00', '23:00:00', 145000),
-  (68, 'weekday', 'fixed', '05:30:00', '23:00:00', 80000),
-  (68, 'weekend', 'fixed', '05:30:00', '23:00:00', 110000),
-  (69, 'weekday', 'walk_in', '06:00:00', '16:00:00', 65000),
-  (69, 'weekday', 'walk_in', '16:00:00', '21:30:00', 105000),
-  (69, 'weekend', 'walk_in', '06:00:00', '16:00:00', 90000),
-  (69, 'weekend', 'walk_in', '16:00:00', '21:30:00', 130000),
-  (70, 'weekday', 'walk_in', '06:00:00', '16:00:00', 60000),
-  (70, 'weekday', 'walk_in', '16:00:00', '22:00:00', 95000),
-  (70, 'weekend', 'walk_in', '06:00:00', '16:00:00', 85000),
-  (70, 'weekend', 'walk_in', '16:00:00', '22:00:00', 120000),
-  (70, 'weekday', 'fixed', '06:00:00', '22:00:00', 65000),
-  (70, 'weekend', 'fixed', '06:00:00', '22:00:00', 90000),
-  (71, 'weekday', 'walk_in', '06:00:00', '16:00:00', 55000),
-  (71, 'weekday', 'walk_in', '16:00:00', '21:30:00', 90000),
-  (71, 'weekend', 'walk_in', '06:00:00', '16:00:00', 75000),
-  (71, 'weekend', 'walk_in', '16:00:00', '21:30:00', 115000),
-  (71, 'weekday', 'fixed', '06:00:00', '21:30:00', 60000),
-  (71, 'weekend', 'fixed', '06:00:00', '21:30:00', 85000),
-  (72, 'weekday', 'walk_in', '06:00:00', '11:00:00', 55000),
-  (72, 'weekday', 'walk_in', '11:00:00', '17:00:00', 50000),
-  (72, 'weekday', 'walk_in', '17:00:00', '21:30:00', 85000),
-  (72, 'weekend', 'walk_in', '06:00:00', '11:00:00', 75000),
-  (72, 'weekend', 'walk_in', '11:00:00', '17:00:00', 70000),
-  (72, 'weekend', 'walk_in', '17:00:00', '21:30:00', 105000),
-  (72, 'weekday', 'fixed', '06:00:00', '21:30:00', 60000),
-  (72, 'weekend', 'fixed', '06:00:00', '21:30:00', 80000),
-  (73, 'weekday', 'walk_in', '06:00:00', '16:00:00', 60000),
-  (73, 'weekday', 'walk_in', '16:00:00', '23:00:00', 95000),
-  (73, 'weekend', 'walk_in', '06:00:00', '16:00:00', 85000),
-  (73, 'weekend', 'walk_in', '16:00:00', '23:00:00', 120000),
-  (73, 'weekday', 'fixed', '06:00:00', '23:00:00', 65000),
-  (73, 'weekend', 'fixed', '06:00:00', '23:00:00', 90000),
-  (74, 'weekday', 'walk_in', '06:00:00', '11:00:00', 55000),
-  (74, 'weekday', 'walk_in', '11:00:00', '17:00:00', 50000),
-  (74, 'weekday', 'walk_in', '17:00:00', '21:30:00', 95000),
-  (74, 'weekend', 'walk_in', '06:00:00', '11:00:00', 75000),
-  (74, 'weekend', 'walk_in', '11:00:00', '17:00:00', 70000),
-  (74, 'weekend', 'walk_in', '17:00:00', '21:30:00', 120000),
-  (75, 'weekday', 'walk_in', '06:00:00', '17:00:00', 55000),
-  (75, 'weekday', 'walk_in', '17:00:00', '22:00:00', 95000),
-  (75, 'weekend', 'walk_in', '06:00:00', '17:00:00', 75000),
-  (75, 'weekend', 'walk_in', '17:00:00', '22:00:00', 120000),
-  (75, 'weekday', 'fixed', '06:00:00', '22:00:00', 65000),
-  (75, 'weekend', 'fixed', '06:00:00', '22:00:00', 90000),
-  (76, 'weekday', 'walk_in', '05:30:00', '17:00:00', 55000),
-  (76, 'weekday', 'walk_in', '17:00:00', '23:00:00', 95000),
-  (76, 'weekend', 'walk_in', '05:30:00', '17:00:00', 75000),
-  (76, 'weekend', 'walk_in', '17:00:00', '23:00:00', 120000),
-  (76, 'weekday', 'fixed', '05:30:00', '23:00:00', 65000),
-  (76, 'weekend', 'fixed', '05:30:00', '23:00:00', 90000),
-  (77, 'weekday', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (77, 'weekday', 'walk_in', '16:00:00', '22:00:00', 110000),
-  (77, 'weekend', 'walk_in', '06:00:00', '16:00:00', 100000),
-  (77, 'weekend', 'walk_in', '16:00:00', '22:00:00', 140000),
-  (78, 'weekday', 'walk_in', '06:00:00', '16:00:00', 65000),
-  (78, 'weekday', 'walk_in', '16:00:00', '21:30:00', 110000),
-  (78, 'weekend', 'walk_in', '06:00:00', '16:00:00', 90000),
-  (78, 'weekend', 'walk_in', '16:00:00', '21:30:00', 140000),
-  (79, 'weekday', 'walk_in', '06:00:00', '16:00:00', 55000),
-  (79, 'weekday', 'walk_in', '16:00:00', '23:00:00', 90000),
-  (79, 'weekend', 'walk_in', '06:00:00', '16:00:00', 75000),
-  (79, 'weekend', 'walk_in', '16:00:00', '23:00:00', 115000),
-  (80, 'weekday', 'walk_in', '05:30:00', '11:00:00', 50000),
-  (80, 'weekday', 'walk_in', '11:00:00', '17:00:00', 45000),
-  (80, 'weekday', 'walk_in', '17:00:00', '23:00:00', 80000),
-  (80, 'weekend', 'walk_in', '05:30:00', '11:00:00', 70000),
-  (80, 'weekend', 'walk_in', '11:00:00', '17:00:00', 60000),
-  (80, 'weekend', 'walk_in', '17:00:00', '23:00:00', 100000),
-  (81, 'weekday', 'walk_in', '06:00:00', '11:00:00', 40000),
-  (81, 'weekday', 'walk_in', '11:00:00', '17:00:00', 35000),
-  (81, 'weekday', 'walk_in', '17:00:00', '22:00:00', 60000),
-  (81, 'weekend', 'walk_in', '06:00:00', '11:00:00', 55000),
-  (81, 'weekend', 'walk_in', '11:00:00', '17:00:00', 45000),
-  (81, 'weekend', 'walk_in', '17:00:00', '22:00:00', 75000),
-  (81, 'weekday', 'fixed', '06:00:00', '22:00:00', 45000),
-  (81, 'weekend', 'fixed', '06:00:00', '22:00:00', 60000),
-  (82, 'weekday', 'walk_in', '06:00:00', '11:00:00', 50000),
-  (82, 'weekday', 'walk_in', '11:00:00', '17:00:00', 45000),
-  (82, 'weekday', 'walk_in', '17:00:00', '23:00:00', 90000),
-  (82, 'weekend', 'walk_in', '06:00:00', '11:00:00', 70000),
-  (82, 'weekend', 'walk_in', '11:00:00', '17:00:00', 60000),
-  (82, 'weekend', 'walk_in', '17:00:00', '23:00:00', 115000),
-  (82, 'weekday', 'fixed', '06:00:00', '23:00:00', 60000),
-  (82, 'weekend', 'fixed', '06:00:00', '23:00:00', 85000),
-  (83, 'weekday', 'walk_in', '05:30:00', '17:00:00', 50000),
-  (83, 'weekday', 'walk_in', '17:00:00', '23:00:00', 80000),
-  (83, 'weekend', 'walk_in', '05:30:00', '17:00:00', 70000),
-  (83, 'weekend', 'walk_in', '17:00:00', '23:00:00', 100000),
-  (83, 'weekday', 'fixed', '05:30:00', '23:00:00', 55000),
-  (83, 'weekend', 'fixed', '05:30:00', '23:00:00', 75000),
-  (84, 'weekday', 'walk_in', '06:00:00', '17:00:00', 45000),
-  (84, 'weekday', 'walk_in', '17:00:00', '23:00:00', 75000),
-  (84, 'weekend', 'walk_in', '06:00:00', '17:00:00', 65000),
-  (84, 'weekend', 'walk_in', '17:00:00', '23:00:00', 95000),
-  (84, 'weekday', 'fixed', '06:00:00', '23:00:00', 50000),
-  (84, 'weekend', 'fixed', '06:00:00', '23:00:00', 70000),
-  (85, 'weekday', 'walk_in', '06:00:00', '17:00:00', 45000),
-  (85, 'weekday', 'walk_in', '17:00:00', '22:00:00', 70000),
-  (85, 'weekend', 'walk_in', '06:00:00', '17:00:00', 65000),
-  (85, 'weekend', 'walk_in', '17:00:00', '22:00:00', 90000),
-  (86, 'weekday', 'walk_in', '05:30:00', '17:00:00', 50000),
-  (86, 'weekday', 'walk_in', '17:00:00', '21:30:00', 80000),
-  (86, 'weekend', 'walk_in', '05:30:00', '17:00:00', 70000),
-  (86, 'weekend', 'walk_in', '17:00:00', '21:30:00', 100000),
-  (86, 'weekday', 'fixed', '05:30:00', '21:30:00', 55000),
-  (86, 'weekend', 'fixed', '05:30:00', '21:30:00', 75000),
-  (87, 'weekday', 'walk_in', '06:00:00', '11:00:00', 35000),
-  (87, 'weekday', 'walk_in', '11:00:00', '17:00:00', 30000),
-  (87, 'weekday', 'walk_in', '17:00:00', '21:30:00', 55000),
-  (87, 'weekend', 'walk_in', '06:00:00', '11:00:00', 50000),
-  (87, 'weekend', 'walk_in', '11:00:00', '17:00:00', 40000),
-  (87, 'weekend', 'walk_in', '17:00:00', '21:30:00', 70000),
-  (87, 'weekday', 'fixed', '06:00:00', '21:30:00', 40000),
-  (87, 'weekend', 'fixed', '06:00:00', '21:30:00', 55000),
-  (88, 'weekday', 'walk_in', '06:00:00', '11:00:00', 60000),
-  (88, 'weekday', 'walk_in', '11:00:00', '17:00:00', 55000),
-  (88, 'weekday', 'walk_in', '17:00:00', '23:00:00', 100000),
-  (88, 'weekend', 'walk_in', '06:00:00', '11:00:00', 85000),
-  (88, 'weekend', 'walk_in', '11:00:00', '17:00:00', 75000),
-  (88, 'weekend', 'walk_in', '17:00:00', '23:00:00', 125000),
-  (88, 'weekday', 'fixed', '06:00:00', '23:00:00', 70000),
-  (88, 'weekend', 'fixed', '06:00:00', '23:00:00', 95000),
-  (89, 'weekday', 'walk_in', '06:00:00', '16:00:00', 50000),
-  (89, 'weekday', 'walk_in', '16:00:00', '22:00:00', 85000),
-  (89, 'weekend', 'walk_in', '06:00:00', '16:00:00', 70000),
-  (89, 'weekend', 'walk_in', '16:00:00', '22:00:00', 105000),
-  (90, 'weekday', 'walk_in', '05:30:00', '11:00:00', 50000),
-  (90, 'weekday', 'walk_in', '11:00:00', '17:00:00', 45000),
-  (90, 'weekday', 'walk_in', '17:00:00', '22:00:00', 80000),
-  (90, 'weekend', 'walk_in', '05:30:00', '11:00:00', 70000),
-  (90, 'weekend', 'walk_in', '11:00:00', '17:00:00', 60000),
-  (90, 'weekend', 'walk_in', '17:00:00', '22:00:00', 100000),
-  (90, 'weekday', 'fixed', '05:30:00', '22:00:00', 55000),
-  (90, 'weekend', 'fixed', '05:30:00', '22:00:00', 75000),
-  (91, 'weekday', 'walk_in', '06:00:00', '16:00:00', 35000),
-  (91, 'weekday', 'walk_in', '16:00:00', '22:00:00', 65000),
-  (91, 'weekend', 'walk_in', '06:00:00', '16:00:00', 50000),
-  (91, 'weekend', 'walk_in', '16:00:00', '22:00:00', 80000),
-  (92, 'weekday', 'walk_in', '05:30:00', '17:00:00', 35000),
-  (92, 'weekday', 'walk_in', '17:00:00', '22:00:00', 55000),
-  (92, 'weekend', 'walk_in', '05:30:00', '17:00:00', 50000),
-  (92, 'weekend', 'walk_in', '17:00:00', '22:00:00', 70000),
-  (92, 'weekday', 'fixed', '05:30:00', '22:00:00', 40000),
-  (92, 'weekend', 'fixed', '05:30:00', '22:00:00', 55000),
-  (93, 'weekday', 'walk_in', '05:30:00', '16:00:00', 35000),
-  (93, 'weekday', 'walk_in', '16:00:00', '22:00:00', 55000),
-  (93, 'weekend', 'walk_in', '05:30:00', '16:00:00', 50000),
-  (93, 'weekend', 'walk_in', '16:00:00', '22:00:00', 70000),
-  (93, 'weekday', 'fixed', '05:30:00', '22:00:00', 40000),
-  (93, 'weekend', 'fixed', '05:30:00', '22:00:00', 55000),
-  (94, 'weekday', 'walk_in', '06:00:00', '17:00:00', 50000),
-  (94, 'weekday', 'walk_in', '17:00:00', '21:30:00', 90000),
-  (94, 'weekend', 'walk_in', '06:00:00', '17:00:00', 70000),
-  (94, 'weekend', 'walk_in', '17:00:00', '21:30:00', 115000),
-  (94, 'weekday', 'fixed', '06:00:00', '21:30:00', 60000),
-  (94, 'weekend', 'fixed', '06:00:00', '21:30:00', 85000);
-
--- Kiểm tra: mỗi quận/huyện phải đúng 4 cơ sở active (chạy thử)
--- SELECT QuanHuyen, COUNT(*) AS SoCoSo FROM CoSo WHERE TrangThai='active' GROUP BY QuanHuyen ORDER BY QuanHuyen;
-
--- ---------------------------------------------------------------------
--- 10b. Đơn bổ sung cho khách mai.nguyen@gmail.com (MaNguoiDung = 6)
---   4 đơn completed (đã chơi, ThanhToan success) + 3 đơn cancelled có hoàn tiền (ThanhToan refunded)
---   Giá tính theo BangGia của từng cơ sở; PhiNenTang = 10% TongTien
--- ---------------------------------------------------------------------
-INSERT INTO DatSan
-  (MaDatSan, MaDon, MaKhachHang, TenKhach, SoDienThoaiLienHe, GhiChu, Nguon, LoaiKhach, MaLichCoDinh,
-   MaSan, NgayChoi, GioBatDau, GioKetThuc, SoPhut, TongTien, PhiNenTang, TienChuSan,
-   TrangThaiThu, NgayThu, TrangThai, HetHanGiuCho, NguoiHuy, LyDoHuy, NgayHuy, NgayTao)
-VALUES
-  -- COMPLETED
-  (20, 'BK20261108001', 6, 'Nguyễn Thị Mai', '0901234561', NULL, 'app', 'walk_in', NULL,
-       16, '2026-11-10', '18:00:00', '20:00:00', 120, 300000, 30000, 270000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-08 20:15:00'),
-  (21, 'BK20261112001', 6, 'Nguyễn Thị Mai', '0901234561', 'Đi 4 người', 'app', 'walk_in', NULL,
-       21, '2026-11-14', '08:00:00', '10:00:00', 120, 200000, 20000, 180000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-12 21:00:00'),
-  (22, 'BK20261103002', 6, 'Nguyễn Thị Mai', '0901234561', NULL, 'app', 'walk_in', NULL,
-       25, '2026-11-05', '17:00:00', '18:30:00', 90, 150000, 15000, 135000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-03 19:00:00'),
-  (23, 'BK20261110001', 6, 'Nguyễn Thị Mai', '0901234561', NULL, 'app', 'walk_in', NULL,
-       31, '2026-11-12', '19:00:00', '21:00:00', 120, 140000, 14000, 126000,
-       NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-10 18:30:00'),
-  -- CANCELLED + REFUNDED: khách hủy sớm (>= 24h) hoàn 100%
-  (24, 'BK20261109001', 6, 'Nguyễn Thị Mai', '0901234561', NULL, 'app', 'walk_in', NULL,
-       17, '2026-11-15', '11:00:00', '13:00:00', 120, 220000, 22000, 198000,
-       NULL, NULL, 'cancelled', NULL, 'customer', 'Khách bận đột xuất', '2026-11-12 09:00:00', '2026-11-09 10:00:00'),
-  -- CANCELLED + REFUNDED: khách hủy trong khoảng 12-24h trước giờ chơi, hoàn 50%
-  (25, 'BK20261114001', 6, 'Nguyễn Thị Mai', '0901234561', NULL, 'app', 'walk_in', NULL,
-       22, '2026-11-16', '19:00:00', '20:00:00', 60, 120000, 12000, 108000,
-       NULL, NULL, 'cancelled', NULL, 'customer', 'Đổi lịch, không đi được', '2026-11-15 21:00:00', '2026-11-14 12:00:00'),
-  -- CANCELLED + REFUNDED: chủ sân hủy, hoàn 100%
-  (26, 'BK20261104001', 6, 'Nguyễn Thị Mai', '0901234561', NULL, 'app', 'walk_in', NULL,
-       26, '2026-11-08', '18:00:00', '20:00:00', 120, 260000, 26000, 234000,
-       NULL, NULL, 'cancelled', NULL, 'owner', 'Sân bảo trì đột xuất', '2026-11-07 09:00:00', '2026-11-04 08:00:00');
-
-  USE db_sancaulong;
-SET NAMES utf8mb4;
-
-INSERT INTO DatSan
-  (MaDon, MaKhachHang, TenKhach, SoDienThoaiLienHe, GhiChu, Nguon, LoaiKhach, MaLichCoDinh,
-   MaSan, NgayChoi, GioBatDau, GioKetThuc, SoPhut, TongTien, PhiNenTang, TienChuSan,
-   TrangThaiThu, NgayThu, TrangThai, HetHanGiuCho, NguoiHuy, LyDoHuy, NgayHuy, NgayTao)
-VALUES
-  -- Mai (6)
-  ('BK20261110101', 6,  'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
-     2,  '2026-11-10', '18:00:00', '20:00:00', 120, 200000, 20000, 180000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-08 20:00:00'),
-  ('BK20261112101', 6,  'Nguyễn Thị Mai',  '0901234561', NULL, 'app', 'walk_in', NULL,
-     5,  '2026-11-12', '19:00:00', '20:00:00', 60,   90000,  9000,  81000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-11 21:00:00'),
-  -- Nam (7)
-  ('BK20261111101', 7,  'Trần Văn Nam',    '0901234562', NULL, 'app', 'walk_in', NULL,
-     8,  '2026-11-11', '17:00:00', '19:00:00', 120, 200000, 20000, 180000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-09 18:00:00'),
-  -- Phúc (8)
-  ('BK20261113101', 8,  'Lê Hoàng Phúc',   '0901234563', NULL, 'app', 'walk_in', NULL,
-     3,  '2026-11-13', '19:00:00', '21:00:00', 120, 200000, 20000, 180000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-12 09:00:00'),
-  -- Hà (9)
-  ('BK20261114101', 9,  'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
-     6,  '2026-11-14', '08:00:00', '10:00:00', 120, 170000, 17000, 153000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-12 19:00:00'),
-  ('BK20261115101', 9,  'Phạm Thu Hà',     '0901234564', NULL, 'app', 'walk_in', NULL,
-     9,  '2026-11-15', '09:00:00', '10:30:00', 90,  150000, 15000, 135000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-13 10:00:00'),
-  -- Hùng (10)
-  ('BK20261109101', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'app', 'walk_in', NULL,
-     4,  '2026-11-09', '20:00:00', '21:00:00', 60,  100000, 10000,  90000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-08 08:00:00'),
-  ('BK20261115102', 10, 'Nguyễn Văn Hùng', '0903456789', NULL, 'app', 'walk_in', NULL,
-     10, '2026-11-15', '18:00:00', '20:00:00', 120, 200000, 20000, 180000,
-     NULL, NULL, 'completed', NULL, NULL, NULL, NULL, '2026-11-14 12:00:00');
-
--- Task 2.1: mọi đơn seed là nhóm 1 dòng (MaNhomDat = MaDatSan), giống bước backfill của migration-t2-ma-nhom-dat.sql.
-UPDATE DatSan SET MaNhomDat = MaDatSan WHERE MaNhomDat IS NULL;
-
--- ThanhToan cho các đơn trên (đơn completed: success; đơn hủy: success + đã hoàn tiền)
-INSERT INTO ThanhToan
-  (MaDatSan, SoTien, TrangThai, NoiDungChuyenKhoan, LyDoLoi, AnhChuyenKhoan, NgayGuiAnh,
-   MaNguoiXacNhan, VaiTroXacNhan, NgayThanhToan,
-   TrangThaiHoanTien, SoTienHoan, MaGiaoDichHoan, NgayHoan,
-   TenNganHangHoan, MaNganHangHoan, SoTaiKhoanHoan, ChuTaiKhoanHoan, MaQuanTriDuyetHoan, NgayTao)
-VALUES
-  (20, 300000, 'success', 'BK20261108001', NULL, '/tep-tai-len/1762607700000-a1b2c3d4.jpg', '2026-11-08 20:20:00',
-       12, 'owner', '2026-11-08 20:35:00', 'none', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2026-11-08 20:15:00'),
-  (21, 200000, 'success', 'BK20261112001', NULL, '/tep-tai-len/1762952400000-b2c3d4e5.jpg', '2026-11-12 21:05:00',
-       12, 'owner', '2026-11-12 21:20:00', 'none', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2026-11-12 21:00:00'),
-  (22, 150000, 'success', 'BK20261103002', NULL, '/tep-tai-len/1762171500000-c3d4e5f6.jpg', '2026-11-03 19:05:00',
-       13, 'owner', '2026-11-03 19:30:00', 'none', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2026-11-03 19:00:00'),
-  (23, 140000, 'success', 'BK20261110001', NULL, '/tep-tai-len/1762774200000-d4e5f6a7.jpg', '2026-11-10 18:35:00',
-       13, 'owner', '2026-11-10 18:50:00', 'none', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '2026-11-10 18:30:00'),
-  -- Hoàn 100% (khách hủy sớm)
-  (24, 220000, 'success', 'BK20261109001', NULL, '/tep-tai-len/1762659600000-e5f6a7b8.jpg', '2026-11-09 10:05:00',
-       12, 'owner', '2026-11-09 10:25:00', 'refunded', 220000, 'FT26316100245871', '2026-11-13 09:30:00',
-       'MB Bank', 'MB', '0901234561', 'NGUYEN THI MAI', 1, '2026-11-09 10:00:00'),
-  -- Hoàn 50% (khách hủy muộn)
-  (25, 120000, 'success', 'BK20261114001', NULL, '/tep-tai-len/1763097900000-f6a7b8c9.jpg', '2026-11-14 12:05:00',
-       12, 'owner', '2026-11-14 12:30:00', 'refunded', 60000, 'FT26319100358142', '2026-11-16 10:00:00',
-       'MB Bank', 'MB', '0901234561', 'NGUYEN THI MAI', 1, '2026-11-14 12:00:00'),
-  -- Hoàn 100% (chủ sân hủy)
-  (26, 260000, 'success', 'BK20261104001', NULL, '/tep-tai-len/1762218000000-a7b8c9d0.jpg', '2026-11-04 08:05:00',
-       13, 'owner', '2026-11-04 08:20:00', 'refunded', 260000, 'FT26311100142763', '2026-11-08 09:15:00',
-       'MB Bank', 'MB', '0901234561', 'NGUYEN THI MAI', 1, '2026-11-04 08:00:00');
-
--- HoanTien (G4) cho 3 đơn seed đã hoàn: ảnh chứng từ là đường dẫn mẫu (giống ảnh chuyển khoản mẫu phía trên).
-INSERT INTO HoanTien
-  (MaThanhToan, MaDatSan, Loai, TyLe, SoTien, TrangThai, TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan,
-   HanHoan, AnhChungTu, VaiTroHoan, NgayHoan, NgayTao)
-SELECT t.MaThanhToan, t.MaDatSan,
-       CASE t.MaDatSan WHEN 26 THEN 'owner_cancel' ELSE 'cancel' END,
-       ROUND(t.SoTienHoan * 100 / t.SoTien), t.SoTienHoan, 'refunded',
-       t.TenNganHangHoan, t.MaNganHangHoan, t.SoTaiKhoanHoan, t.ChuTaiKhoanHoan,
-       t.NgayHoan, CONCAT('/tep-tai-len/hoan-mau-', t.MaDatSan, '.jpg'), 'owner', t.NgayHoan, t.NgayTao
-FROM ThanhToan t WHERE t.TrangThaiHoanTien = 'refunded';
-
--- ---------------------------------------------------------------------
--- 13b. KhieuNai: khiếu nại của khách để admin xử lý (mỗi đơn tối đa 1 khiếu nại)
---   Tất cả 7 khiếu nại đang pending (chưa xử lý), để admin vào xử lý
---   MaChuSan / MaCoSo lấy theo sân của đơn
--- ---------------------------------------------------------------------
-INSERT INTO KhieuNai
-  (MaKhieuNai, MaDatSan, MaKhachHang, MaChuSan, MaCoSo, GiaiDoan, NoiDung,
-   TrangThai, GhiChuQuanTri, MucXuLy, MaQuanTri, NgayXuLy, NgayTao)
-VALUES
-  -- Tất cả chờ admin xử lý
-  (1, 20, 6, 12, 6, 'after_payment',
-     'Tôi đã chuyển khoản và đơn được xác nhận nhưng khi đến sân nhân viên báo chưa thấy tiền, phải chờ gần 30 phút mới được vào sân.',
-     'pending', NULL, 'none', NULL, NULL, '2026-11-10 20:30:00'),
-  (2, 26, 6, 13, 8, 'at_cancel',
-     'Chủ sân hủy đơn sát ngày chơi vì bảo trì, không báo trước và không hỗ trợ đổi sang cơ sở khác nên cả nhóm bị lỡ buổi chơi.',
-     'pending', NULL, 'none', NULL, NULL, '2026-11-07 10:00:00'),
-  (3, 25, 6, 12, 7, 'after_cancel',
-     'Tôi hủy đơn trước giờ chơi hơn 20 tiếng nhưng chỉ được hoàn 50%, mong admin xem lại cách tính hoàn tiền.',
-     'pending', NULL, 'none', NULL, NULL, '2026-11-16 11:00:00'),
-  (4, 13, 7, 2, 1, 'after_payment',
-     'Đến sân thì Sân 3 đang có nhóm khác chơi, chủ sân xếp tôi sang sân khác sau 20 phút chờ, không được bù giờ.',
-     'pending', NULL, 'none', NULL, NULL, '2026-11-02 19:00:00'),
-  (5, 19, 8, 2, 1, 'after_cancel',
-     'Chủ sân hủy đơn nhưng đến nay tôi chưa thấy tiền hoàn về tài khoản.',
-     'pending', NULL, 'none', NULL, NULL, '2026-10-31 09:00:00'),
-  (6, 4, 9, 3, 3, 'after_payment',
-     'Sân quảng cáo có máy lạnh nhưng hôm tôi chơi máy hỏng, chủ sân không báo trước mà vẫn thu giá như bình thường.',
-     'pending', NULL, 'none', NULL, NULL, '2026-10-25 12:00:00'),
-  (7, 3, 8, 2, 1, 'after_payment',
-     'Tôi ghi chú cần thêm 1 hộp cầu nhưng chủ sân không chuẩn bị.',
-     'pending', NULL, 'none', NULL, NULL, '2026-10-24 20:00:00');
-
--- ---------------------------------------------------------------------
--- BẢNG TÓM TẮT (tham khảo)
--- MaCoSo | Tên | Tỉnh / Quận | Trạng thái | Giá thấp nhất | Số sân | Điểm
---    6 | Thành Long Badminton Quận 1 | TP. Hồ Chí Minh / Quận 1 | active | 80,000đ | 5 sân | 4.8
---    7 | Thành Long Badminton Quận 3 | TP. Hồ Chí Minh / Quận 3 | active | 70,000đ | 4 sân | 4.5
---    8 | Hồng Phát Sport Quận 7 | TP. Hồ Chí Minh / Quận 7 | active | 60,000đ | 6 sân | 4.3
---    9 | Hồng Phát Sport Bình Thạnh | TP. Hồ Chí Minh / Bình Thạnh | active | 45,000đ | 3 sân | 4.0
---   10 | Anh Tuấn Arena Gò Vấp | TP. Hồ Chí Minh / Gò Vấp | active | 65,000đ | 6 sân | 4.6
---   11 | Anh Tuấn Arena Quận 12 | TP. Hồ Chí Minh / Quận 12 | active | 50,000đ | 3 sân | 3.8
---   12 | Linh Sport Phú Nhuận | TP. Hồ Chí Minh / Phú Nhuận | active | 75,000đ | 4 sân | 4.1
---   13 | Linh Sport Tân Phú | TP. Hồ Chí Minh / Tân Phú | active | 50,000đ | 4 sân | 4.4
---   14 | Sơn Badminton Center Thủ Đức | TP. Hồ Chí Minh / TP. Thủ Đức | active | 70,000đ | 8 sân | 4.7
---   15 | Sơn Badminton Bình Tân | TP. Hồ Chí Minh / Bình Tân | active | 40,000đ | 2 sân | 3.5
---   16 | Sơn Badminton Q10 (đang đóng tạm) | TP. Hồ Chí Minh / Quận 10 | closed | 80,000đ | 3 sân | 4.2
---   17 | Thu Hà Sport Quận 5 | TP. Hồ Chí Minh / Quận 5 | active | 60,000đ | 5 sân | 4.6
---   18 | Thu Hà Sport Quận 6 | TP. Hồ Chí Minh / Quận 6 | active | 65,000đ | 3 sân | 4.2
---   19 | Thu Hà Sport Quận 8 | TP. Hồ Chí Minh / Quận 8 | active | 50,000đ | 4 sân | 3.9
---   20 | Quốc Vinh Sport Tân Bình | TP. Hồ Chí Minh / Tân Bình | active | 90,000đ | 6 sân | 4.9
---   21 | Quốc Vinh Sport Quận 11 (bị khóa) | TP. Hồ Chí Minh / Quận 11 | locked | 70,000đ | 2 sân | 3.2
---   22 | Châu Sport Bình Chánh | TP. Hồ Chí Minh / Bình Chánh | active | 60,000đ | 4 sân | 4.5
---   23 | Châu Sport Hóc Môn | TP. Hồ Chí Minh / Hóc Môn | active | 55,000đ | 3 sân | 4.3
---   24 | Châu Sport Nhà Bè | TP. Hồ Chí Minh / Nhà Bè | active | 50,000đ | 2 sân | 0.0
---   25 | Huy Hoàng Sport Củ Chi | TP. Hồ Chí Minh / Củ Chi | active | 50,000đ | 4 sân | 4.4
---   26 | Huy Hoàng Sport Quận 1 | TP. Hồ Chí Minh / Quận 1 | active | 45,000đ | 3 sân | 4.0
---   27 | Ngọc Court Bình Thạnh | TP. Hồ Chí Minh / Bình Thạnh | active | 55,000đ | 5 sân | 4.6
---   28 | Gia Bảo Sport Quận 7 (chờ duyệt) | TP. Hồ Chí Minh / Quận 7 | hidden | 70,000đ | 2 sân | 0.0
---   29 | Thanh Tùng Arena Gò Vấp (bị từ chối) | TP. Hồ Chí Minh / Gò Vấp | hidden | 60,000đ | 2 sân | 0.0
--- ---------------------------------------------------------------------
-
--- ---------------------------------------------------------------------
--- Kiểm tra nhanh sau khi import
--- ---------------------------------------------------------------------
--- SELECT 'NguoiDung', COUNT(*) FROM NguoiDung UNION ALL
--- SELECT 'CoSo', COUNT(*) FROM CoSo UNION ALL
--- SELECT 'San', COUNT(*) FROM San UNION ALL
--- SELECT 'BangGia', COUNT(*) FROM BangGia UNION ALL
--- SELECT 'DatSan', COUNT(*) FROM DatSan UNION ALL
--- SELECT 'DanhGia', COUNT(*) FROM DanhGia;
--- Hoan tat import schema
-SET FOREIGN_KEY_CHECKS = 1;
+INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
+ ('community_max_open_posts','5','Số bài tìm người đang mở tối đa mỗi người'),
+ ('community_max_owned_teams','3','Số đội nhóm tối đa một người đang làm trưởng nhóm'),
+ ('community_post_max_days','60','Số ngày tối đa từ hôm nay đến ngày chơi của bài tìm người')
+ON DUPLICATE KEY UPDATE MoTa=VALUES(MoTa);

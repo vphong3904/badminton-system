@@ -1,3 +1,4 @@
+const fs = require('fs');
 const dinhTuyen = require('express').Router();
 const dieuKhien = require('../controllers/ownerController');
 const kiemTraDuLieu = require('../validators/owner');
@@ -40,6 +41,11 @@ dinhTuyen.put('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.bangGiaTheoM
 dinhTuyen.get('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layBangGiaCoSo);
 dinhTuyen.post('/co-so/:maCoSo/bang-gia', kiemTraHopLe(kiemTraDuLieu.themKhungGia), dieuKhien.themKhungGia);
 dinhTuyen.post('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.single('tepAnh'), dieuKhien.capNhatAnhCoSo);
+// Thư viện ảnh: ảnh bìa + nhiều ảnh sân. POST /anh = đổi ảnh bìa (giữ ảnh cũ trong thư viện); POST /anh-san = thêm 1 hoặc nhiều ảnh sân (field `tepAnh` lặp lại, tối đa 12 file/lần).
+dinhTuyen.get('/co-so/:maCoSo/anh', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.layAnhCoSo);
+dinhTuyen.post('/co-so/:maCoSo/anh-san', kiemTraHopLe(kiemTraDuLieu.maCoSo), taiAnhCoSo.array('tepAnh', 12), dieuKhien.themAnhSan);
+dinhTuyen.patch('/co-so/:maCoSo/anh/:maAnh/bia', kiemTraHopLe(kiemTraDuLieu.anhCoSo), dieuKhien.datAnhBia);
+dinhTuyen.delete('/co-so/:maCoSo/anh/:maAnh', kiemTraHopLe(kiemTraDuLieu.anhCoSo), dieuKhien.xoaAnhCoSo);
 // Đóng tạm / mở lại / xoá cơ sở: đóng & xoá chỉ khi không còn khách đặt (đơn hiện tại, lịch cố định); xoá phải đóng trước.
 dinhTuyen.patch('/co-so/:maCoSo/dong', kiemTraHopLe(kiemTraDuLieu.dongXoaCoSo), dieuKhien.dongCoSo);
 dinhTuyen.patch('/co-so/:maCoSo/mo', kiemTraHopLe(kiemTraDuLieu.maCoSo), dieuKhien.moCoSo);
@@ -58,6 +64,7 @@ dinhTuyen.get('/san/:maSan/qr-check-in/in', kiemTraHopLe(kiemTraCheckIn.trangIn)
 dinhTuyen.post('/dat-san/:maDatSan/check-in-thu-cong',
   kiemTraHopLe(kiemTraCheckIn.checkInThuCong), checkIn.checkInThuCong);
 dinhTuyen.get('/khoa-san', kiemTraHopLe(kiemTraDuLieu.danhSachKhoaSan), dieuKhien.lietKeKhoaSan);
+dinhTuyen.get('/khoa-san/xem-truoc', kiemTraHopLe(kiemTraDuLieu.xemTruocKhoaSan), dieuKhien.xemTruocKhoaSan);
 dinhTuyen.post('/khoa-san', kiemTraHopLe(kiemTraDuLieu.khoaSan), dieuKhien.taoKhoaSan);
 dinhTuyen.delete('/khoa-san/:maKhoa', kiemTraHopLe(kiemTraDuLieu.maKhoaSan), dieuKhien.xoaKhoaSan);
 dinhTuyen.post('/dat-san', kiemTraHopLe(kiemTraBaoCao.taoDon), donDatSan.taoDon);
@@ -69,11 +76,25 @@ dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDon), don
 // Đơn chủ sân tự tạo (Nguon='owner', thanh toán ngoài hệ thống): đánh dấu đã thu / huỷ (không hoàn tiền).
 dinhTuyen.patch('/dat-san/:maDatSan/da-thu', kiemTraHopLe(kiemTraBaoCao.daThuDon), donDatSan.daThuDon);
 dinhTuyen.patch('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraBaoCao.huyDonOwner), donDatSan.huyDonOwner);
+// Khiếu nại gửi tới chủ sân (khách báo chậm duyệt / chưa nhận được tiền hoàn): xem + giải trình 1 lần.
+dinhTuyen.get('/khieu-nai', kiemTraHopLe(kiemTraDuLieu.danhSachKhieuNai), dieuKhien.lietKeKhieuNai);
+dinhTuyen.post('/khieu-nai/:maKhieuNai/phan-hoi', kiemTraHopLe(kiemTraDuLieu.phanHoiKhieuNai), dieuKhien.phanHoiKhieuNai);
+// G5.5: kháng nghị quyết định chấp nhận khiếu nại (1 lần, trong appeal_hours = 24h).
+// G9.C9: multipart — `noiDung` 10–1000 ký tự + `anhBangChung` 1–3 ảnh (bắt buộc ≥1; kiểm ở service).
+// multer chạy TRƯỚC zod để body multipart có dữ liệu; lỗi dữ liệu thì xoá ảnh đã tải (giống PATCH /quan-tri/khieu-nai/:id/xu-ly).
+dinhTuyen.post('/khieu-nai/:maKhieuNai/khang-nghi',
+  taiTep.array('anhBangChung', 3),
+  (yeuCau, phanHoi, tiep) => kiemTraHopLe(kiemTraDuLieu.khangNghiKhieuNai)(yeuCau, phanHoi, (loi) => {
+    if (loi) (yeuCau.files || []).forEach((tep) => fs.unlink(tep.path, () => {}));
+    tiep(loi);
+  }),
+  dieuKhien.khangNghiKhieuNai);
 dinhTuyen.get('/hoan-tien', kiemTraHopLe(kiemTraBaoCao.danhSachHoanTien), donDatSan.lietKeHoanTien);
 // G4: kèm ảnh chứng từ chuyển khoản hoàn (multipart, field `anhChungTu`, bắt buộc).
 dinhTuyen.post('/hoan-tien/:maThanhToan/hoan-thanh', kiemTraHopLe(kiemTraBaoCao.hoanThanhHoanTien),
   taiTep.single('anhChungTu'), donDatSan.hoanThanhHoanTien);
 dinhTuyen.get('/bao-cao/doanh-thu', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThu);
+dinhTuyen.get('/bao-cao/doanh-thu-theo-san', kiemTraHopLe(kiemTraBaoCao.doanhThu), baoCao.layDoanhThuTheoSan); // G9.B1
 dinhTuyen.get('/bao-cao/top-khach', kiemTraHopLe(kiemTraBaoCao.topKhach), baoCao.layTopKhach);
 dinhTuyen.get('/bao-cao/top-san', kiemTraHopLe(kiemTraBaoCao.topSan), baoCao.layTopSan);
 dinhTuyen.get('/bao-cao/cong-no', kiemTraHopLe(kiemTraBaoCao.congNo), baoCao.layCongNo);

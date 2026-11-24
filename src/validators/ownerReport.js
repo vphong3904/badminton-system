@@ -48,7 +48,7 @@ exports.danhSachDon = {
     soDong: z.coerce.number().int().min(1).max(200).optional(),
     tuKhoa: z.string().trim().min(1).max(50).optional(),
     trang: maSo.optional(),
-    sapXep: z.enum(['moi-nhat', 'cu-nhat', 'han-xac-nhan']).optional(), // mặc định moi-nhat: ngày chơi mới nhất trước; han-xac-nhan: hàng đợi duyệt thanh toán (G2)
+    sapXep: z.enum(['moi-nhat', 'cu-nhat', 'han-xac-nhan', 'thanh-toan-moi-nhat', 'thanh-toan-cu-nhat']).optional(), // mặc định moi-nhat: ngày chơi mới nhất trước; han-xac-nhan: hàng đợi duyệt thanh toán (G2); thanh-toan-*: theo giờ thu tiền (G9.A2)
   }).refine((duLieu) => !duLieu.tuNgay || !duLieu.denNgay || duLieu.tuNgay <= duLieu.denNgay, {
     message: 'Ngày bắt đầu phải trước hoặc bằng ngày kết thúc',
     path: ['denNgay'],
@@ -66,6 +66,12 @@ exports.huyDon = {
   body: z.object({
     lyDo: z.string({ error: 'Vui lòng nhập lý do huỷ đơn.' }).trim()
       .min(2, 'Vui lòng nhập lý do huỷ đơn.').max(255, 'Lý do tối đa 255 ký tự.'),
+    // G9.D1: huỷ MỘT PHẦN — mã các buổi (DatSan) cần huỷ, cùng đợt thanh toán với đơn trên URL. Không gửi = huỷ như cũ.
+    // Số tiền hoàn do máy chủ tính (100% TongTien các buổi chọn), chủ sân không nhập.
+    cacBuoi: z.array(maSo, { error: 'cacBuoi phải là danh sách mã buổi.' })
+      .min(1, 'Chọn ít nhất 1 buổi cần huỷ.').max(100, 'Mỗi lần chỉ huỷ tối đa 100 buổi.')
+      .refine((ds) => new Set(ds.map(Number)).size === ds.length, 'Danh sách buổi bị trùng mã.')
+      .optional(),
   }),
 };
 

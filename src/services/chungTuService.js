@@ -53,16 +53,110 @@ async function kiemTraThoiDiemChuyen(ketNoi, thoiDiemChuyen) {
 
 // Số phút chủ sân/Admin có để xác nhận: confirm_minutes (30); đặt gấp (buổi sớm nhất còn < urgent_threshold_minutes
 // đến giờ chơi) thì confirm_urgent_minutes (15). `cungDot` = { sql, thamSo } như paymentService.dieuKienCungDot.
+// G9.C3: trả thêm `gioChoiSom` (giờ bắt đầu buổi sớm nhất của đợt) và giờ mở/đóng cửa cơ sở để tính hạn thật.
 async function tinhPhutXacNhan(ketNoi, cungDot) {
   const [[dong]] = await ketNoi.query(
-    `SELECT MIN(TIMESTAMPDIFF(MINUTE, NOW(), TIMESTAMP(NgayChoi, GioBatDau))) AS conPhut
-     FROM DatSan WHERE ${cungDot.sql} AND TrangThai='pending_payment'`,
+    `SELECT MIN(TIMESTAMPDIFF(MINUTE, NOW(), TIMESTAMP(d.NgayChoi, d.GioBatDau))) AS conPhut,
+       MIN(TIMESTAMP(d.NgayChoi, d.GioBatDau)) AS gioChoiSom,
+       MIN(cs.GioMoCua) AS gioMoCua, MAX(cs.GioDongCua) AS gioDongCua
+     FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+     WHERE ${cungDot.sql.replace(/\b(MaLichCoDinh|MaNhomDat|MaDatSan)\b/g, 'd.$1')} AND d.TrangThai='pending_payment'`,
     cungDot.thamSo);
-  const nguong = await layCauHinhSo(ketNoi, 'urgent_threshold_minutes', NGUONG_GAP_MAC_DINH);
-  const gap = dong && dong.conPhut !== null && dong.conPhut !== undefined && Number(dong.conPhut) < nguong;
-  return gap
-    ? { phut: await layCauHinhSo(ketNoi, 'confirm_urgent_minutes', PHUT_XAC_NHAN_GAP_MAC_DINH), gap: true }
-    : { phut: await layCauHinhSo(ketNoi, 'confirm_minutes', PHUT_XAC_NHAN_MAC_DINH), gap: false };
+  const { datGap: gap, soPhutXacNhan: phut } = danhGiaDatGap(dong?.conPhut, await docCauHinhDatGap(ketNoi));
+  return {
+    phut, gap: !!gap,
+    gioChoiSom: dong?.gioChoiSom ?? null, gioMoCua: dong?.gioMoCua ?? null, gioDongCua: dong?.gioDongCua ?? null,
+  };
+}
+
+// Đặt gấp (một nguồn duy nhất cho hạn xác nhận lẫn cờ `datGap` trả cho app): số phút từ MỐC TÍNH (lúc gửi ảnh đầu tiên
+// của lượt đang chờ duyệt, hoặc BÂY GIỜ nếu chưa gửi ảnh) đến giờ chơi sớm nhất của đợt < urgent_threshold_minutes (60).
+// Giống tinhPhutXacNhan: số phút ÂM (đã quá giờ chơi) vẫn tính là gấp.
+async function docCauHinhDatGap(ketNoi) {
+  return {
+    nguong: await layCauHinhSo(ketNoi, 'urgent_threshold_minutes', NGUONG_GAP_MAC_DINH),
+    phutGap: await layCauHinhSo(ketNoi, 'confirm_urgent_minutes', PHUT_XAC_NHAN_GAP_MAC_DINH),
+    phutThuong: await layCauHinhSo(ketNoi, 'confirm_minutes', PHUT_XAC_NHAN_MAC_DINH),
+  };
+}
+
+// Hàm thuần. `phutDenGioChoi` null/undefined (không có buổi chờ trả) → không gấp. Trả { datGap, soPhutXacNhan }.
+function danhGiaDatGap(phutDenGioChoi, cauHinh) {
+  const coSo = phutDenGioChoi !== null && phutDenGioChoi !== undefined;
+  const datGap = coSo && Number(phutDenGioChoi) < cauHinh.nguong;
+  return { datGap, soPhutXacNhan: datGap ? cauHinh.phutGap : cauHinh.phutThuong };
+}
+
+// Hai đoạn SQL dùng để lấy `phutDenGioChoiLucGui` ở danh sách đơn của khách / hoá đơn nháp (bí danh d = DatSan, t = ThanhToan).
+// Giờ chơi sớm nhất của ĐỢT thanh toán còn buổi pending_payment (cùng điều kiện đợt như paymentService.dieuKienCungDot).
+function sqlGioChoiSomCuaDot(d = 'd') {
+  return `(SELECT MIN(TIMESTAMP(x.NgayChoi, x.GioBatDau)) FROM DatSan x
+     WHERE x.TrangThai='pending_payment' AND CASE WHEN ${d}.MaLichCoDinh IS NULL
+       THEN COALESCE(x.MaNhomDat, x.MaDatSan) = COALESCE(${d}.MaNhomDat, ${d}.MaDatSan)
+       ELSE x.MaLichCoDinh = ${d}.MaLichCoDinh END)`;
+}
+
+// Mốc tính đặt gấp: đang chờ duyệt → lúc gửi ảnh ĐẦU TIÊN của lượt này (ảnh 'pending' cũ nhất; ảnh đã duyệt/từ chối thuộc lượt cũ,
+// trùng với lúc backend tính HanXacNhan ở G9.C3); chưa gửi ảnh → bây giờ (nếu gửi ngay).
+function sqlMocTinhDatGap(t = 't') {
+  return `CASE WHEN ${t}.TrangThai='confirming'
+    THEN COALESCE((SELECT MIN(c.NgayGui) FROM ChungTuThanhToan c WHERE c.MaThanhToan=${t}.MaThanhToan AND c.KetQua='pending'), ${t}.NgayGuiAnh)
+    ELSE NOW() END`;
+}
+
+// Số phút (có thể âm) từ mốc tính đến giờ chơi sớm nhất của đợt; NULL khi đơn/thanh toán không còn trong luồng chờ trả/chờ duyệt.
+function sqlPhutDenGioChoiLucGui(d = 'd', t = 't') {
+  return `CASE WHEN ${t}.TrangThai IN ('pending','confirming') AND ${d}.TrangThai='pending_payment'
+    THEN TIMESTAMPDIFF(MINUTE, ${sqlMocTinhDatGap(t)}, ${sqlGioChoiSomCuaDot(d)}) END`;
+}
+
+// G9.C3: HanXacNhan = LEAST(base, giờ bắt đầu chơi sớm nhất của đợt).
+//   base = lúc gửi ảnh + phút xác nhận (30; đặt gấp 15);
+//   gửi ảnh NGOÀI giờ mở cửa (CoSo.GioMoCua/GioDongCua) thì base tính từ LÚC MỞ CỬA kế tiếp
+//   (trước giờ mở → hôm nay; từ giờ đóng cửa trở đi → ngày mai). Giờ so sánh là NOW() của MySQL (+07:00).
+// Trả { han: 'YYYY-MM-DD HH:mm:ss', phut, gap, ngoaiGioMoCua }.
+async function tinhHanTuThongSo(ketNoi, { phut, gioChoiSom, gioMoCua, gioDongCua }) {
+  let han;
+  let ngoaiGioMoCua = false;
+  if (gioMoCua && gioDongCua) {
+    const [[kq]] = await ketNoi.query(
+      `SELECT
+         (TIME(NOW()) < ? OR TIME(NOW()) >= ?) AS ngoaiGio,
+         LEAST(
+           DATE_ADD(CASE
+             WHEN TIME(NOW()) < ? THEN TIMESTAMP(CURDATE(), ?)
+             WHEN TIME(NOW()) >= ? THEN TIMESTAMP(DATE_ADD(CURDATE(), INTERVAL 1 DAY), ?)
+             ELSE NOW() END, INTERVAL ? MINUTE),
+           COALESCE(?, '9999-12-31 00:00:00')) AS han`,
+      [gioMoCua, gioDongCua, gioMoCua, gioMoCua, gioDongCua, gioMoCua, phut, gioChoiSom]);
+    han = kq.han;
+    ngoaiGioMoCua = !!Number(kq.ngoaiGio);
+  } else {
+    const [[kq]] = await ketNoi.query(
+      "SELECT LEAST(DATE_ADD(NOW(), INTERVAL ? MINUTE), COALESCE(?, '9999-12-31 00:00:00')) AS han",
+      [phut, gioChoiSom]);
+    han = kq.han;
+  }
+  return { han, ngoaiGioMoCua };
+}
+
+async function tinhHanXacNhan(ketNoi, cungDot) {
+  const { phut, gap, gioChoiSom, gioMoCua, gioDongCua } = await tinhPhutXacNhan(ketNoi, cungDot);
+  const { han, ngoaiGioMoCua } = await tinhHanTuThongSo(ketNoi, { phut, gioChoiSom, gioMoCua, gioDongCua });
+  return { han, phut, gap, ngoaiGioMoCua };
+}
+
+// Sự kiện có phí dùng CÙNG quy tắc hạn xác nhận với đặt sân: base = gửi ảnh + confirm_minutes (gấp: confirm_urgent_minutes),
+// tính từ giờ mở cửa kế tiếp nếu gửi ngoài giờ, và không vượt quá giờ bắt đầu sự kiện.
+async function tinhHanXacNhanSuKien(ketNoi, maSuKien) {
+  const [[sk]] = await ketNoi.query(
+    `SELECT TIMESTAMP(sk.NgaySuKien, sk.GioBatDau) AS gioChoiSom, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
+       TIMESTAMPDIFF(MINUTE, NOW(), TIMESTAMP(sk.NgaySuKien, sk.GioBatDau)) AS conPhut
+     FROM SuKien sk JOIN CoSo cs ON cs.MaCoSo = sk.MaCoSo WHERE sk.MaSuKien = ?`, [maSuKien]);
+  const { datGap: gap, soPhutXacNhan: phut } = danhGiaDatGap(sk?.conPhut, await docCauHinhDatGap(ketNoi));
+  const { han, ngoaiGioMoCua } = await tinhHanTuThongSo(ketNoi, {
+    phut, gioChoiSom: sk?.gioChoiSom ?? null, gioMoCua: sk?.gioMoCua ?? null, gioDongCua: sk?.gioDongCua ?? null });
+  return { han, phut, gap: !!gap, ngoaiGioMoCua };
 }
 
 async function demChungTu(ketNoi, maThanhToan) {
@@ -158,6 +252,11 @@ module.exports = {
   docThoiDiemChuyen,
   kiemTraThoiDiemChuyen,
   tinhPhutXacNhan,
+  docCauHinhDatGap,
+  danhGiaDatGap,
+  sqlPhutDenGioChoiLucGui,
+  tinhHanXacNhan,
+  tinhHanXacNhanSuKien,
   demChungTu,
   themChungTu,
   chotKetQuaChungTu,
