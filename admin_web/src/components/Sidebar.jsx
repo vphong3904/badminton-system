@@ -3,7 +3,7 @@ const MUC_MENU = [
   { tab: 'dashboard', nhan: 'Tổng quan' },
   { tab: 'users', nhan: 'Quản lý tài khoản' },
   { tab: 'owners', nhan: 'Duyệt hồ sơ chủ sân' },
-  { tab: 'complaints', nhan: 'Khiếu nại khách hàng' },
+  { tab: 'complaints', nhan: 'Khiếu nại của Khách hàng' },
   { tab: 'reviews', nhan: 'Quản lý đánh giá' },
   { tab: 'proofs', nhan: 'Chờ xác nhận / quá hạn' },
   { tab: 'logs', nhan: 'Nhật ký hệ thống' },

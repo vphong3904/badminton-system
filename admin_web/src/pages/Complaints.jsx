@@ -1,5 +1,5 @@
 /**
- * Màn hình Khiếu nại khách hàng (khiếu nại chủ sân), chia 2 loại theo lúc khách bấm khiếu nại:
+ * Màn hình Khiếu nại của Khách hàng (khiếu nại chủ sân), chia 2 loại theo lúc khách bấm khiếu nại:
  *  - Hoàn tiền: đơn đã hủy (giaiDoan = at_cancel | after_cancel) – khách chưa được hoàn tiền / hoàn không đúng
  *  - Thanh toán thành công: đơn đã thanh toán (giaiDoan = after_payment) – chủ sân không xác nhận / không phản hồi
  */
@@ -146,7 +146,7 @@ export default function Complaints({ khiThayDoi }) {
   return (
     <section className="space-y-6">
       <div>
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Khiếu nại khách hàng</h1>
+        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Khiếu nại của Khách hàng</h1>
         <p className="text-xs text-slate-500 mt-1 font-medium">
           Khách khiếu nại chủ sân từ ứng dụng. Chấp nhận khiếu nại là cộng 1 lần vi phạm cho chủ sân: lần 1 cảnh cáo, lần 2
           cảnh cáo nghiêm trọng, lần 3 khóa tài khoản.

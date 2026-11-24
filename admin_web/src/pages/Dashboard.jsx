@@ -2,12 +2,15 @@
 import { useEffect, useState } from 'react';
 import {
   layHoSoChoDuyet,
+  layKhieuNai,
   layNhatKy,
 } from '../api/admin';
 import { dinhDangNgayGio, nhanHanhDong } from '../utils/format';
 import EmptyState from '../components/EmptyState';
 
 const layNhatKyMoiNhat = () => layNhatKy({ gioiHan: 10 });
+// Cùng API và cùng tham số với huy hiệu ở menu (H1), chỉ lấy khiếu nại đang chờ xử lý
+const layKhieuNaiChoXuLy = () => layKhieuNai({ trangThai: 'pending', gioiHan: 100 });
 
 
 /** Mỗi khối tải độc lập: một khối lỗi không làm hỏng các khối còn lại */
@@ -71,6 +74,7 @@ function TheSoLieu({ tieuDe, trangThai, giaTri, phu, tabDich, doiTab }) {
 
 export default function Dashboard({ doiTab }) {
   const hoSo = useTaiDuLieu(layHoSoChoDuyet);
+  const khieuNai = useTaiDuLieu(layKhieuNaiChoXuLy);
   const nhatKy = useTaiDuLieu(layNhatKyMoiNhat);
 
   return (
@@ -86,6 +90,14 @@ export default function Dashboard({ doiTab }) {
           trangThai={hoSo}
           giaTri={(d) => d.length}
           tabDich="owners"
+          doiTab={doiTab}
+        />
+        <TheSoLieu
+          tieuDe="Khiếu nại của Khách hàng"
+          trangThai={khieuNai}
+          giaTri={(d) => d.length}
+          phu={() => 'Đang chờ xử lý'}
+          tabDich="complaints"
           doiTab={doiTab}
         />
       </div>
