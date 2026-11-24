@@ -39,10 +39,8 @@ async function layThanhToanCuaKhach(maNguoiDung, maDatSan, ketNoi = pool, khoa =
        d.MaDatSan AS maDatSan, d.MaLichCoDinh AS maLichCoDinh, d.MaNhomDat AS maNhomDat,
        d.MaKhachHang AS maKhachHang, d.TrangThai AS trangThaiDatSan,
        d.HetHanGiuCho AS hetHanGiuCho
-     FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
-       WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-       ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-     END
+     FROM DatSan d LEFT JOIN (SELECT MaLichCoDinh, MIN(MaDatSan) AS MaDatSanDau FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) lf ON lf.MaLichCoDinh=d.MaLichCoDinh
+     JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE lf.MaDatSanDau END
      WHERE d.MaDatSan=? AND d.MaKhachHang=? ${khoa ? 'FOR UPDATE' : ''}`,
     [maDatSan, maNguoiDung]);
   if (!thanhToan) throw AppError.khongTimThay('Không tìm thấy thanh toán');
@@ -245,10 +243,8 @@ async function layThanhToanDeDuyet(ketNoi, maNguoiDung, vaiTro, maDatSan) {
        d.GioBatDau AS gioBatDau, d.GioKetThuc AS gioKetThuc,
        s.TenSan AS tenSan, cs.TenCoSo AS tenCoSo
      FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-       JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       LEFT JOIN (SELECT MaLichCoDinh, MIN(MaDatSan) AS MaDatSanDau FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) lf ON lf.MaLichCoDinh=d.MaLichCoDinh
+     JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE lf.MaDatSanDau END
      WHERE d.MaDatSan=? AND d.Nguon='app' ${laAdmin ? '' : 'AND cs.MaChuSan=?'}
      FOR UPDATE`,
     laAdmin ? [maDatSan] : [maDatSan, maNguoiDung]);

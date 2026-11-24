@@ -848,56 +848,38 @@ CREATE TABLE IF NOT EXISTS DoiNhom (
   CONSTRAINT CHK_DoiNhom_SoThanhVien CHECK (SoThanhVienToiDa >= 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS YeuCauVaoDoi (
-  MaYeuCau INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  MaDoi INT UNSIGNED NOT NULL,
-  MaNguoiDung INT UNSIGNED NOT NULL,
-  TrangThai ENUM('pending','accepted','rejected','cancelled') NOT NULL DEFAULT 'pending',
-  MaNguoiDungPending INT UNSIGNED AS (CASE WHEN TrangThai='pending' THEN MaNguoiDung ELSE NULL END) STORED,
-  NgayTao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  NgayXuLy DATETIME NULL,
-  CONSTRAINT FK_YeuCauVaoDoi_Doi FOREIGN KEY (MaDoi) REFERENCES DoiNhom(MaDoi) ON DELETE CASCADE,
-  CONSTRAINT FK_YeuCauVaoDoi_NguoiDung FOREIGN KEY (MaNguoiDung) REFERENCES NguoiDung(MaNguoiDung) ON DELETE CASCADE,
-  UNIQUE KEY UQ_YeuCauVaoDoi_Pending (MaDoi, MaNguoiDungPending),
-  KEY IDX_YeuCauVaoDoi_DoiTrangThai (MaDoi, TrangThai, NgayTao),
-  KEY IDX_YeuCauVaoDoi_NguoiTrangThai (MaNguoiDung, TrangThai)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Mỗi người chỉ được một báo cáo trên mỗi đối tượng; UNIQUE hiện hữu được giữ nguyên.
+-- BaoCaoViPham: mỗi câu một thay đổi (UQ_BaoCao_Moi đã có sẵn, không cần procedure)
 ALTER TABLE BaoCaoViPham
-  MODIFY LoaiDoiTuong ENUM('event','player_post','team') NOT NULL DEFAULT 'event',
-  MODIFY TrangThai ENUM('pending','upheld','dismissed','rejected') NOT NULL DEFAULT 'pending',
+  MODIFY LoaiDoiTuong ENUM('event','player_post','team') NOT NULL DEFAULT 'event';
+ALTER TABLE BaoCaoViPham
+  MODIFY TrangThai ENUM('pending','upheld','dismissed','rejected') NOT NULL DEFAULT 'pending';
+ALTER TABLE BaoCaoViPham
   MODIFY HanhDong ENUM('none','hide','cancel','remove') NULL;
 
-
-DELIMITER $$
-DROP PROCEDURE IF EXISTS migration_g8_community_unique_report$$
-CREATE PROCEDURE migration_g8_community_unique_report()
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='BaoCaoViPham' AND INDEX_NAME='UQ_BaoCao_Moi'
-  ) THEN
-    ALTER TABLE BaoCaoViPham
-      ADD UNIQUE KEY UQ_BaoCao_Moi (MaNguoiBaoCao, LoaiDoiTuong, MaDoiTuong);
-  END IF;
-END$$
-CALL migration_g8_community_unique_report()$$
-DROP PROCEDURE migration_g8_community_unique_report$$
-DELIMITER ;
-
+-- ThongBao: giữ nguyên thứ tự cũ, chỉ nối thêm giá trị mới ở CUỐI
 ALTER TABLE ThongBao
   MODIFY Loai ENUM(
-    'booking_created','payment_success','payment_failed','booking_cancelled','new_booking_for_owner','system',
-    'refund_requested','refund_completed','complaint_received','complaint_resolved','owner_warning','owner_banned',
-    'review_received','review_replied','review_hidden','review_sent','review_reminder',
-    'refund_reminder','refund_escalated','refund_received','refund_not_received','hold_expiring','confirm_expiring','checkin_success',
-    'event_registered','event_accepted','event_rejected','event_removed','event_updated','event_cancelled','event_reminder','event_hidden',
-    'event_payment_submitted','event_payment_confirmed','event_payment_rejected','event_payment_expired',
+    'booking_created','payment_success','payment_failed',
+    'booking_cancelled','new_booking_for_owner','system',
+    'refund_requested','refund_completed','complaint_received',
+    'complaint_resolved','owner_warning','owner_banned',
+    'review_received','review_replied','review_hidden','review_sent',
+    'review_reminder',
+    'refund_reminder','refund_escalated','refund_received','refund_not_received',
+    'hold_expiring','confirm_expiring','checkin_success',
+    'event_registered','event_accepted','event_rejected','event_removed',
+    'event_updated','event_cancelled','event_reminder','event_hidden',
+    'event_payment_submitted','event_payment_confirmed','event_payment_rejected',
+    'event_payment_expired',
+    'refund_expiring','booking_moved','payment_auto_confirmed',
+    -- mới (G8)
     'post_joined','post_left','post_cancelled','post_ended','member_removed',
     'team_request','team_accepted','team_rejected','team_disbanded','team_owner_changed',
     'community_hidden','community_removed','report_processed'
-  ) NOT NULL,
+  ) NOT NULL;
+
+ALTER TABLE ThongBao
   MODIFY LoaiThamChieu ENUM('booking','payment','venue','complaint','event','registration','player_post','team') NULL;
 
 INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES

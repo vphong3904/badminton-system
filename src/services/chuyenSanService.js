@@ -19,10 +19,8 @@ const SQL_KHOA_DOT = `CASE
     ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh = d.MaLichCoDinh)
   END`;
 const NOI_THANH_TOAN = `
-  LEFT JOIN ThanhToan t ON t.MaDatSan = CASE
-    WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-    ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh = d.MaLichCoDinh)
-  END`;
+  LEFT JOIN (SELECT MaLichCoDinh, MIN(MaDatSan) AS MaDatSanDau FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) lf ON lf.MaLichCoDinh=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE lf.MaDatSanDau END`;
 
 const dinhDangNgayVn = (ngay) => String(ngay).slice(0, 10).split('-').reverse().join('/');
 

@@ -66,8 +66,8 @@ INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
 -- ---------------------------------------------------------------------
 -- Tài khoản admin (MaNguoiDung = 1)
 -- ---------------------------------------------------------------------
-INSERT INTO NguoiDung (HoTen, Email, MatKhauMaHoa, VaiTro)
-VALUES ('Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 'admin');
+INSERT INTO NguoiDung (MaNguoiDung, HoTen, Email, MatKhauMaHoa, VaiTro)
+VALUES (1, 'Quản trị viên', 'admin@badminton.local', 'CHANGE_ME_BCRYPT_HASH', 'admin');
 
 -- Cập nhật mật khẩu admin (seed trong schema đang là CHANGE_ME_BCRYPT_HASH)
 UPDATE NguoiDung

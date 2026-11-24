@@ -69,10 +69,8 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
       `SELECT t.TrangThai AS trangThai,
          DATE_FORMAT(t.HanXacNhan, '%H:%i %d/%m/%Y') AS hanXacNhan,
          (t.HanXacNhan IS NOT NULL AND t.HanXacNhan < NOW()) AS daQuaHan
-       FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       FROM DatSan d LEFT JOIN (SELECT MaLichCoDinh, MIN(MaDatSan) AS MaDatSanDau FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) lf ON lf.MaLichCoDinh=d.MaLichCoDinh
+     JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE lf.MaDatSanDau END
        WHERE d.MaDatSan=?`, [maDatSan]);
     const dangChoDuyet = thanhToan?.trangThai === 'confirming';
     if (dangChoDuyet && !Number(thanhToan.daQuaHan)) {
@@ -320,10 +318,8 @@ async function lietKeKhieuNai({ trangThai = 'pending', gioiHan = 50 } = {}) {
        JOIN NguoiDung cu ON cu.MaNguoiDung=k.MaChuSan
        JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
        LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung=k.MaChuSan
-       LEFT JOIN ThanhToan t ON t.MaDatSan=CASE
-         WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
-         ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
-       END
+       LEFT JOIN (SELECT MaLichCoDinh, MIN(MaDatSan) AS MaDatSanDau FROM DatSan WHERE MaLichCoDinh IS NOT NULL GROUP BY MaLichCoDinh) lf ON lf.MaLichCoDinh=d.MaLichCoDinh
+     LEFT JOIN ThanhToan t ON t.MaDatSan=CASE WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan) ELSE lf.MaDatSanDau END
        LEFT JOIN HoanTien ht ON ht.MaHoanTien=k.MaHoanTien
        LEFT JOIN Gay g ON g.MaKhieuNai=k.MaKhieuNai
      WHERE k.DaXoa=0 AND (? = 'all' OR k.TrangThai = ?)
