@@ -36,8 +36,9 @@ exports.taoDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
 
 // Chủ sân huỷ đơn đã đặt: khách được hoàn 100% (vào hàng đợi hoàn tiền của chủ sân).
 exports.huyDon = xuLyBatDongBo(async (yeuCau, phanHoi) => {
-  const r = await dichVu.huyDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo);
-  await phatCapNhatDatSan(yeuCau.params.maDatSan); thanhCong(phanHoi, r);
+  const r = await dichVu.huyDon(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body.lyDo, yeuCau.body.cacBuoi);
+  // Huỷ một phần / cả lịch cố định: phát cập nhật cho MỌI buổi vừa huỷ (không chỉ đơn trên URL).
+  await phatNhieuCapNhatDatSan([yeuCau.params.maDatSan, ...(r.cacBuoiDaHuy || [])]); thanhCong(phanHoi, r);
 });
 
 // Đơn chủ sân tự tạo: đánh dấu đã thu tiền ngoài hệ thống / huỷ (không hoàn tiền).

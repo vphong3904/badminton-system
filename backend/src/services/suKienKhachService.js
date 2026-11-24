@@ -173,7 +173,8 @@ async function lietKeSuKien({
          ELSE (SELECT SUM(hm.SoLuongToiDa) FROM HangMucSuKien hm WHERE hm.MaSuKien = sk.MaSuKien) END AS soLuongToiDa,
        (SELECT COUNT(*) FROM DangKySuKien dk WHERE dk.MaSuKien = sk.MaSuKien AND dk.TrangThai = 'accepted') AS soDaNhan,
        (SELECT COUNT(*) FROM DangKySuKien dk WHERE dk.MaSuKien = sk.MaSuKien AND dk.TrangThai = 'pending') AS soChoDuyet,
-       (SELECT COUNT(*) FROM HangMucSuKien hm WHERE hm.MaSuKien = sk.MaSuKien) AS soHangMuc
+       (SELECT COUNT(*) FROM HangMucSuKien hm WHERE hm.MaSuKien = sk.MaSuKien) AS soHangMuc,
+       EXISTS(SELECT 1 FROM KhoaSan ks WHERE ks.MaSuKien = sk.MaSuKien) AS coSanDaGiu
      FROM SuKien sk JOIN CoSo cs ON cs.MaCoSo = sk.MaCoSo
        JOIN NguoiDung nd ON nd.MaNguoiDung = sk.MaChuSan
      WHERE ${where}

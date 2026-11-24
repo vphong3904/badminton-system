@@ -3,13 +3,15 @@ const cauHinh = require('../config/env');
 const hoanTienService = require('../services/hoanTienService');
 
 // Job nền (G4.5): hạn hoàn tiền. Giờ so sánh là NOW() của MySQL.
-//  - Khoản `processing`/`not_received` quá HanHoan (= lúc tạo + refund_deadline_hours) → nhắc chủ sân (1 lần).
-//  - Quá HanHoan + refund_grace_hours mà vẫn chưa hoàn → `escalated` + báo Admin (thang bậc khóa nhận đặt mới: G5).
+//  - G9.C5: chu kỳ 1 phút. Khoản `processing`/`not_received` còn hạn → nhắc chủ sân theo mốc (`refund_expiring`:
+//    hạn dài 1440/360/60, hạn ngắn 20/10/5 phút trước HanHoan).
+//  - Qua HanHoan + refund_overdue_grace_minutes (mặc định 0) → `escalated` NGAY + báo Admin, khách, chủ sân
+//    (thang bậc khóa nhận đặt mới: G5). Chủ sân vẫn hoàn được khi escalated.
 let dangChay = false;
 
 const chayMotLan = () => thucHienGiaoDich((ketNoi) => hoanTienService.chayJobHanHoan(ketNoi));
 
-// Chạy định kỳ bằng setInterval (mặc định 10 phút, đổi bằng JOB_HAN_HOAN_PHUT). Không chạy khi NODE_ENV=test.
+// Chạy định kỳ bằng setInterval (mặc định 1 phút, đổi bằng JOB_HAN_HOAN_PHUT). Không chạy khi NODE_ENV=test.
 function batDauJob() {
   if (cauHinh.moiTruong === 'test') return null;
   const luot = async () => {

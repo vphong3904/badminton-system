@@ -5,6 +5,7 @@
 //  - Mới (khoảng): { tuNgay:'YYYY-MM-DD', denNgay?:'YYYY-MM-DD', gioBatDau:'HH:MM', gioKetThuc:'HH:MM' }
 //    Mỗi ngày trong khoảng [tuNgay, denNgay] khóa CÙNG khung giờ; denNgay bỏ trống = chỉ tuNgay.
 const AppError = require('./AppError');
+const { doiGioRaPhut, doiPhutRaGio } = require('./time');
 
 const SO_NGAY_TOI_DA = 90;
 const MOT_NGAY_MS = 24 * 60 * 60 * 1000;
@@ -57,4 +58,44 @@ function chuanHoaYeuCauKhoa(duLieu) {
   };
 }
 
-module.exports = { SO_NGAY_TOI_DA, laNgayHopLe, lietKeNgay, chuanHoaYeuCauKhoa };
+// G9.E: trừ các khoảng đang bận (đơn giữ chỗ, khóa sẵn có) khỏi [gioBatDau, gioKetThuc) của MỘT ngày.
+// Trả các khoảng TRỐNG theo thứ tự, dạng [{ gioBatDau:'HH:MM', gioKetThuc:'HH:MM' }]. Hàm thuần, không đụng DB.
+// cacKhoangBan: [{ gioBatDau, gioKetThuc }] ('HH:MM' hoặc 'HH:MM:SS'); khoảng ngoài cửa sổ hoặc chồng nhau đều được xử lý.
+function catKhungTrong(gioBatDau, gioKetThuc, cacKhoangBan) {
+  const dau = doiGioRaPhut(gioBatDau);
+  const cuoi = doiGioRaPhut(gioKetThuc);
+  const cacBan = cacKhoangBan
+    .map((k) => [Math.max(dau, doiGioRaPhut(k.gioBatDau)), Math.min(cuoi, doiGioRaPhut(k.gioKetThuc))])
+    .filter(([a, b]) => b > a)
+    .sort((x, y) => x[0] - y[0]);
+  const ketQua = [];
+  let conTu = dau;
+  for (const [a, b] of cacBan) {
+    if (a > conTu) ketQua.push({ gioBatDau: doiPhutRaGio(conTu), gioKetThuc: doiPhutRaGio(a) });
+    conTu = Math.max(conTu, b);
+  }
+  if (conTu < cuoi) ketQua.push({ gioBatDau: doiPhutRaGio(conTu), gioKetThuc: doiPhutRaGio(cuoi) });
+  return ketQua;
+}
+
+// G9.E2: một đơn vướng khung giờ khóa có thể chuyển sân / huỷ được không (hàm thuần).
+//  - Đã đến giờ chơi/đã qua, hoặc khách đã check-in: không đụng tới (khóa sẽ cắt quanh đơn).
+//  - Chuyển sân: khi còn ít nhất 1 sân thay thế trống (ưu tiên khách: chuyển trước, không tự huỷ).
+//  - Huỷ: CHỈ khi không còn sân để chuyển; và không huỷ được khi khách đã gửi ảnh chuyển khoản (`confirming`).
+function phanLoaiDonVuong({ daDenGio, trangThai, trangThaiThanhToan }, soSanThayThe) {
+  if (daDenGio || trangThai === 'checked_in') {
+    return { coTheChuyen: false, coTheHuy: false, lyDoKhongXuLy: 'Đơn đã đến giờ chơi hoặc đã qua, không thể chuyển hay huỷ.' };
+  }
+  const coTheChuyen = soSanThayThe > 0;
+  if (coTheChuyen) return { coTheChuyen: true, coTheHuy: false, lyDoKhongXuLy: null };
+  if (trangThaiThanhToan === 'confirming') {
+    return {
+      coTheChuyen: false,
+      coTheHuy: false,
+      lyDoKhongXuLy: 'Không còn sân trống để chuyển, và khách đã gửi ảnh chuyển khoản nên chưa huỷ được. Hãy xác nhận hoặc từ chối thanh toán trước.',
+    };
+  }
+  return { coTheChuyen: false, coTheHuy: true, lyDoKhongXuLy: null };
+}
+
+module.exports = { SO_NGAY_TOI_DA, laNgayHopLe, lietKeNgay, chuanHoaYeuCauKhoa, catKhungTrong, phanLoaiDonVuong };

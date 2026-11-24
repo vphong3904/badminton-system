@@ -34,7 +34,18 @@ chuSan.post('/dang-ky-su-kien/:maDangKy/thanh-toan/hoan-phi', kiemTraHopLe(kiemT
 
 // /api/khach/su-kien/* — danh sách/chi tiết cũng yêu cầu token customer theo hợp đồng API.
 const khach = require('express').Router();
-khach.use(xacThucNguoiDung, kiemTraVaiTro('customer'));
+
+khach.use(
+  '/su-kien',
+  xacThucNguoiDung,
+  kiemTraVaiTro('customer')
+);
+
+khach.use(
+  '/dang-ky-su-kien',
+  xacThucNguoiDung,
+  kiemTraVaiTro('customer')
+);
 khach.get('/su-kien', kiemTraHopLe(kiemTraDuLieu.danhSachKhach), dieuKhien.lietKeCongKhai);
 khach.get('/su-kien/:maSuKien', kiemTraHopLe(kiemTraDuLieu.chiTietKhach), dieuKhien.chiTietCongKhai);
 khach.post('/su-kien/:maSuKien/dang-ky', kiemTraHopLe(kiemTraDuLieu.dangKyKhach), dieuKhien.dangKy);

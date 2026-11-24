@@ -71,6 +71,15 @@ exports.xuLyKhieuNai = {
   }),
 };
 
+// G9.D3: thu hồi (xoá mềm) khiếu nại — BẮT BUỘC lý do (1–255 ký tự, lưu KhieuNai.LyDoXoa). Body của DELETE do JSON parser đọc.
+exports.thuHoiKhieuNai = {
+  params: z.object({ maKhieuNai: maSo }),
+  body: z.object({
+    lyDo: z.string({ error: 'Cần nêu lý do thu hồi khiếu nại.' })
+      .trim().min(3, 'Lý do tối thiểu 3 ký tự.').max(255, 'Lý do tối đa 255 ký tự.'),
+  }),
+};
+
 // G5.5: kháng nghị + khóa nhận đặt mới.
 exports.danhSachKhangNghi = {
   query: z.object({

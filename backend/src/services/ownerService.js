@@ -1,5 +1,6 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
+const { SAN_CHUA_XOA } = require('../utils/sanHienHanh');
 const { kiemTraKhungGia } = require('../utils/time');
 const { TAT_CA_THU, dongBangGia, COT_BANG_GIA } = require('../utils/giaTheoThu');
 const { thongBaoTheoTrangThai, layMucConThieuHoSo } = require('../utils/hoSoChuSan');
@@ -8,9 +9,9 @@ const { layToaDoTuLink } = require('../utils/toaDoBanDo');
 const sanCoSo = require('./sanCoSoService');
 const fs = require('fs/promises');
 const { ANH_MAC_DINH, luuAnh, xoaAnh } = require('../middlewares/upload');
-const { SLOT_BAN } = require('../utils/slot');
 const { chuanHoaYeuCauKhoa } = require('../utils/khoaSan');
 const nhatKy = require('./nhatKyService');
+const chuyenSan = require('./chuyenSanService');
 
 const TRANG_THAI_DUOC_SUA = ['rejected'];
 
@@ -36,8 +37,8 @@ const CHON_CO_SO = `
     cs.TrangThai AS trangThai,
     COALESCE((SELECT DuongDan FROM AnhCoSo WHERE MaCoSo = cs.MaCoSo AND LaAnhBia = 1
      ORDER BY ThuTu, MaAnh LIMIT 1), '${ANH_MAC_DINH.coso}') AS duongDanAnh,
-    (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo) AS soSan,
-    (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active') AS soSanHoatDong
+    (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo AND ${SAN_CHUA_XOA()}) AS soSan,
+    (SELECT COUNT(*) FROM San WHERE MaCoSo = cs.MaCoSo AND TrangThai = 'active' AND ${SAN_CHUA_XOA()}) AS soSanHoatDong
   FROM CoSo cs`;
 
 // Tất cả cơ sở của chủ sân (mới nhất ở cuối), kèm số sân.
@@ -450,7 +451,7 @@ async function lietKeSan(maChuSan, maCoSo) {
     `SELECT s.MaSan AS maSan, s.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo,
        s.TenSan AS tenSan, s.TrangThai AS trangThai
      FROM San s JOIN CoSo cs ON cs.MaCoSo = s.MaCoSo
-     WHERE cs.MaChuSan = ? ${maCoSo ? 'AND s.MaCoSo = ?' : ''}
+     WHERE cs.MaChuSan = ? AND ${SAN_CHUA_XOA('s')} ${maCoSo ? 'AND s.MaCoSo = ?' : ''}
      ORDER BY s.MaCoSo, s.MaSan`,
     maCoSo ? [maChuSan, maCoSo] : [maChuSan]);
   return cacSan;
@@ -479,7 +480,7 @@ async function laySanCuaChu(maChuSan, maSan) {
   const [[san]] = await pool.query(
     `SELECT s.MaSan AS maSan, s.MaCoSo AS maCoSo, s.TenSan AS tenSan, s.TrangThai AS trangThai
      FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     WHERE s.MaSan=? AND cs.MaChuSan=?`,
+     WHERE s.MaSan=? AND ${SAN_CHUA_XOA('s')} AND cs.MaChuSan=?`,
     [maSan, maChuSan]);
   if (!san) throw AppError.khongTimThay('Không tìm thấy sân');
   return san;
@@ -506,65 +507,127 @@ async function capNhatSan(maChuSan, maSan, duLieuSan) {
   return laySanCuaChu(maChuSan, maSan);
 }
 
-// Khóa sân theo khoảng ngày (Task 1.3): mỗi ngày 1 bản ghi KhoaSan cùng khung giờ.
-// Tất cả hoặc không: nếu BẤT KỲ ngày nào đã có đơn giữ slot trong khung giờ → 409, không ghi gì (không khóa đè đơn).
-// Ngày đã có khóa phủ kín khung giờ này thì bỏ qua (bấm lặp không sinh bản ghi trùng).
+// Xem trước khoá sân (G9.E2): các khung trống sẽ được khoá + các đơn vướng (kèm sân thay thế). Không ghi gì.
+async function xemTruocKhoaSan(maChuSan, truyVan) {
+  const san = await laySanCuaChu(maChuSan, truyVan.maSan);
+  const { cacNgay, gioBatDau, gioKetThuc } = chuanHoaYeuCauKhoa({
+    tuNgay: truyVan.tuNgay, denNgay: truyVan.denNgay, gioBatDau: truyVan.gioBatDau, gioKetThuc: truyVan.gioKetThuc,
+  });
+  const { cacDonVuong, cacKhungTrong } = await chuyenSan.tinhKhungKhoa(pool, san, cacNgay, gioBatDau, gioKetThuc);
+  const cacDon = [];
+  for (const don of cacDonVuong) cacDon.push(await chuyenSan.moTaDonVuong(pool, san, don));
+  return { cacKhungTrong, cacDonVuong: cacDon };
+}
+
+// Khóa sân theo khoảng ngày (Task 1.3, đổi ở G9.E3): KHÔNG còn 409 CONFLICT.
+// Mặc định chỉ khoá PHẦN TRỐNG: khung giờ yêu cầu được cắt quanh các đơn đang giữ slot và khóa sẵn có → nhiều dòng KhoaSan / ngày.
+// `xuLyDonVuong` [{ maDatSan, hanhDong:'chuyen-san'|'huy', maSanMoi?, lyDo? }]: xử lý các đơn đó rồi khoá, CÙNG MỘT giao dịch.
+// Đơn vướng không có trong danh sách (hoặc đã đến giờ chơi) giữ nguyên, khoá cắt quanh đơn và được trả lại ở `cacDonVuong`.
 async function taoKhoaSan(maChuSan, duLieuKhoa) {
   const san = await laySanCuaChu(maChuSan, duLieuKhoa.maSan);
   const { kieu, cacNgay, gioBatDau, gioKetThuc } = chuanHoaYeuCauKhoa(duLieuKhoa);
   const ngayDau = cacNgay[0];
   const ngayCuoi = cacNgay[cacNgay.length - 1];
+  const cacXuLy = duLieuKhoa.xuLyDonVuong || [];
+  const lyDoKhoa = duLieuKhoa.lyDo ?? null;
 
-  const cacKhoaMoi = await thucHienGiaoDich(async (ketNoi) => {
-    await ketNoi.query('SELECT MaSan FROM San WHERE MaSan=? FOR UPDATE', [san.maSan]);
-    const [cacDonTrung] = await ketNoi.query(
-      `SELECT DATE_FORMAT(NgayChoi, '%Y-%m-%d') AS ngay FROM DatSan
-       WHERE MaSan=? AND NgayChoi BETWEEN ? AND ?
-         AND ${SLOT_BAN()}
-         AND GioBatDau < ? AND GioKetThuc > ?
-       ORDER BY NgayChoi FOR UPDATE`,
-      [san.maSan, ngayDau, ngayCuoi, gioKetThuc, gioBatDau]);
-    if (cacDonTrung.length) {
-      const cacNgayTrung = [...new Set(cacDonTrung.map((don) => don.ngay))];
-      const hienThi = cacNgayTrung.slice(0, 5).join(', ') + (cacNgayTrung.length > 5 ? ` và ${cacNgayTrung.length - 5} ngày khác` : '');
-      throw new AppError(409, `Khung giờ này đã có khách đặt vào ngày ${hienThi}, hãy hủy đơn trước khi khóa`,
-        'CONFLICT', { cacNgayTrung });
+  const ketQua = await thucHienGiaoDich(async (ketNoi) => {
+    // Có chuyển sân → khoá mọi sân cùng cơ sở theo thứ tự mã (tránh deadlock); không thì chỉ khoá sân này.
+    if (cacXuLy.length) {
+      await ketNoi.query(`SELECT MaSan FROM San WHERE MaCoSo=? AND ${SAN_CHUA_XOA()} ORDER BY MaSan FOR UPDATE`, [san.maCoSo]);
+    } else {
+      await ketNoi.query('SELECT MaSan FROM San WHERE MaSan=? FOR UPDATE', [san.maSan]);
     }
-    const [cacKhoaCo] = await ketNoi.query(
-      `SELECT DATE_FORMAT(NgayKhoa, '%Y-%m-%d') AS ngay FROM KhoaSan
-       WHERE MaSan=? AND NgayKhoa BETWEEN ? AND ? AND GioBatDau <= ? AND GioKetThuc >= ?`,
-      [san.maSan, ngayDau, ngayCuoi, gioBatDau, gioKetThuc]);
-    const daKhoa = new Set(cacKhoaCo.map((khoa) => khoa.ngay));
-    const ketQuaGhi = [];
-    for (const ngay of cacNgay.filter((n) => !daKhoa.has(n))) {
+    const cacBuoiDaChuyen = [];
+    const cacBuoiDaHuy = [];
+    if (cacXuLy.length) {
+      const dau = await chuyenSan.tinhKhungKhoa(ketNoi, san, cacNgay, gioBatDau, gioKetThuc, { khoa: true });
+      const theoMa = new Map(dau.cacDonVuong.map((don) => [don.maDatSan, don]));
+      const khongThuoc = cacXuLy.filter((x) => !theoMa.has(Number(x.maDatSan))).map((x) => Number(x.maDatSan));
+      if (khongThuoc.length) {
+        throw new AppError(409, 'Có đơn không vướng khung giờ khoá (hoặc không thuộc sân này).', 'BOOKING_NOT_IN_RANGE', { cacMaDatSan: khongThuoc });
+      }
+      const cacDonXuLy = cacXuLy
+        .map((x) => ({ ...x, don: theoMa.get(Number(x.maDatSan)) }))
+        .sort((x, y) => (x.don.ngay + x.don.gioBatDau).localeCompare(y.don.ngay + y.don.gioBatDau) || x.don.maDatSan - y.don.maDatSan);
+      const daDenGio = cacDonXuLy.filter((x) => x.don.daDenGio).map((x) => x.don.maDatSan);
+      if (daDenGio.length) {
+        throw new AppError(409, 'Có đơn đã đến giờ chơi hoặc đã qua, không thể chuyển hay huỷ.', 'BOOKING_STARTED', { cacMaDatSan: daDenGio });
+      }
+      const uuTienTheoDot = new Map();
+      for (const { don, hanhDong, maSanMoi, lyDo } of cacDonXuLy) {
+        if (hanhDong === 'huy') {
+          if (don.trangThaiThanhToan === 'confirming') {
+            throw new AppError(409, 'Khách đã gửi ảnh chuyển khoản. Hãy xác nhận hoặc từ chối thanh toán trước khi huỷ đơn.', 'PAYMENT_CONFIRMING', { maDatSan: don.maDatSan });
+          }
+          cacBuoiDaHuy.push(await chuyenSan.huyDonKhiKhoaSan(ketNoi, { san, don, lyDo }));
+          continue;
+        }
+        const daChuyen = await chuyenSan.chuyenMotBuoi(ketNoi, san, don, { maSanMoi, uuTien: uuTienTheoDot.get(don.khoaDot) ?? null });
+        if (daChuyen) {
+          uuTienTheoDot.set(don.khoaDot, daChuyen.maSanMoi);
+          cacBuoiDaChuyen.push(daChuyen);
+        } else if (don.trangThaiThanhToan === 'confirming') {
+          throw new AppError(409, 'Hết sân trống để chuyển và khách đã gửi ảnh chuyển khoản nên chưa huỷ được. Hãy xác nhận hoặc từ chối thanh toán trước.', 'PAYMENT_CONFIRMING', { maDatSan: don.maDatSan });
+        } else {
+          // Hết sân trống → rơi về huỷ (E5), hoàn 100%. Lý do bắt buộc: dùng lý do của đơn, không có thì lý do khoá sân.
+          cacBuoiDaHuy.push(await chuyenSan.huyDonKhiKhoaSan(ketNoi, { san, don, lyDo: lyDo || lyDoKhoa }));
+        }
+      }
+    }
+    // E5: hoàn tiền 100% (closure) theo đợt thanh toán, thông báo khách, nhật ký cho các buổi vừa huỷ.
+    const ketQuaHuy = await chuyenSan.hoanTatHuyKhiKhoaSan(ketNoi, {
+      maChuSan, san, tenCoSo: (await ketNoi.query('SELECT TenCoSo AS tenCoSo FROM CoSo WHERE MaCoSo=?', [san.maCoSo]))[0][0].tenCoSo,
+      cacBuoiDaHuy, lyDoKhoa,
+    });
+    // Tính lại sau khi đã chuyển/huỷ rồi mới khoá phần còn trống.
+    const { cacKhungTrong } = await chuyenSan.tinhKhungKhoa(ketNoi, san, cacNgay, gioBatDau, gioKetThuc, { khoa: true });
+    const cacKhoaMoi = [];
+    for (const khung of cacKhungTrong) {
       const [mucKhoa] = await ketNoi.query(
         'INSERT INTO KhoaSan (MaSan, NgayKhoa, GioBatDau, GioKetThuc, LyDo) VALUES (?,?,?,?,?)',
-        [san.maSan, ngay, gioBatDau, gioKetThuc, duLieuKhoa.lyDo ?? null]);
-      ketQuaGhi.push({ maKhoa: mucKhoa.insertId, ngay });
+        [san.maSan, khung.ngay, khung.gioBatDau, khung.gioKetThuc, lyDoKhoa]);
+      cacKhoaMoi.push({ maKhoa: mucKhoa.insertId, ...khung });
     }
-    return ketQuaGhi;
+    if (cacBuoiDaChuyen.length) {
+      const [[coSoDon]] = await ketNoi.query('SELECT TenCoSo AS tenCoSo FROM CoSo WHERE MaCoSo=?', [san.maCoSo]);
+      await chuyenSan.baoKhachDaChuyen(ketNoi, cacBuoiDaChuyen, coSoDon.tenCoSo);
+      await chuyenSan.ghiNhatKyChuyen(ketNoi, maChuSan, cacBuoiDaChuyen, lyDoKhoa);
+    }
+    const { cacDonVuong } = await chuyenSan.tinhKhungKhoa(ketNoi, san, cacNgay, gioBatDau, gioKetThuc);
+    const cacDonConLai = [];
+    for (const don of cacDonVuong) cacDonConLai.push(await chuyenSan.moTaDonVuong(ketNoi, san, don));
+    return { cacKhoaMoi, cacBuoiDaChuyen, cacDonDaHuy: ketQuaHuy.cacDonDaHuy, tongTienHoan: ketQuaHuy.tongTienHoan, cacDonConLai };
   });
 
+  const { cacKhoaMoi, cacBuoiDaChuyen, cacDonDaHuy, tongTienHoan, cacDonConLai } = ketQua;
+  const cacDonDaChuyen = cacBuoiDaChuyen.map((b) => ({
+    maDatSan: b.maDatSan, maDon: b.maDon, ngay: b.ngay, gioBatDau: b.gioBatDau, gioKetThuc: b.gioKetThuc,
+    maSanCu: b.maSanCu, tenSanCu: b.tenSanCu, maSanMoi: b.maSanMoi, tenSanMoi: b.tenSanMoi,
+  }));
+  const chung = { cacKhoa: cacKhoaMoi, cacDonVuong: cacDonConLai, cacDonDaChuyen, cacDonDaHuy, tongTienHoan };
   if (kieu === 'mot-ngay') {
-    // Dạng cũ: giữ nguyên dạng trả về (web/app cũ không đổi).
+    // Dạng cũ: giữ các trường cũ (maKhoa = dòng khoá đầu tiên, null nếu cả khung đã có đơn/khoá sẵn).
     return {
       maKhoa: cacKhoaMoi[0]?.maKhoa ?? null,
       maSan: duLieuKhoa.maSan,
       thoiGianBatDau: `${ngayDau} ${gioBatDau}`,
       thoiGianKetThuc: `${ngayDau} ${gioKetThuc}`,
-      lyDo: duLieuKhoa.lyDo ?? null,
+      lyDo: lyDoKhoa,
+      ...chung,
     };
   }
+  const soNgayKhoa = new Set(cacKhoaMoi.map((khoa) => khoa.ngay)).size;
   return {
     maSan: duLieuKhoa.maSan,
     tuNgay: ngayDau,
     denNgay: ngayCuoi,
     gioBatDau,
     gioKetThuc,
-    lyDo: duLieuKhoa.lyDo ?? null,
-    soNgayKhoa: cacKhoaMoi.length,
-    soNgayBoQua: cacNgay.length - cacKhoaMoi.length,
-    cacKhoa: cacKhoaMoi,
+    lyDo: lyDoKhoa,
+    soNgayKhoa,
+    soNgayBoQua: cacNgay.length - soNgayKhoa,
+    ...chung,
   };
 }
 
@@ -576,7 +639,7 @@ async function lietKeKhoaSan(maChuSan, boLoc) {
       k.LyDo AS lyDo
     FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
       JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-    WHERE cs.MaChuSan=?`;
+    WHERE cs.MaChuSan=? AND ${SAN_CHUA_XOA('s')}`;
   if (boLoc.maSan) {
     truyVan += ' AND k.MaSan=?';
     thamSo.push(boLoc.maSan);
@@ -633,6 +696,7 @@ module.exports = {
   lietKeSan,
   taoSan,
   capNhatSan,
+  xemTruocKhoaSan,
   taoKhoaSan,
   lietKeKhoaSan,
   xoaKhoaSan,

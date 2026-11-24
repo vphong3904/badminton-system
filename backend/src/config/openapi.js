@@ -126,6 +126,9 @@ module.exports = {
     '/api/suc-khoe': {
       get: endpoint('Kiểm tra API đang hoạt động', 'Sức khỏe'),
     },
+    '/api/gio-may-chu': {
+      get: endpoint('Giờ máy chủ theo NOW() của MySQL (+07:00): {iso, epochMs, mui, ngay, gio}. Công khai; FE chỉ dùng để hiển thị/đếm ngược', 'Sức khỏe'),
+    },
     '/api/suc-khoe/co-so-du-lieu': {
       get: endpoint('Kiểm tra kết nối db_sancaulong', 'Sức khỏe'),
     },
@@ -211,7 +214,7 @@ module.exports = {
       get: endpoint('Xem chi tiết cơ sở (có `soPhutDatToiThieu` và `soPhutTreToiDa` để hiển thị trước khi đặt)', 'Khách hàng', { params: maCoSo }),
     },
     '/api/khach/co-so/{maCoSo}/lich-ngay': {
-      get: endpoint('Xem lịch các sân của cơ sở trong một ngày (khung đã đặt/bị khóa, bảng giá, `soPhutDatToiThieu`, `soPhutTreToiDa`)', 'Khách hàng', {
+      get: endpoint('Xem lịch các sân của cơ sở trong một ngày (khung đã đặt/bị khóa, bảng giá, `soPhutDatToiThieu`, `soPhutTreToiDa`); sân đã đóng hiện kèm `tamDong:true` và `cacKhungBan:[]` (G9.B2)', 'Khách hàng', {
         params: maCoSo,
         query: [thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD', true)],
       }),
@@ -227,7 +230,7 @@ module.exports = {
       }),
     },
     '/api/khach/san/{maSan}': {
-      get: endpoint('Xem chi tiết sân và bảng giá (có `soPhutDatToiThieu` và `soPhutTreToiDa` của cơ sở)', 'Khách hàng', { params: maSan }),
+      get: endpoint('Xem chi tiết sân và bảng giá (có `soPhutDatToiThieu` và `soPhutTreToiDa` của cơ sở); sân đã đóng trả 200 kèm `tamDong:true` thay vì 404 (G9.B2)', 'Khách hàng', { params: maSan }),
     },
     '/api/khach/san/{maSan}/lich-trong': {
       get: endpoint('Kiểm tra sân có trống trong khung giờ không', 'Khách hàng', {
@@ -241,7 +244,10 @@ module.exports = {
     },
     '/api/khach/dat-san': {
       post: endpoint('Đặt sân một lần (429 ABUSE_HOLD_BLOCKED nếu bị chặn do giữ sân ảo)', 'Khách hàng', { auth: true, body: 'DatSan' }),
-      get: endpoint('Xem lịch sử đặt sân', 'Khách hàng', { auth: true }),
+      get: endpoint('Xem lịch sử đặt sân. G9 thêm: maSanCu, tenSanCu, ngayChuyenSan, daChuyenSan, coTheTuChoiChuyenSan (nút "Từ chối chuyển sân" ở thẻ đơn; BE tính, 409 vẫn có thể xảy ra khi dữ liệu đổi); '
+        + 'loaiHoanTien (cancel|owner_cancel|closure|incident|overpay|late_proof|null), hanHoanPhut (số phút của hạn hoàn: cancel/overpay 4320, owner_cancel/closure/incident 30, '
+        + 'đã được Admin chấp nhận khiếu nại hoàn tiền thì refund_grace_hours×60; null khi không có khoản hoàn hoặc late_proof) và hanHoanChu ("3 ngày"/"30 phút"); '
+        + 'datGap (bool) + soPhutXacNhan (15|30; null khi đơn không còn chờ trả/chờ duyệt)', 'Khách hàng', { auth: true }),
     },
     '/api/khach/dat-san/co-dinh': {
       post: endpoint('Đặt sân cố định hằng ngày tối đa 90 ngày, thanh toán một hóa đơn tổng', 'Khách hàng', {
@@ -261,7 +267,8 @@ module.exports = {
     },
     '/api/khach/dat-san/{maDatSan}/hoa-don-nhap': {
       get: endpoint('Xem hóa đơn nháp và hướng dẫn thanh toán (đơn con bất kỳ của nhóm nhiều sân đều trả hóa đơn tổng của nhóm; có maNhomDat, conLaiGiay; '
-        + 'G2: đã gửi ảnh thì hetHanGiuCho/conLaiGiay = null, thêm hanXacNhan, conLaiXacNhanGiay, chungTu[] (các ảnh đã gửi, không có cảnh báo trùng ảnh), soAnhToiDa)', 'Khách hàng', { auth: true, params: maDatSan }),
+        + 'G2: đã gửi ảnh thì hetHanGiuCho/conLaiGiay = null, thêm hanXacNhan, conLaiXacNhanGiay, chungTu[] (các ảnh đã gửi, không có cảnh báo trùng ảnh), soAnhToiDa; '
+        + 'G9: datGap + soPhutXacNhan (15|30) do BE tính — chưa gửi ảnh: nếu gửi ngay bây giờ; đã gửi: theo lúc gửi ảnh đầu tiên của lượt chờ duyệt)', 'Khách hàng', { auth: true, params: maDatSan }),
     },
     '/api/khach/dat-san/{maDatSan}/huy-xem-truoc': {
       get: endpoint(
@@ -277,6 +284,14 @@ module.exports = {
         'Khách hàng',
         { auth: true, params: maDatSan }),
     },
+    '/api/khach/dat-san/{maDatSan}/tu-choi-chuyen-san': {
+      post: endpoint(
+        'Từ chối việc chủ sân chuyển sân (G9.E6): huỷ các buổi ĐÃ BỊ CHUYỂN SÂN (MaSanCu khác NULL), còn hiệu lực, chưa tới giờ chơi của đợt chứa đơn, '
+        + 'hoàn 100% NGAY (HoanTien.Loai=closure, hạn 30 phút), không áp chính sách 24h/12h, không bắt nhập tài khoản nhận hoàn. '
+        + 'Lỗi 409: BOOKING_NOT_MOVED, BOOKING_STARTED, PAYMENT_CONFIRMING, REFUND_PENDING, PARTIAL_CANCEL_UNPAID',
+        'Khách hàng',
+        { auth: true, params: maDatSan, responses: { 409: response.Loi } }),
+    },
     '/api/khach/dat-san/{maDatSan}/check-in': {
       post: endpoint(
         'G3 – Khách quét QR check-in tại sân (mỗi đơn con check-in riêng). Body {maSan, token, phienBan} tách từ QR "bc1:<maSan>:<phienBan>:<token>", '
@@ -289,14 +304,14 @@ module.exports = {
     },
     '/api/khach/dat-san/{maDatSan}/khieu-nai': {
       post: endpoint(
-        'Khách khiếu nại chủ sân CHẬM DUYỆT thanh toán (chỉ khi đã gửi ảnh chuyển khoản mà chủ sân chưa duyệt quá 30 phút; mỗi đơn 1 lần; trả 201). Đơn đã duyệt không khiếu nại được',
+        'Khách khiếu nại chủ sân CHẬM DUYỆT thanh toán (chỉ khi đã gửi ảnh chuyển khoản mà chủ sân chưa duyệt và đã quá hạn xác nhận thật `ThanhToan.HanXacNhan` (G9.C8); mỗi đơn 1 lần; trả 201). Đơn đã duyệt không khiếu nại được',
         'Khách hàng',
         { auth: true, params: maDatSan, body: 'KhieuNaiMoi', responses: { 404: response.Loi, 409: response.Loi } }),
     },
     '/api/khach/hoan-tien/{maHoanTien}/khieu-nai': {
       post: endpoint(
-        'Khách báo CHƯA NHẬN ĐƯỢC TIỀN HOÀN (khiếu nại gửi chủ sân + Admin). Chỉ khi chủ sân chưa chuyển hoàn quá refund_complaint_wait_minutes (30 phút) kể từ lúc huỷ. '
-        + 'Body {lyDo 10–800}. Trả 201 {maKhieuNai, maKhieuNaiHienThi, trangThai}. 400 chưa đủ 30 phút; 409 đã khiếu nại / khoản hoàn đã chuyển',
+        'Khách báo CHƯA NHẬN ĐƯỢC TIỀN HOÀN (khiếu nại gửi chủ sân + Admin). Chỉ khi khoản hoàn đã quá hạn thật `HoanTien.HanHoan` (G9.C8: huỷ bởi khách 3 ngày; chủ sân huỷ/đóng sân/sự cố 30 phút) mà chủ sân chưa chuyển hoàn. '
+        + 'Body {lyDo 10–800}. Trả 201 {maKhieuNai, maKhieuNaiHienThi, trangThai}. 400 chưa quá HanHoan (hoặc khoản hoàn chưa có hạn); 409 đã khiếu nại / khoản hoàn đã chuyển',
         'Khách hàng', { auth: true, params: [thamSoDuongDan('maHoanTien')], responses: { 404: response.Loi, 409: response.Loi } }),
     },
     '/api/khach/bao-cao': {
@@ -409,7 +424,7 @@ module.exports = {
       patch: endpoint('Đóng tạm sân (409 HAS_ACTIVE_BOOKINGS nếu còn khách/lịch cố định; HAS_ACTIVE_EVENTS nếu còn sự kiện sắp diễn ra)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
     },
     '/api/chu-san/san/{maSan}/mo': {
-      patch: endpoint('Bật sân (chưa hoạt động/đã đóng → active); sân đầu tiên được bật thì cơ sở tự hiện cho khách nếu đã có bảng giá', 'Chủ sân', { auth: true, params: maSan }),
+      patch: endpoint('Bật sân (chưa hoạt động/đã đóng → active); 409 NO_PRICE_TABLE nếu cơ sở chưa có bảng giá; sân đầu tiên được bật thì cơ sở tự hiện cho khách', 'Chủ sân', { auth: true, params: maSan, responses: { 409: response.Loi } }),
     },
     '/api/chu-san/dang-ky': {
       get: endpoint('Xem tiến độ đăng ký chủ sân', 'Chủ sân', { auth: true }),
@@ -472,7 +487,7 @@ module.exports = {
     },
     '/api/chu-san/san/{maSan}': {
       patch: endpoint('Cập nhật sân; chuyển sang maintenance bị chặn 409 HAS_ACTIVE_EVENTS nếu sân còn sự kiện sắp diễn ra', 'Chủ sân', { auth: true, params: maSan, body: 'CapNhatSan', responses: { 409: response.Loi } }),
-      delete: endpoint('Xoá sân (phải đóng trước; 409 HAS_ACTIVE_EVENTS nếu còn sự kiện sắp diễn ra)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
+      delete: endpoint('Xoá MỀM sân (G9.F3: DaXoa=1, vẫn giữ đơn/báo cáo cũ; sân đã từng có đơn xoá được; phải đóng trước; 409 HAS_ACTIVE_BOOKINGS / HAS_ACTIVE_EVENTS nếu còn đơn, lịch cố định hoặc sự kiện sắp diễn ra; sân đã xoá → 404; tên sân được dùng lại)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
     },
     '/api/chu-san/khoa-san': {
       get: endpoint('Liệt kê khung giờ khóa sân', 'Chủ sân', {
@@ -483,7 +498,20 @@ module.exports = {
           thamSoTruyVan('denNgay', 'Thời gian kết thúc lọc'),
         ],
       }),
-      post: endpoint('Khóa khung giờ sân (1 ngày hoặc khoảng ngày)', 'Chủ sân', { auth: true, body: 'KhoaSan' }),
+      post: endpoint('Khóa khung giờ sân (1 ngày hoặc khoảng ngày). Không còn 409 CONFLICT: mặc định chỉ khoá phần trống (cắt quanh đơn/khóa sẵn có) và trả `cacDonVuong`; kèm `xuLyDonVuong` để chuyển sân/huỷ đơn vướng cùng giao dịch (G9.E3). Nhánh `huy` (G9.E5): chỉ khi không còn sân để chuyển, lý do bắt buộc, hoàn 100% (HoanTien.Loai=closure, hạn 30 phút) gom 1 khoản/đợt thanh toán; trả `cacDonDaHuy` + `tongTienHoan`. Lỗi 409: BOOKING_NOT_IN_RANGE, BOOKING_STARTED (đã đến giờ/đã check-in), PAYMENT_CONFIRMING, TARGET_COURT_UNAVAILABLE, REFUND_PENDING (đợt còn khoản hoàn chưa xong), PARTIAL_CANCEL_UNPAID (khách chưa trả, chỉ huỷ trọn đợt)', 'Chủ sân', { auth: true, body: 'KhoaSan', responses: { 409: response.Loi } }),
+    },
+    '/api/chu-san/khoa-san/xem-truoc': {
+      get: endpoint('Xem trước khoá sân (G9.E2): `cacKhungTrong` (khung sẽ được khoá, theo ngày) + `cacDonVuong` (đơn vướng kèm `coTheChuyen`, `coTheHuy`, `cacSanThayThe`). Không ghi gì', 'Chủ sân', {
+        auth: true,
+        query: [
+          thamSoTruyVan('maSan', 'Mã sân (bắt buộc)'),
+          thamSoTruyVan('tuNgay', 'Ngày bắt đầu YYYY-MM-DD (bắt buộc)'),
+          thamSoTruyVan('denNgay', 'Ngày kết thúc YYYY-MM-DD; bỏ trống = chỉ tuNgay (tối đa 90 ngày)'),
+          thamSoTruyVan('gioBatDau', 'Giờ bắt đầu mỗi ngày HH:MM (bắt buộc)'),
+          thamSoTruyVan('gioKetThuc', 'Giờ kết thúc mỗi ngày HH:MM (bắt buộc)'),
+        ],
+        responses: { 404: response.Loi },
+      }),
     },
     '/api/chu-san/khoa-san/{maKhoa}': {
       delete: endpoint('Xóa khung giờ khóa sân; khóa do sự kiện trả 409 EVENT_LOCK_PROTECTED', 'Chủ sân', {
@@ -534,7 +562,7 @@ module.exports = {
           thamSoTruyVan('denNgay', 'Ngày chơi đến YYYY-MM-DD'),
           thamSoTruyVan('tuKhoa', 'Tìm theo mã đơn / tên / SĐT khách'),
           thamSoTruyVan('trang', 'Trang (mặc định 1, 20 đơn/trang)'),
-          thamSoTruyVan('sapXep', 'moi-nhat (mặc định: ngày chơi mới nhất trước, cũ nhất cuối) | cu-nhat | han-xac-nhan (G2: hàng đợi duyệt thanh toán, sắp hết hạn/quá hạn lên đầu)'),
+          thamSoTruyVan('sapXep', 'moi-nhat (mặc định: ngày chơi mới nhất trước, cũ nhất cuối) | cu-nhat | han-xac-nhan (G2: hàng đợi duyệt thanh toán, sắp hết hạn/quá hạn lên đầu) | thanh-toan-moi-nhat | thanh-toan-cu-nhat (G9.A2: theo giờ thu tiền, đơn chưa có giờ xuống cuối)'),
         ],
       }),
       post: endpoint('Chủ sân tạo đơn cho khách tại chỗ (1 ngày) hoặc khách cố định (có ngayKetThuc) — xác nhận ngay', 'Chủ sân', {
@@ -580,9 +608,26 @@ module.exports = {
       }),
     },
     '/api/chu-san/khieu-nai/{maKhieuNai}/khang-nghi': {
-      post: endpoint('Chủ sân kháng nghị 1 lần quyết định chấp nhận khiếu nại, trong appeal_hours (48h) kể từ lúc Admin xử lý (body {noiDung 10–1000}); gậy → appealed, báo Admin. Lỗi: APPEAL_NOT_ALLOWED, APPEAL_ALREADY_SENT (409), APPEAL_EXPIRED (400)', 'Chủ sân', {
-        auth: true, params: [thamSoDuongDan('maKhieuNai')], responses: { 404: response.Loi, 409: response.Loi },
-      }),
+      post: {
+        ...endpoint('Chủ sân kháng nghị 1 lần quyết định chấp nhận khiếu nại, trong appeal_hours (24h, G9.C) kể từ lúc Admin xử lý. G9.C9: multipart — noiDung 10–1000 ký tự + anhBangChung (1–3 ảnh jpg/png/webp ≤5MB, bắt buộc ≥1); gậy → appealed, báo Admin. Trả {maKhangNghi, maKhieuNai, trangThai, bangChung[]}. Lỗi: 400 thiếu/quá số ảnh hoặc APPEAL_EXPIRED, APPEAL_NOT_ALLOWED, APPEAL_ALREADY_SENT (409)', 'Chủ sân', {
+          auth: true, params: [thamSoDuongDan('maKhieuNai')], responses: { 404: response.Loi, 409: response.Loi },
+        }),
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['noiDung', 'anhBangChung'],
+                properties: {
+                  noiDung: { type: 'string', minLength: 10, maxLength: 1000 },
+                  anhBangChung: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'string', format: 'binary' } },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     '/api/chu-san/dat-san/{maDatSan}/huy': {
       patch: endpoint('Chủ sân huỷ đơn do mình tạo (không hoàn tiền, giải phóng lịch; ?tatCaBuoi=true: cả lịch cố định). Đơn app → 409', 'Chủ sân', {
@@ -591,7 +636,7 @@ module.exports = {
         query: [thamSoTruyVan('tatCaBuoi', 'true = huỷ mọi buổi chưa chơi của lịch cố định (mặc định 1 buổi)')],
         responses: { 404: response.Loi, 409: response.Loi },
       }),
-      post: endpoint('Chủ sân huỷ đơn đã đặt (kèm lý do) → khách được hoàn 100%, vào hàng đợi hoàn tiền', 'Chủ sân', {
+      post: endpoint('Chủ sân huỷ đơn đã đặt (kèm lý do) → khách được hoàn 100%, vào hàng đợi hoàn tiền (hạn 30 phút). G9.D1: body thêm cacBuoi[] (tuỳ chọn) = huỷ MỘT PHẦN các buổi chọn, cùng đợt thanh toán, chưa tới giờ chơi; hoàn = tổng TongTien các buổi chọn (100%, máy chủ tính). Trả thêm huyMotPhan, cacBuoiDaHuy[], soBuoiConLai. 409: PAYMENT_CONFIRMING, REFUND_PENDING, PARTIAL_CANCEL_UNPAID, BUOI_KHONG_HUY_DUOC, BUOI_DA_DEN_GIO; 400 BUOI_KHAC_DOT', 'Chủ sân', {
         auth: true,
         params: maDatSan,
         body: 'HuyDonChuSan',
@@ -645,6 +690,18 @@ module.exports = {
     },
     '/api/chu-san/bao-cao/doanh-thu': {
       get: endpoint('Báo cáo doanh thu theo ngày/tháng/năm hoặc khoảng ngày tự chọn (kèm tongCong)', 'Chủ sân', {
+        auth: true,
+        query: [
+          thamSoTruyVan('nam', 'Xem theo năm, vd 2026'),
+          thamSoTruyVan('thang', 'Xem theo tháng 1-12 (cần kèm nam)'),
+          thamSoTruyVan('tuNgay', 'Khoảng ngày tự chọn: từ YYYY-MM-DD (ưu tiên hơn nam/thang)'),
+          thamSoTruyVan('denNgay', 'Khoảng ngày tự chọn: đến YYYY-MM-DD'),
+          thamSoTruyVan('maCoSo', 'Chỉ tính 1 cơ sở'),
+        ],
+      }),
+    },
+    '/api/chu-san/bao-cao/doanh-thu-theo-san': {
+      get: endpoint('Doanh thu từng sân (G9.B1): cùng bộ lọc và quy tắc trừ hoàn như doanh-thu nên Σ các sân = tongCong.doanhThu; gồm sân đã đóng nếu có doanh thu; sắp doanhThu giảm dần', 'Chủ sân', {
         auth: true,
         query: [
           thamSoTruyVan('nam', 'Xem theo năm, vd 2026'),
@@ -723,10 +780,10 @@ module.exports = {
       patch: endpoint('Đóng tạm sân (cùng điều kiện với chủ sân; 409 HAS_ACTIVE_EVENTS nếu còn sự kiện sắp diễn ra)', 'Quản trị', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
     },
     '/api/quan-tri/san/{maSan}/mo': {
-      patch: endpoint('Mở lại sân', 'Quản trị', { auth: true, params: maSan }),
+      patch: endpoint('Mở lại sân (409 NO_PRICE_TABLE nếu cơ sở chưa có bảng giá)', 'Quản trị', { auth: true, params: maSan, responses: { 409: response.Loi } }),
     },
     '/api/quan-tri/san/{maSan}': {
-      delete: endpoint('Xoá sân (phải đóng trước; 409 HAS_ACTIVE_EVENTS nếu còn sự kiện sắp diễn ra)', 'Quản trị', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
+      delete: endpoint('Xoá MỀM sân (G9.F3: DaXoa=1, vẫn giữ đơn/báo cáo cũ; sân đã từng có đơn xoá được; phải đóng trước; 409 HAS_ACTIVE_BOOKINGS / HAS_ACTIVE_EVENTS nếu còn đơn, lịch cố định hoặc sự kiện sắp diễn ra; sân đã xoá → 404; tên sân được dùng lại)', 'Quản trị', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
     },
     '/api/quan-tri/co-so/{maCoSo}/dong': {
       patch: endpoint('Đóng tạm cơ sở (409 HAS_ACTIVE_EVENTS nếu còn sự kiện sắp diễn ra)', 'Quản trị', { auth: true, params: maCoSo, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
@@ -882,14 +939,25 @@ module.exports = {
           responses: { 404: response.Loi, 409: response.Loi },
         }),
     },
+    '/api/quan-tri/khieu-nai/{maKhieuNai}': {
+      delete: endpoint(
+        'G9.D3 – Admin thu hồi (xoá MỀM) khiếu nại, body {lyDo} bắt buộc → {maKhieuNai, daThuHoi, soLanViPham, daMoKhoaChuSan}. Ẩn khỏi mọi danh sách. Nếu đã upheld: gậy → revoked, tính lại SoLanViPham, kháng nghị đang chờ → cancelled; chủ sân đang bị khoá CHỈ do đủ 3 gậy mà nay <3 → tự mở khoá và bật lại cơ sở hidden. Báo chủ sân + khách, ghi nhật ký thu_hoi_khieu_nai. 404; 409 COMPLAINT_ALREADY_DELETED',
+        'Quản trị',
+        {
+          auth: true,
+          params: [thamSoDuongDan('maKhieuNai')],
+          body: 'ThuHoiKhieuNai',
+          responses: { 404: response.Loi, 409: response.Loi },
+        }),
+    },
     '/api/quan-tri/khang-nghi': {
-      get: endpoint('Admin xem kháng nghị của chủ sân (kèm khiếu nại gốc, lý do + bằng chứng quyết định, giải trình)', 'Quản trị', {
+      get: endpoint('Admin xem kháng nghị của chủ sân (kèm khiếu nại gốc, lý do quyết định, giải trình). G9.C9: bangChung[] = ảnh chủ sân đính kèm kháng nghị (ảnh Admin đính kèm khi xử lý khiếu nại đổi tên bangChungQuanTri[]); thêm loaiKhieuNai, maHoanTien, trangThaiHoanTien, ngayKhachXacNhan, anhChungTuHoan', 'Quản trị', {
         auth: true,
         query: [thamSoTruyVan('trangThai', 'pending | accepted | rejected | all (mặc định pending)'), thamSoTruyVan('gioiHan', '1–100')],
       }),
     },
     '/api/quan-tri/khang-nghi/{maKhangNghi}/xu-ly': {
-      patch: endpoint('Admin xét kháng nghị (body {quyetDinh: accepted|rejected, ghiChu bắt buộc}): accepted → thu hồi gậy (revoked), rejected → giữ gậy. Trả canMoKhoaTaiKhoan khi tài khoản đang khóa mà đã dưới 3 gậy (Admin tự mở khóa)', 'Quản trị', {
+      patch: endpoint('Admin xét kháng nghị (body {quyetDinh: accepted|rejected, ghiChu bắt buộc}): accepted → thu hồi gậy (revoked), rejected → giữ gậy. G9.C9: kháng nghị khiếu nại hoàn tiền chỉ accepted được khi khách đã bấm đã nhận tiền hoặc có ảnh chứng từ hoàn, nếu không 409 APPEAL_REFUND_NOT_CONFIRMED. Trả canMoKhoaTaiKhoan khi tài khoản đang khóa mà đã dưới 3 gậy (Admin tự mở khóa)', 'Quản trị', {
         auth: true, params: [thamSoDuongDan('maKhangNghi')], responses: { 404: response.Loi, 409: response.Loi },
       }),
     },
@@ -949,7 +1017,7 @@ module.exports = {
     '/api/chu-san/dang-ky-su-kien/{maDangKy}/thanh-toan/xac-nhan': { post: endpoint('Chủ sân xác nhận đã nhận phí sự kiện', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], responses: { 409: response.Loi } }) },
     '/api/chu-san/dang-ky-su-kien/{maDangKy}/thanh-toan/tu-choi': { post: endpoint('Chủ sân từ chối chứng từ (bắt buộc lý do)', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], body: 'LyDoSuKien' }) },
     '/api/chu-san/dang-ky-su-kien/{maDangKy}/thanh-toan/hoan-phi': { post: endpoint('Đánh dấu chủ sân đã tự chuyển khoản hoàn phí', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], responses: { 409: response.Loi } }) },
-    '/api/khach/su-kien': { get: endpoint('Khách xem và lọc sự kiện đang công khai', 'Sự kiện', { auth: true, query: [thamSoTruyVan('khuVuc', 'Tỉnh/quận/địa chỉ'), thamSoTruyVan('maCoSo', 'Mã cơ sở'), thamSoTruyVan('ngay', 'YYYY-MM-DD'), thamSoTruyVan('loai', 'social | tournament'), thamSoTruyVan('trinhDo', '1–8'), thamSoTruyVan('phi', 'free | paid'), thamSoTruyVan('conCho', 'true | false'), thamSoTruyVan('trang', 'Trang'), thamSoTruyVan('soLuong', '1–50')] }) },
+    '/api/khach/su-kien': { get: endpoint('Khách xem và lọc sự kiện đang công khai; kết quả có coSanDaGiu cho biết sự kiện đã giữ sân', 'Sự kiện', { auth: true, query: [thamSoTruyVan('khuVuc', 'Tỉnh/quận/địa chỉ'), thamSoTruyVan('maCoSo', 'Mã cơ sở'), thamSoTruyVan('ngay', 'YYYY-MM-DD'), thamSoTruyVan('loai', 'social | tournament'), thamSoTruyVan('trinhDo', '1–8'), thamSoTruyVan('phi', 'free | paid'), thamSoTruyVan('conCho', 'true | false'), thamSoTruyVan('trang', 'Trang'), thamSoTruyVan('soLuong', '1–50')] }) },
     '/api/khach/su-kien/{maSuKien}': { get: endpoint('Khách xem chi tiết công khai, chỉ hiển thị số lượng người đăng ký', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maSuKien')] }) },
     '/api/khach/su-kien/{maSuKien}/dang-ky': { post: endpoint('Khách đăng ký sự kiện', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maSuKien')], body: 'DangKySuKien', responses: { 409: response.Loi } }) },
     '/api/khach/dang-ky-su-kien': { get: endpoint('Khách xem danh sách đăng ký của chính mình', 'Sự kiện', { auth: true, query: [thamSoTruyVan('trangThai', 'pending | accepted | cancelled | rejected'), thamSoTruyVan('trang', 'Trang'), thamSoTruyVan('soLuong', '1–50')] }) },
@@ -964,7 +1032,7 @@ module.exports = {
       },
     },
     // G8.3–G8.4: Cộng đồng — bài tìm người chơi và đội nhóm.
-    '/api/khach/tim-nguoi': { get: endpoint('Danh sách bài tìm người chơi, lọc khu vực/trình độ/ngày', 'Cộng đồng', { auth: true }), post: endpoint('Tạo bài tìm người chơi (tạo phòng chat cùng transaction)', 'Cộng đồng', { auth: true }) },
+    '/api/khach/tim-nguoi': { get: endpoint('Danh sách bài tìm người chơi, tìm tiêu đề và lọc khu vực/khoảng trình độ/ngày; mới nhất trước', 'Cộng đồng', { auth: true, query: [thamSoTruyVan('tieuDe', 'Từ khóa trong tiêu đề, tối đa 150 ký tự'), thamSoTruyVan('khuVuc', 'Lọc khu vực'), thamSoTruyVan('trinhDoTu', 'Mức trình độ đầu, 1–8'), thamSoTruyVan('trinhDoDen', 'Mức trình độ cuối, 1–8'), thamSoTruyVan('ngay', 'Ngày chơi YYYY-MM-DD')] }), post: endpoint('Tạo bài tìm người chơi (tạo phòng chat cùng transaction)', 'Cộng đồng', { auth: true }) },
     '/api/khach/tim-nguoi/cua-toi': { get: endpoint('Danh sách bài do tôi tạo hoặc tham gia', 'Cộng đồng', { auth: true }) },
     '/api/khach/tim-nguoi/{id}': { get: endpoint('Chi tiết bài và thành viên active', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')] }), patch: endpoint('Chủ bài sửa thông tin, ngày giờ và số người', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')] }) },
     '/api/khach/tim-nguoi/{id}/tham-gia': { post: endpoint('Đăng ký tham gia bài, tự chuyển full khi đủ chỗ', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')], responses: { 409: response.Loi } }) },
@@ -983,7 +1051,7 @@ module.exports = {
     '/api/khach/doi-nhom/{id}/roi': { post: endpoint('Thành viên rời nhóm; trưởng nhóm phải chuyển quyền trước', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')] }) },
     '/api/khach/doi-nhom/{id}/thanh-vien/{maNguoiDung}': { delete: endpoint('Trưởng nhóm xóa thành viên', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id'), thamSoDuongDan('maNguoiDung')] }) },
     '/api/khach/doi-nhom/{id}/chuyen-quyen': { post: endpoint('Trưởng nhóm chuyển quyền cho thành viên active', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')] }) },
-    '/api/khach/doi-nhom/{id}/giai-tan': { post: endpoint('Trưởng nhóm giải tán nhóm và khóa gửi tin', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')] }) },
+    '/api/khach/doi-nhom/{id}/giai-tan': { post: endpoint('Trưởng nhóm giải tán nhóm, xóa toàn bộ lịch sử tin nhắn và khóa gửi tin', 'Cộng đồng', { auth: true, params: [thamSoDuongDan('id')] }) },
   },
   components: {
     securitySchemes: {
@@ -1362,6 +1430,20 @@ module.exports = {
           gioBatDau: { type: 'string', example: '08:00', description: 'Giờ bắt đầu mỗi ngày (HH:MM)' },
           gioKetThuc: { type: 'string', example: '10:00', description: 'Giờ kết thúc mỗi ngày (HH:MM)' },
           lyDo: { type: 'string' },
+          xuLyDonVuong: {
+            type: 'array',
+            description: 'G9.E3: xử lý các đơn vướng cùng giao dịch với khoá. Đơn không có trong danh sách giữ nguyên (khoá cắt quanh đơn)',
+            items: {
+              type: 'object',
+              required: ['maDatSan', 'hanhDong'],
+              properties: {
+                maDatSan: { type: 'integer' },
+                hanhDong: { type: 'string', enum: ['chuyen-san', 'huy'] },
+                maSanMoi: { type: 'integer', description: 'Chỉ với chuyen-san; bỏ trống = máy chủ chọn sân trống đầu tiên cùng cơ sở' },
+                lyDo: { type: 'string', description: 'Bắt buộc khi huy (G9.E5); chuyen-san hết sân trống mà không có lyDo thì dùng lyDo của khoá, không có cả hai → 400' },
+              },
+            },
+          },
         },
       },
       DuyetChuSan: {
@@ -1397,7 +1479,16 @@ module.exports = {
       HuyDonChuSan: {
         type: 'object',
         required: ['lyDo'],
-        properties: { lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Sân đóng để bảo trì sàn' } },
+        properties: {
+          lyDo: { type: 'string', minLength: 2, maxLength: 255, example: 'Sân đóng để bảo trì sàn' },
+          cacBuoi: { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: { type: 'integer' },
+            description: 'G9.D1 (tuỳ chọn): mã DatSan các buổi cần huỷ (huỷ một phần). Không gửi = huỷ như cũ', example: [101, 102] },
+        },
+      },
+      ThuHoiKhieuNai: {
+        type: 'object',
+        required: ['lyDo'],
+        properties: { lyDo: { type: 'string', minLength: 3, maxLength: 255, description: 'Lý do thu hồi — bắt buộc', example: 'Admin xử lý nhầm, khách đã nhận tiền hoàn' } },
       },
       MaGiaoDich: {
         type: 'object',

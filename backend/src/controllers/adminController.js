@@ -45,6 +45,8 @@ exports.moKhoaCoSo = xuLy((yeuCau) =>
   dichVu.moKhoaCoSo(layMaQuanTri(yeuCau), yeuCau.params.maCoSo));
 exports.lietKeCoSo = xuLy((yeuCau) => dichVu.lietKeCoSo(yeuCau.query));
 exports.lietKeKhieuNai = xuLy((yeuCau) => dichVuKhieuNai.lietKeKhieuNai(yeuCau.query));
+exports.thuHoiKhieuNai = xuLy((yeuCau) =>
+  dichVuKhieuNai.thuHoiKhieuNai(layMaQuanTri(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));
 exports.lietKeKhangNghi = xuLy((yeuCau) => dichVuKhieuNai.lietKeKhangNghi(yeuCau.query));
 exports.xuLyKhangNghi = xuLy((yeuCau) =>
   dichVuKhieuNai.xuLyKhangNghi(layMaQuanTri(yeuCau), yeuCau.params.maKhangNghi, yeuCau.body));

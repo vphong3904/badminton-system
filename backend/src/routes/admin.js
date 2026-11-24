@@ -50,6 +50,8 @@ dinhTuyen.patch('/khieu-nai/:maKhieuNai/xu-ly',
     tiep(loi);
   }),
   dieuKhien.xuLyKhieuNai);
+// G9.D3: thu hồi (xoá mềm) khiếu nại + gỡ gậy, tự mở khoá chủ sân nếu chỉ bị khoá do khiếu nại này. Body `{lyDo}` bắt buộc.
+dinhTuyen.delete('/khieu-nai/:maKhieuNai', kiemTraHopLe(kiemTraDuLieu.thuHoiKhieuNai), dieuKhien.thuHoiKhieuNai);
 // G5.5: kháng nghị của chủ sân (thu hồi / giữ gậy) + khóa/mở khóa nhận đặt mới.
 dinhTuyen.get('/khang-nghi', kiemTraHopLe(kiemTraDuLieu.danhSachKhangNghi), dieuKhien.lietKeKhangNghi);
 dinhTuyen.patch('/khang-nghi/:maKhangNghi/xu-ly', kiemTraHopLe(kiemTraDuLieu.xuLyKhangNghi), dieuKhien.xuLyKhangNghi);

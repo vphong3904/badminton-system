@@ -1,3 +1,4 @@
+const fs = require('fs');
 const dichVu = require('../services/ownerService');
 const dichVuDanhGia = require('../services/reviewService');
 const sanCoSo = require('../services/sanCoSoService');
@@ -5,7 +6,7 @@ const dichVuKhieuNai = require('../services/complaintService');
 const xuLyBatDongBo = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { thanhCong, daTao } = require('../utils/response');
-const { phatMotSlot } = require('../realtime/datSan');
+const { phatMotSlot, phatNhieuCapNhatDatSan } = require('../realtime/datSan');
 
 const xuLy = (hamXuLy, dinhDang = thanhCong) =>
   xuLyBatDongBo(async (yeuCau, phanHoi) => dinhDang(phanHoi, await hamXuLy(yeuCau)));
@@ -55,15 +56,12 @@ exports.xoaSan = xuLy((yeuCau) => sanCoSo.xoaSan(nguoi(yeuCau), yeuCau.params.ma
 exports.dongCoSo = xuLy((yeuCau) => sanCoSo.dongCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
 exports.moCoSo = xuLy((yeuCau) => sanCoSo.moCoSo(nguoi(yeuCau), yeuCau.params.maCoSo));
 exports.xoaCoSo = xuLy((yeuCau) => sanCoSo.xoaCoSo(nguoi(yeuCau), yeuCau.params.maCoSo, yeuCau.body.lyDo));
+exports.xemTruocKhoaSan = xuLy((yeuCau) => dichVu.xemTruocKhoaSan(layMaChuSan(yeuCau), yeuCau.query));
 exports.taoKhoaSan = xuLy(async (yeuCau) => {
   const r = await dichVu.taoKhoaSan(layMaChuSan(yeuCau), yeuCau.body);
-  const db = require('../config/db').pool;
-  const tuNgay = r.tuNgay || String(r.thoiGianBatDau || '').slice(0,10);
-  const denNgay = r.denNgay || tuNgay;
-  if (tuNgay) {
-    const [locks] = await db.query('SELECT MaSan,NgayKhoa,GioBatDau,GioKetThuc FROM KhoaSan WHERE MaSan=? AND NgayKhoa BETWEEN ? AND ? AND GioBatDau<? AND GioKetThuc>?', [r.maSan, tuNgay, denNgay, r.gioKetThuc || String(r.thoiGianKetThuc || '').slice(11), r.gioBatDau || String(r.thoiGianBatDau || '').slice(11)]);
-    for (const k of locks) await phatMotSlot(k.MaSan,k.NgayKhoa,k.GioBatDau,k.GioKetThuc);
-  }
+  // Phát lịch realtime sau commit: từng dòng khoá mới + các đơn vừa chuyển/huỷ (slot sân cũ/mới + thông báo đơn).
+  for (const k of r.cacKhoa) await phatMotSlot(r.maSan, k.ngay, k.gioBatDau, k.gioKetThuc);
+  await phatNhieuCapNhatDatSan([...r.cacDonDaChuyen, ...r.cacDonDaHuy].map((d) => d.maDatSan));
   return r;
 }, daTao);
 exports.lietKeKhoaSan = xuLy((yeuCau) => dichVu.lietKeKhoaSan(layMaChuSan(yeuCau), yeuCau.query));
@@ -82,7 +80,16 @@ exports.xoaPhanHoiDanhGia = xuLy((yeuCau) =>
   dichVuDanhGia.xoaPhanHoiDanhGia(layMaChuSan(yeuCau), yeuCau.params.maDanhGia));
 
 exports.lietKeKhieuNai = xuLy((yeuCau) => dichVuKhieuNai.lietKeKhieuNaiCuaChuSan(layMaChuSan(yeuCau), yeuCau.query));
-exports.khangNghiKhieuNai = xuLy((yeuCau) =>
-  dichVuKhieuNai.khangNghiKhieuNai(layMaChuSan(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));
+exports.khangNghiKhieuNai = xuLyBatDongBo(async (yeuCau, phanHoi) => {
+  try {
+    const ketQua = await dichVuKhieuNai.khangNghiKhieuNai(
+      layMaChuSan(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body, yeuCau.files || []);
+    return thanhCong(phanHoi, ketQua);
+  } catch (loi) {
+    // Kháng nghị thất bại (thiếu ảnh, quá hạn, 409…) → không để lại ảnh bằng chứng mồ côi.
+    (yeuCau.files || []).forEach((tep) => fs.unlink(tep.path, () => {}));
+    throw loi;
+  }
+});
 exports.phanHoiKhieuNai = xuLy((yeuCau) =>
   dichVuKhieuNai.phanHoiKhieuNai(layMaChuSan(yeuCau), yeuCau.params.maKhieuNai, yeuCau.body));

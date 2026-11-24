@@ -45,6 +45,20 @@ async function guiChoQuanTri(ketNoi, thongBao) {
   }
 }
 
+// Hạn mới (chủ sân duyệt lại / Admin gia hạn hoàn tiền) → cho phép nhắc mốc lại từ đầu: bỏ KhoaChongTrung của các
+// thông báo nhắc cũ có tiền tố `tienTo` (vd 'confirm_expiring:12:'), GIỮ nguyên thông báo trong lịch sử.
+async function giaiPhongKhoaNhac(ketNoi, tienTo, { chinhXac = false } = {}) {
+  try {
+    await ketNoi.query(
+      chinhXac
+        ? 'UPDATE ThongBao SET KhoaChongTrung=NULL WHERE KhoaChongTrung=?'
+        : 'UPDATE ThongBao SET KhoaChongTrung=NULL WHERE KhoaChongTrung IS NOT NULL AND LEFT(KhoaChongTrung, ?)=?',
+      chinhXac ? [tienTo] : [tienTo.length, tienTo]);
+  } catch (loi) {
+    console.error('[thong-bao] Không giải phóng được khoá nhắc:', loi.message);
+  }
+}
+
 const dinhDangTien = (soTien) => `${Number(soTien).toLocaleString('vi-VN')}đ`;
 
 // Báo khách khi tiền hoàn đã được chuyển (chủ sân hoặc admin bấm hoàn tất). Best-effort.
@@ -199,5 +213,5 @@ async function danhDauTatCaDaDoc(maNguoiDung) {
 }
 
 module.exports = {
-  guiThongBao, guiChoQuanTri, baoKhachDaHoanTien, baoDanhGiaMoi, baoNguoiDangKySuKien, baoSuKienBiAn, rutGonVanBan, dinhDangTien, lietKe, demChuaDoc, danhDauDaDoc, danhDauTatCaDaDoc,
+  guiThongBao, guiChoQuanTri, giaiPhongKhoaNhac, baoKhachDaHoanTien, baoDanhGiaMoi, baoNguoiDangKySuKien, baoSuKienBiAn, rutGonVanBan, dinhDangTien, lietKe, demChuaDoc, danhDauDaDoc, danhDauTatCaDaDoc,
 };

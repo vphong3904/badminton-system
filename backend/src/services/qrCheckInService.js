@@ -10,6 +10,7 @@ const nhatKy = require('./nhatKyService');
 const { guiThongBao } = require('./notificationService');
 const chungTu = require('./chungTuService');
 const { ganTrangThaiHienThi } = require('../utils/trangThaiDon');
+const { SAN_CHUA_XOA } = require('../utils/sanHienHanh');
 const { kiemTraCheckInQr, kiemTraCheckInThuCong } = require('../utils/kiemTraCheckIn');
 
 const TIEN_TO_QR = 'bc1';
@@ -23,7 +24,7 @@ async function laySanCuaChu(ketNoi, maChuSan, maSan, khoa = false) {
     `SELECT s.MaSan AS maSan, s.TenSan AS tenSan, s.TrangThai AS trangThai, cs.TenCoSo AS tenCoSo,
        cs.DiaChi AS diaChi, s.QrToken AS qrToken, s.QrPhienBan AS qrPhienBan
      FROM San s JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-     WHERE s.MaSan=? AND cs.MaChuSan=? ${khoa ? 'FOR UPDATE' : ''}`,
+     WHERE s.MaSan=? AND ${SAN_CHUA_XOA('s')} AND cs.MaChuSan=? ${khoa ? 'FOR UPDATE' : ''}`,
     [maSan, maChuSan]);
   if (!san) throw AppError.khongTimThay('Không tìm thấy sân');
   return san;
@@ -198,6 +199,14 @@ async function tuXacNhanDonChoDuyet(ketNoi, don, nguoi) {
     maDoiTuong: don.maThanhToan,
     chiTiet: `[${nguoi.vaiTro || 'customer'}] đơn ${don.maDon} tự xác nhận khi check-in`,
   });
+  // G9.C7: báo chủ sân đơn đã tự xác nhận để kiểm tra tiền về (chủ sân tự check-in thủ công thì khỏi báo lại chính họ).
+  if (nguoi.vaiTro !== 'owner') {
+    await guiThongBao(ketNoi, {
+      maNguoiDung: don.maChuSan, loai: 'payment_auto_confirmed', tieuDe: 'Đơn tự xác nhận do khách đã check-in',
+      noiDung: `Khách đã check-in, đơn ${don.maDon} tự xác nhận. Hãy kiểm tra tiền đã về tài khoản chưa.`,
+      loaiThamChieu: 'payment', maThamChieu: don.maDatSan, khoa: `payment_auto_confirmed:${don.maThanhToan}`,
+    });
+  }
 }
 
 async function ghiCheckIn(ketNoi, { don, phuongThuc, nguoi, canTuXacNhan, phienBanToken = null, viDo = null, kinhDo = null,
@@ -260,7 +269,7 @@ async function ghiCheckIn(ketNoi, { don, phuongThuc, nguoi, canTuXacNhan, phienB
 async function checkInBangQr(maKhach, maDatSan, { maSan, token, phienBan, viDo, kinhDo }) {
   return thucHienGiaoDich(async (ketNoi) => {
     const [[san]] = await ketNoi.query(
-      'SELECT MaSan AS maSan, QrToken AS qrToken, QrPhienBan AS qrPhienBan FROM San WHERE MaSan=?', [maSan]);
+      `SELECT MaSan AS maSan, QrToken AS qrToken, QrPhienBan AS qrPhienBan FROM San WHERE MaSan=? AND ${SAN_CHUA_XOA()}`, [maSan]);
     const don = await layDonDeCheckIn(ketNoi, maDatSan);
     const moSomPhut = await layCauHinhSo(ketNoi, 'checkin_open_minutes', PHUT_MO_SOM_MAC_DINH);
     const kiem = kiemTraCheckInQr({

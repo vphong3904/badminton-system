@@ -1,3 +1,4 @@
+const { SAN_CHUA_XOA } = require('../utils/sanHienHanh');
 // G8.6: phát lại trạng thái các slot bị sự kiện chiếm/nhả sau commit.
 const { pool } = require('../config/db');
 const { phatLichSan } = require('./phat');
@@ -12,7 +13,7 @@ async function phatLichTheoSuKien(maSuKien, snapshot = null) {
   try {
     const sk = snapshot || await layLichSuKien(maSuKien);
     if (!sk) return;
-    const [san] = await pool.query('SELECT MaSan AS maSan FROM San WHERE MaCoSo=? AND TrangThai<>\'deleted\' ORDER BY MaSan', [sk.maCoSo]);
+    const [san] = await pool.query(`SELECT MaSan AS maSan FROM San WHERE MaCoSo=? AND ${SAN_CHUA_XOA()} ORDER BY MaSan`, [sk.maCoSo]);
     const cacSlot = [];
     for (const s of san) {
       const [[khoa]] = await pool.query('SELECT MaKhoa FROM KhoaSan WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? LIMIT 1', [s.maSan, sk.ngay, sk.gioKetThuc, sk.gioBatDau]);

@@ -122,6 +122,18 @@ exports.khoaSan = {
     gioBatDau: gioPhut.optional(),
     gioKetThuc: gioPhut.optional(),
     lyDo: z.string().max(255).optional(),
+    // G9.E3: xử lý các đơn vướng cùng lúc với khoá. Huỷ bắt buộc có lý do; maSanMoi chỉ đi với chuyen-san.
+    xuLyDonVuong: z.array(z.object({
+      maDatSan: maSo,
+      hanhDong: z.enum(['chuyen-san', 'huy'], { error: "hanhDong phải là 'chuyen-san' hoặc 'huy'." }),
+      maSanMoi: maSo.optional(),
+      lyDo: z.string().trim().min(1, 'Lý do không được để trống.').max(255).optional(),
+    }).superRefine((muc, ngCanh) => {
+      if (muc.hanhDong === 'huy' && !muc.lyDo) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['lyDo'], message: 'Huỷ đơn phải có lý do.' });
+      if (muc.hanhDong === 'huy' && muc.maSanMoi !== undefined) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['maSanMoi'], message: 'maSanMoi chỉ dùng khi chuyển sân.' });
+    })).max(300, 'Mỗi lần xử lý tối đa 300 đơn.')
+      .refine((ds) => new Set(ds.map((x) => x.maDatSan)).size === ds.length, 'Danh sách đơn bị trùng mã.')
+      .optional(),
   }).superRefine((duLieu, ngCanh) => {
     const dangCu = duLieu.thoiGianBatDau !== undefined || duLieu.thoiGianKetThuc !== undefined;
     const dangMoi = duLieu.tuNgay !== undefined || duLieu.denNgay !== undefined
@@ -141,6 +153,18 @@ exports.khoaSan = {
     if (duLieu.gioBatDau >= duLieu.gioKetThuc) return loi('gioKetThuc', 'Giờ kết thúc phải sau giờ bắt đầu');
     if (duLieu.denNgay && duLieu.denNgay < duLieu.tuNgay) return loi('denNgay', 'Ngày kết thúc phải từ ngày bắt đầu trở đi');
     return undefined;
+  }),
+};
+exports.xemTruocKhoaSan = {
+  query: z.object({
+    maSan: maSo,
+    tuNgay: ngayKhoa,
+    denNgay: ngayKhoa.optional(),
+    gioBatDau: gioPhut,
+    gioKetThuc: gioPhut,
+  }).superRefine((duLieu, ngCanh) => {
+    if (duLieu.gioBatDau >= duLieu.gioKetThuc) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['gioKetThuc'], message: 'Giờ kết thúc phải sau giờ bắt đầu' });
+    if (duLieu.denNgay && duLieu.denNgay < duLieu.tuNgay) ngCanh.addIssue({ code: z.ZodIssueCode.custom, path: ['denNgay'], message: 'Ngày kết thúc phải từ ngày bắt đầu trở đi' });
   }),
 };
 exports.danhSachKhoaSan = {
@@ -181,6 +205,7 @@ exports.xoaPhanHoiDanhGia = { params: z.object({ maDanhGia: maSo }) };
 exports.danhSachKhieuNai = {
   query: z.object({ trangThai: z.enum(['pending', 'upheld', 'rejected', 'all']).default('all') }),
 };
+// G9.C9: body là multipart (text field `noiDung`; ảnh `anhBangChung` 1–3 do multer + service kiểm).
 exports.khangNghiKhieuNai = {
   params: z.object({ maKhieuNai: maSo }),
   body: z.object({

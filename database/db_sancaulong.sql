@@ -5,7 +5,7 @@
 -- Thứ tự chạy: 1) db_sancaulong.sql   2) db_sancaulong_data.sql
 -- Quy ước: tên bảng, tên cột viết tiếng Việt không dấu, PascalCase
 -- Giá trị ENUM và khóa trong CauHinhHeThong giữ nguyên tiếng Anh
--- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực)
+-- Yêu cầu: MySQL 8.0.16+ (để CHECK có hiệu lực) hoặc MariaDB 10.2.1+ (cột sinh STORED + CHECK; khuyến nghị 10.6+)
 -- Bảng (29): NguoiDung, HoSoChuSan, CoSo, AnhCoSo, San, SuKien, KhoaSan, BangGia, LichCoDinh,
 --   DatSan, ThanhToan, HoanTien, ChungTuThanhToan, DanhGia, YeuThich, KhieuNai, Gay, KhangNghi,
 --   LichSuQrSan, CheckIn, HangMucSuKien, DangKySuKien, ThanhToanSuKien, ChungTuSuKien,
@@ -124,8 +124,11 @@ CREATE TABLE San (
   TrangThai  ENUM('active','maintenance') NOT NULL DEFAULT 'maintenance' COMMENT 'maintenance = chưa hoạt động/đã đóng; sân mới tạo ở maintenance, chủ sân bật thì mới nhận khách',
   QrToken    CHAR(64) NULL COMMENT 'token QR check-in (ngẫu nhiên 32 byte hex); NULL = chưa tạo, backend tạo lười lần đầu chủ sân mở trang QR',
   QrPhienBan INT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'tăng 1 mỗi lần chủ sân đổi QR; QR cũ mất hiệu lực ngay',
+  DaXoa      TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = đã xoá mềm (G9.F); sân đã xoá không hiện ở truy vấn hiện hành, vẫn giữ để hiện tên cũ trong lịch sử',
+  NgayXoa    DATETIME NULL COMMENT 'thời điểm xoá mềm; NULL = chưa xoá',
+  TenDangDung VARCHAR(50) GENERATED ALWAYS AS (IF(DaXoa = 0, TenSan, NULL)) STORED COMMENT 'cột sinh: tên đang dùng (NULL khi đã xoá) — UNIQUE chỉ áp cho sân chưa xoá; STORED để chạy cả MySQL lẫn MariaDB',
   CONSTRAINT FK_San_CoSo FOREIGN KEY (MaCoSo) REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
-  UNIQUE KEY UQ_San_Ten (MaCoSo, TenSan)
+  UNIQUE KEY UQ_San_TenDangDung (MaCoSo, TenDangDung)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -259,6 +262,8 @@ CREATE TABLE DatSan (
   MaLichCoDinh        INT UNSIGNED NULL COMMENT 'có giá trị nếu đơn sinh từ lịch cố định',
   MaNhomDat           INT UNSIGNED NULL COMMENT 'nhóm đặt (đơn tổng) = MaDatSan của đơn con đầu nhóm; đơn lẻ = chính MaDatSan',
   MaSan               INT UNSIGNED NOT NULL,
+  MaSanCu             INT UNSIGNED NULL COMMENT 'sân trước khi chủ sân chuyển sân (G9.E); NULL = chưa chuyển',
+  NgayChuyenSan       DATETIME NULL COMMENT 'thời điểm chuyển sân gần nhất (G9.E); NULL = chưa chuyển',
   NgayChoi            DATE NOT NULL,
   GioBatDau           TIME NOT NULL,
   GioKetThuc          TIME NOT NULL,
@@ -278,6 +283,7 @@ CREATE TABLE DatSan (
   NgayCapNhat         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT FK_DatSan_KhachHang  FOREIGN KEY (MaKhachHang)     REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_DatSan_San        FOREIGN KEY (MaSan)           REFERENCES San(MaSan),
+  CONSTRAINT FK_DatSan_SanCu      FOREIGN KEY (MaSanCu)         REFERENCES San(MaSan),
   CONSTRAINT FK_DatSan_LichCoDinh FOREIGN KEY (MaLichCoDinh)    REFERENCES LichCoDinh(MaLichCoDinh),
   CONSTRAINT CHK_DatSan_Gio       CHECK (GioKetThuc > GioBatDau),
   CONSTRAINT CHK_DatSan_SoPhut    CHECK (SoPhut >= 30),
@@ -344,7 +350,7 @@ CREATE TABLE HoanTien (
   MaNganHang        VARCHAR(20)  NULL,
   SoTaiKhoan        VARCHAR(30)  NULL,
   ChuTaiKhoan       VARCHAR(100) NULL,
-  HanHoan           DATETIME NULL COMMENT 'hạn chuyển hoàn = lúc tạo + refund_deadline_hours (giờ máy chủ)',
+  HanHoan           DATETIME NULL COMMENT 'hạn chuyển hoàn = lúc tạo + refund_deadline_minutes_* theo HoanTien.Loai (phút, giờ máy chủ)',
   AnhChungTu        VARCHAR(255) NULL COMMENT 'ảnh chuyển khoản hoàn (bắt buộc khi đánh dấu đã hoàn): /tep-tai-len/<tên>',
   MaNguoiHoan       INT UNSIGNED NULL COMMENT 'chủ sân hoặc Admin bấm đã hoàn',
   VaiTroHoan        ENUM('owner','admin') NULL,
@@ -430,7 +436,7 @@ CREATE TABLE KhieuNai (
   MaKhachHang    INT UNSIGNED NOT NULL,
   MaChuSan       INT UNSIGNED NOT NULL,
   MaCoSo         INT UNSIGNED NOT NULL,
-  Loai           ENUM('service','refund') NOT NULL DEFAULT 'service' COMMENT 'service = chủ sân chậm duyệt thanh toán; refund = chưa nhận được tiền hoàn (sau refund_complaint_wait_minutes)',
+  Loai           ENUM('service','refund') NOT NULL DEFAULT 'service' COMMENT 'service = chủ sân chậm duyệt thanh toán; refund = chưa nhận được tiền hoàn (khi HanHoan đã qua)',
   MaHoanTien     INT UNSIGNED NULL COMMENT 'khoản hoàn bị khiếu nại (Loai=refund)',
   GiaiDoan       ENUM('after_payment','at_cancel','after_cancel') NOT NULL COMMENT 'khách bấm khiếu nại ở màn nào',
   NoiDung        VARCHAR(1000) NOT NULL,
@@ -444,11 +450,16 @@ CREATE TABLE KhieuNai (
   MaQuanTri      INT UNSIGNED NULL,
   NgayXuLy       DATETIME NULL,
   NgayTao        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  DaXoa          TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = Admin đã thu hồi (xoá mềm), ẩn khỏi mọi danh sách (G9.D)',
+  NgayXoa        DATETIME NULL,
+  LyDoXoa        VARCHAR(255) NULL,
+  MaQuanTriXoa   INT UNSIGNED NULL,
   CONSTRAINT FK_KhieuNai_DatSan   FOREIGN KEY (MaDatSan)    REFERENCES DatSan(MaDatSan),
   CONSTRAINT FK_KhieuNai_Khach    FOREIGN KEY (MaKhachHang) REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_KhieuNai_ChuSan   FOREIGN KEY (MaChuSan)    REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_KhieuNai_CoSo     FOREIGN KEY (MaCoSo)      REFERENCES CoSo(MaCoSo) ON DELETE CASCADE,
   CONSTRAINT FK_KhieuNai_QuanTri  FOREIGN KEY (MaQuanTri)   REFERENCES NguoiDung(MaNguoiDung),
+  CONSTRAINT FK_KhieuNai_QuanTriXoa FOREIGN KEY (MaQuanTriXoa) REFERENCES NguoiDung(MaNguoiDung),
   CONSTRAINT FK_KhieuNai_HoanTien FOREIGN KEY (MaHoanTien)  REFERENCES HoanTien(MaHoanTien) ON DELETE SET NULL,
   UNIQUE KEY UQ_KhieuNai_DatSan_Loai (MaDatSan, Loai),
   KEY IDX_KhieuNai_TrangThai (TrangThai, NgayTao),
@@ -482,15 +493,16 @@ CREATE TABLE Gay (
   KEY IDX_Gay_ChuSan (MaChuSan, TrangThai)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 13d. KhangNghi: chủ sân kháng nghị quyết định chấp nhận khiếu nại (trong appeal_hours); mỗi khiếu nại 1 lần.
---      accepted = Admin thu hồi gậy; rejected = giữ gậy
+-- 13d. KhangNghi: chủ sân kháng nghị quyết định chấp nhận khiếu nại (trong appeal_hours = 24h); mỗi khiếu nại 1 lần, kèm 1–3 ảnh bằng chứng (BangChung).
+--      accepted = Admin thu hồi gậy; rejected = giữ gậy; cancelled = khiếu nại gốc bị Admin thu hồi (G9.D)
 CREATE TABLE KhangNghi (
   MaKhangNghi    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   MaKhieuNai     INT UNSIGNED NOT NULL,
   MaGay          INT UNSIGNED NOT NULL,
   MaChuSan       INT UNSIGNED NOT NULL,
   NoiDung        VARCHAR(1000) NOT NULL,
-  TrangThai      ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  BangChung      VARCHAR(1500) NULL COMMENT 'JSON mảng đường dẫn 1–3 ảnh bằng chứng chủ sân đính kèm khi kháng nghị (G9.C)',
+  TrangThai      ENUM('pending','accepted','rejected','cancelled') NOT NULL DEFAULT 'pending',
   GhiChuQuanTri  VARCHAR(500) NULL,
   MaQuanTri      INT UNSIGNED NULL,
   NgayXuLy       DATETIME NULL,
@@ -677,7 +689,8 @@ CREATE TABLE ThongBao (
                        'event_registered','event_accepted','event_rejected','event_removed',
                        'event_updated','event_cancelled','event_reminder','event_hidden',
                        'event_payment_submitted','event_payment_confirmed','event_payment_rejected',
-                       'event_payment_expired')
+                       'event_payment_expired',
+                       'refund_expiring','booking_moved','payment_auto_confirmed')
                   NOT NULL,
   TieuDe          VARCHAR(150) NOT NULL,
   NoiDung         VARCHAR(500) NOT NULL,

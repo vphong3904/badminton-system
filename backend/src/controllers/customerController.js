@@ -23,6 +23,7 @@ exports.lietKeDatSan = xuLy((yeuCau) => dichVu.lietKeDatSan(yeuCau.nguoiDung.maN
 exports.layHoaDonNhap = xuLy((yeuCau) =>
   dichVu.layHoaDonNhap(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.huyDatSan = xuLy(async (yeuCau) => { const r = await dichVu.huyDatSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan, yeuCau.body?.taiKhoanHoan ?? null); await phatCapNhatDatSan(yeuCau.params.maDatSan); return r; });
+exports.tuChoiChuyenSan = xuLy(async (yeuCau) => { const r = await dichVu.tuChoiChuyenSan(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan); await phatNhieuCapNhatDatSan(r.cacBuoiDaHuy); return r; });
 exports.xemTruocHuy = xuLy((yeuCau) =>
   dichVu.xemTruocHuy(yeuCau.nguoiDung.maNguoiDung, yeuCau.params.maDatSan));
 exports.guiDanhGia = xuLy((yeuCau) =>

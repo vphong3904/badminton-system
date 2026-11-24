@@ -32,6 +32,16 @@ ungDung.get('/api/suc-khoe', (_yeuCau, phanHoi) => thanhCong(phanHoi, {
   trangThai: 'ok',
   thoiGian: new Date().toISOString(),
 }));
+// G9.A4: giờ máy chủ theo NOW() của MySQL (cùng nguồn giờ với mọi hạn nghiệp vụ). FE chỉ dùng để hiển thị/đếm ngược.
+ungDung.get('/api/gio-may-chu', xuLyBatDongBo(async (_yeuCau, phanHoi) => {
+  const [[dong]] = await pool.query(
+    `SELECT DATE_FORMAT(NOW(), '%Y-%m-%d') AS ngay, DATE_FORMAT(NOW(), '%H:%i:%s') AS gio,
+            ROUND(UNIX_TIMESTAMP(NOW(3)) * 1000) AS epochMs`);
+  const mui = '+07:00';
+  thanhCong(phanHoi, {
+    iso: `${dong.ngay}T${dong.gio}${mui}`, epochMs: Number(dong.epochMs), mui, ngay: dong.ngay, gio: dong.gio,
+  });
+}));
 ungDung.get('/api/suc-khoe/co-so-du-lieu', xuLyBatDongBo(async (_yeuCau, phanHoi) => {
   await pool.query('SELECT 1');
   thanhCong(phanHoi, { tenCoSoDuLieu: 'db_sancaulong', trangThai: 'ok' });

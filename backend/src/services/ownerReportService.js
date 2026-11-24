@@ -11,6 +11,55 @@ async function capNhatDonDaHoanTat(maChuSan, ketNoi = pool) {
     [maChuSan]);
 }
 
+// Dựng bảng `x` (mỗi dòng = 1 đơn đã thu tiền) + bộ cột tổng hợp, dùng chung cho doanh thu theo thời gian và theo sân
+// (G9.B1) để tổng các sân luôn khớp `tongCong.doanhThu`. Tên sân/cơ sở lấy trực tiếp (kể cả sân đã đóng).
+function dungBangDoanhThu(maChuSan, boLoc) {
+  const thamSo = [maChuSan];
+  let loc = '';
+  if (boLoc.maCoSo) { loc += ' AND cs.MaCoSo=?'; thamSo.push(boLoc.maCoSo); }
+  const coKhoangNgay = Boolean(boLoc.tuNgay || boLoc.denNgay);
+  if (coKhoangNgay) {
+    if (boLoc.tuNgay) { loc += ' AND d.NgayChoi>=?'; thamSo.push(boLoc.tuNgay); }
+    if (boLoc.denNgay) { loc += ' AND d.NgayChoi<=?'; thamSo.push(boLoc.denNgay); }
+  } else {
+    if (boLoc.nam) { loc += ' AND YEAR(d.NgayChoi)=?'; thamSo.push(boLoc.nam); }
+    if (boLoc.nam && boLoc.thang) { loc += ' AND MONTH(d.NgayChoi)=?'; thamSo.push(boLoc.thang); }
+  }
+  // Hai nhánh UNION ALL đều dùng cùng bộ tham số (maChuSan + bộ lọc).
+  const thamSoX = [...thamSo, ...thamSo];
+  // Mỗi dòng của bảng `x` = 1 đơn đã thu tiền, với: gross (đã trả), daHoan (đã chuyển hoàn), choHoan (đang chờ hoàn).
+  // Nhánh 1: đơn app. Nhánh 2: đơn chủ sân tạo đã thu ngoài hệ thống (không hoa hồng, không hoàn qua hệ thống).
+  const x = `(
+    SELECT d.NgayChoi AS ngay, s.MaSan AS maSan, s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo,
+      d.TongTien AS gross, d.PhiNenTang AS phi, d.TienChuSan AS chu,
+      CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien IN ('refunded','received')
+           THEN LEAST(d.TongTien, COALESCE(t.SoTienHoan,0)) ELSE 0 END AS daHoan,
+      CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien='processing'
+           THEN LEAST(d.TongTien, COALESCE(t.SoTienHoan,0)) ELSE 0 END AS choHoan,
+      CASE WHEN d.TrangThai IN ('confirmed','checked_in','completed') THEN 1 ELSE 0 END AS luot,
+      0 AS ngoai, 0 AS luotNgoai
+    FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+      LEFT JOIN ThanhToan t ON t.MaDatSan=d.MaDatSan
+    WHERE cs.MaChuSan=? AND d.Nguon='app'
+      AND (d.TrangThai IN ('confirmed','checked_in','completed') OR (d.TrangThai='cancelled' AND t.TrangThai='success'))${loc}
+    UNION ALL
+    SELECT d.NgayChoi AS ngay, s.MaSan AS maSan, s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo,
+      d.TongTien AS gross, 0 AS phi, d.TongTien AS chu,
+      0 AS daHoan, 0 AS choHoan, 1 AS luot, d.TongTien AS ngoai, 1 AS luotNgoai
+    FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+    WHERE cs.MaChuSan=? AND d.Nguon='owner' AND d.TrangThaiThu='paid'
+      AND d.TrangThai IN ('confirmed','checked_in','completed')${loc}
+  ) x`;
+  // Tỉ lệ phần tiền được giữ lại (gross − daHoan)/gross; gross=0 → 0.
+  const giu = '(CASE WHEN x.gross>0 THEN (x.gross - x.daHoan)/x.gross ELSE 0 END)';
+  const cot = `SUM(x.gross - x.daHoan) AS doanhThu, SUM(x.gross) AS tongDaThu, SUM(x.daHoan) AS tienDaHoan,
+       SUM(x.choHoan) AS choHoan, SUM(ROUND(x.phi*${giu})) AS phiNenTang,
+       SUM(ROUND(x.chu*${giu})) AS tienChuSan, SUM(x.luot) AS soLuotDat,
+       SUM(x.ngoai) AS doanhThuNgoaiHeThong, SUM(x.luotNgoai) AS soLuotDatNgoaiHeThong`;
+
+  return { x, cot, thamSoX, coKhoangNgay };
+}
+
 // Doanh thu theo năm/tháng/ngày. Bộ lọc (đều tuỳ chọn):
 //  - tuNgay/denNgay: khoảng ngày tự chọn (ưu tiên hơn nam/thang)
 //  - nam, nam+thang: xem 1 năm / 1 tháng
@@ -29,47 +78,7 @@ async function capNhatDonDaHoanTat(maChuSan, ketNoi = pool) {
 async function layDoanhThu(maChuSan, boLoc = {}) {
   if (typeof boLoc !== 'object' || boLoc === null) boLoc = { nam: boLoc }; // tương thích kiểu gọi cũ
   await capNhatDonDaHoanTat(maChuSan);
-  const thamSo = [maChuSan];
-  let loc = '';
-  if (boLoc.maCoSo) { loc += ' AND cs.MaCoSo=?'; thamSo.push(boLoc.maCoSo); }
-  const coKhoangNgay = Boolean(boLoc.tuNgay || boLoc.denNgay);
-  if (coKhoangNgay) {
-    if (boLoc.tuNgay) { loc += ' AND d.NgayChoi>=?'; thamSo.push(boLoc.tuNgay); }
-    if (boLoc.denNgay) { loc += ' AND d.NgayChoi<=?'; thamSo.push(boLoc.denNgay); }
-  } else {
-    if (boLoc.nam) { loc += ' AND YEAR(d.NgayChoi)=?'; thamSo.push(boLoc.nam); }
-    if (boLoc.nam && boLoc.thang) { loc += ' AND MONTH(d.NgayChoi)=?'; thamSo.push(boLoc.thang); }
-  }
-  // Hai nhánh UNION ALL đều dùng cùng bộ tham số (maChuSan + bộ lọc).
-  const thamSoX = [...thamSo, ...thamSo];
-  // Mỗi dòng của bảng `x` = 1 đơn đã thu tiền, với: gross (đã trả), daHoan (đã chuyển hoàn), choHoan (đang chờ hoàn).
-  // Nhánh 1: đơn app. Nhánh 2: đơn chủ sân tạo đã thu ngoài hệ thống (không hoa hồng, không hoàn qua hệ thống).
-  const x = `(
-    SELECT d.NgayChoi AS ngay, d.TongTien AS gross, d.PhiNenTang AS phi, d.TienChuSan AS chu,
-      CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien IN ('refunded','received')
-           THEN LEAST(d.TongTien, COALESCE(t.SoTienHoan,0)) ELSE 0 END AS daHoan,
-      CASE WHEN d.TrangThai='cancelled' AND t.TrangThaiHoanTien='processing'
-           THEN LEAST(d.TongTien, COALESCE(t.SoTienHoan,0)) ELSE 0 END AS choHoan,
-      CASE WHEN d.TrangThai IN ('confirmed','checked_in','completed') THEN 1 ELSE 0 END AS luot,
-      0 AS ngoai, 0 AS luotNgoai
-    FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-      LEFT JOIN ThanhToan t ON t.MaDatSan=d.MaDatSan
-    WHERE cs.MaChuSan=? AND d.Nguon='app'
-      AND (d.TrangThai IN ('confirmed','checked_in','completed') OR (d.TrangThai='cancelled' AND t.TrangThai='success'))${loc}
-    UNION ALL
-    SELECT d.NgayChoi AS ngay, d.TongTien AS gross, 0 AS phi, d.TongTien AS chu,
-      0 AS daHoan, 0 AS choHoan, 1 AS luot, d.TongTien AS ngoai, 1 AS luotNgoai
-    FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
-    WHERE cs.MaChuSan=? AND d.Nguon='owner' AND d.TrangThaiThu='paid'
-      AND d.TrangThai IN ('confirmed','checked_in','completed')${loc}
-  ) x`;
-  // Tỉ lệ phần tiền được giữ lại (gross − daHoan)/gross; gross=0 → 0.
-  const giu = '(CASE WHEN x.gross>0 THEN (x.gross - x.daHoan)/x.gross ELSE 0 END)';
-  const cot = `SUM(x.gross - x.daHoan) AS doanhThu, SUM(x.gross) AS tongDaThu, SUM(x.daHoan) AS tienDaHoan,
-       SUM(x.choHoan) AS choHoan, SUM(ROUND(x.phi*${giu})) AS phiNenTang,
-       SUM(ROUND(x.chu*${giu})) AS tienChuSan, SUM(x.luot) AS soLuotDat,
-       SUM(x.ngoai) AS doanhThuNgoaiHeThong, SUM(x.luotNgoai) AS soLuotDatNgoaiHeThong`;
-
+  const { x, cot, thamSoX, coKhoangNgay } = dungBangDoanhThu(maChuSan, boLoc);
   const [[tongCong]] = await pool.query(`SELECT ${cot} FROM ${x}`, thamSoX);
   const [theoNam] = await pool.query(
     `SELECT YEAR(x.ngay) AS nam, ${cot} FROM ${x} GROUP BY YEAR(x.ngay) ORDER BY nam DESC`, thamSoX);
@@ -101,6 +110,36 @@ async function layDoanhThu(maChuSan, boLoc = {}) {
     theoNam,
     theoThang,
     theoNgay,
+  };
+}
+
+// G9.B1: doanh thu từng sân — cùng bộ lọc và cùng quy tắc trừ hoàn như `layDoanhThu` nên Σ các sân = `tongCong`.
+// Gồm cả sân đã đóng (và sân đã xoá mềm khi có G9.F) nếu có doanh thu; sân không có doanh thu không xuất hiện.
+async function layDoanhThuTheoSan(maChuSan, boLoc = {}) {
+  await capNhatDonDaHoanTat(maChuSan);
+  const { x, cot, thamSoX, coKhoangNgay } = dungBangDoanhThu(maChuSan, boLoc);
+  const [[tongCong]] = await pool.query(`SELECT ${cot} FROM ${x}`, thamSoX);
+  const [cacSan] = await pool.query(
+    `SELECT x.maSan AS maSan, MAX(x.tenSan) AS tenSan, MAX(x.maCoSo) AS maCoSo, MAX(x.tenCoSo) AS tenCoSo, ${cot}
+     FROM ${x} GROUP BY x.maSan ORDER BY doanhThu DESC, x.maSan ASC`, thamSoX);
+  const so = (v) => Number(v ?? 0);
+  const dinhDang = (d) => ({
+    doanhThu: so(d.doanhThu), tongDaThu: so(d.tongDaThu), tienDaHoan: so(d.tienDaHoan), choHoan: so(d.choHoan),
+    phiNenTang: so(d.phiNenTang), tienChuSan: so(d.tienChuSan), soLuotDat: so(d.soLuotDat),
+    doanhThuNgoaiHeThong: so(d.doanhThuNgoaiHeThong), soLuotDatNgoaiHeThong: so(d.soLuotDatNgoaiHeThong),
+  });
+  return {
+    boLoc: {
+      nam: coKhoangNgay ? null : boLoc.nam || null,
+      thang: coKhoangNgay ? null : boLoc.thang || null,
+      tuNgay: boLoc.tuNgay || null,
+      denNgay: boLoc.denNgay || null,
+      maCoSo: boLoc.maCoSo || null,
+    },
+    tongCong: dinhDang(tongCong),
+    cacSan: cacSan.map((d) => ({
+      maSan: d.maSan, tenSan: d.tenSan, maCoSo: d.maCoSo, tenCoSo: d.tenCoSo, ...dinhDang(d),
+    })),
   };
 }
 
@@ -173,6 +212,7 @@ async function layCongNo(maChuSan, boLoc = {}) {
 
 module.exports = {
   layDoanhThu,
+  layDoanhThuTheoSan,
   layTopKhach,
   layTopSan,
   layCongNo,

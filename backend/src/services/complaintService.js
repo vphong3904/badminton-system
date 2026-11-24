@@ -1,22 +1,19 @@
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
-const { guiThongBao, guiChoQuanTri, rutGonVanBan } = require('./notificationService');
+const { guiThongBao, guiChoQuanTri, rutGonVanBan, giaiPhongKhoaNhac } = require('./notificationService');
 
-// Số phút chủ sân chưa xác nhận (kể từ lúc khách gửi ảnh) thì khách mới được khiếu nại "Chậm duyệt".
-const PHUT_CHAM_DUYET_MAC_DINH = 30;
 const nhatKy = require('./nhatKyService');
 const { layCauHinhSo } = require('./cauHinhService');
 const { dinhDangTien } = require('./notificationService');
 const suKienAdmin = require('./suKienAdminService');
+const sanCoSo = require('./sanCoSoService');
 const { ngatKetNoiNguoiDung } = require('../realtime/phat');
 
-// Số phút chủ sân chưa hoàn tiền thì khách được báo "chưa nhận được tiền hoàn" (khiếu nại gửi chủ sân + Admin).
-const PHUT_CHO_KHIEU_NAI_HOAN_MAC_DINH = 30;
 const GIO_HAN_HOAN_LAI_MAC_DINH = 24;
 // Hạn chủ sân phản hồi/giải trình khiếu nại (giờ). Quá hạn mà chưa phản hồi → Admin thấy cờ "quá hạn phản hồi" và có thể xử lý ngay.
 const GIO_PHAN_HOI_MAC_DINH = 24;
 // Hạn chủ sân kháng nghị quyết định chấp nhận khiếu nại (giờ, kể từ lúc Admin xử lý).
-const GIO_KHANG_NGHI_MAC_DINH = 48;
+const GIO_KHANG_NGHI_MAC_DINH = 24; // G9.C1: appeal_hours 48 → 24
 // Mã hiển thị của khiếu nại, vd KN000123 (chủ sân / Admin / khách dùng chung để tra cứu).
 const maKhieuNaiHienThi = (ma) => `KN${String(ma).padStart(6, '0')}`;
 
@@ -27,6 +24,9 @@ const maKhieuNaiHienThi = (ma) => `KN${String(ma).padStart(6, '0')}`;
 //  - Số khiếu nại `upheld` của chủ sân: 1 = cảnh cáo · 2 = cảnh cáo nghiêm trọng (sắp bị khoá) · 3 = khoá tài khoản.
 const SO_LAN_KHOA = 3;
 const MUC_XU_LY = { 1: 'warning', 2: 'severe_warning' };
+// Lý do ghi vào NguoiDung.LyDoKhoa khi đủ SO_LAN_KHOA gậy. G9.D3 dựa vào đúng chuỗi này để nhận ra tài khoản
+// "chỉ bị khoá do gậy" (khoá tay bởi Admin có lý do khác nên không bao giờ bị tự mở khoá).
+const lyDoKhoaTuDong = () => `Bị khoá do ${SO_LAN_KHOA} lần khiếu nại được xác nhận`;
 
 function xacDinhMucXuLy(soLanViPham) {
   if (soLanViPham >= SO_LAN_KHOA) return 'banned';
@@ -47,9 +47,9 @@ async function demGayHieuLuc(ketNoi, maChuSan) {
 }
 
 // Có 2 loại khiếu nại (mỗi đơn tối đa 1 khiếu nại mỗi loại):
-//  - 'service': chủ sân CHẬM DUYỆT thanh toán (khách đã gửi ảnh mà chủ sân chưa xác nhận quá 30 phút).
+//  - 'service': chủ sân CHẬM DUYỆT thanh toán (khách đã gửi ảnh mà chủ sân chưa xác nhận quá `ThanhToan.HanXacNhan`).
 //    Đơn chủ sân ĐÃ duyệt thanh toán thì KHÔNG khiếu nại được nữa.
-//  - 'refund': khách huỷ đơn đã trả tiền nhưng chủ sân chưa hoàn sau 30 phút → "Chưa nhận được tiền hoàn".
+//  - 'refund': khoản hoàn đã quá `HoanTien.HanHoan` mà chủ sân chưa hoàn → "Chưa nhận được tiền hoàn".
 
 async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
   return thucHienGiaoDich(async (ketNoi) => {
@@ -64,20 +64,21 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
       [maDatSan, maKhachHang]);
     if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
 
-    // Đơn đã gửi ảnh và đang chờ chủ sân duyệt: chỉ được khiếu nại sau khi quá hạn (mặc định 30 phút) → "Chậm duyệt".
-    const phutChamDuyet = await layCauHinhSo(ketNoi, 'complaint_slow_confirm_minutes', PHUT_CHAM_DUYET_MAC_DINH);
+    // G9.C8: đơn đã gửi ảnh và đang chờ chủ sân duyệt: chỉ được khiếu nại sau khi QUÁ HanXacNhan thật → "Chậm duyệt".
     const [[thanhToan]] = await ketNoi.query(
       `SELECT t.TrangThai AS trangThai,
-         (t.NgayGuiAnh IS NOT NULL AND t.NgayGuiAnh + INTERVAL ? MINUTE <= NOW()) AS daQuaHan
+         DATE_FORMAT(t.HanXacNhan, '%H:%i %d/%m/%Y') AS hanXacNhan,
+         (t.HanXacNhan IS NOT NULL AND t.HanXacNhan < NOW()) AS daQuaHan
        FROM DatSan d JOIN ThanhToan t ON t.MaDatSan=CASE
          WHEN d.MaLichCoDinh IS NULL THEN COALESCE(d.MaNhomDat, d.MaDatSan)
          ELSE (SELECT MIN(d2.MaDatSan) FROM DatSan d2 WHERE d2.MaLichCoDinh=d.MaLichCoDinh)
        END
-       WHERE d.MaDatSan=?`, [phutChamDuyet, maDatSan]);
+       WHERE d.MaDatSan=?`, [maDatSan]);
     const dangChoDuyet = thanhToan?.trangThai === 'confirming';
     if (dangChoDuyet && !Number(thanhToan.daQuaHan)) {
       throw AppError.duLieuKhongHopLe(
-        `Chủ sân vẫn còn trong thời gian xác nhận. Nếu sau ${phutChamDuyet} phút chủ sân chưa duyệt, bạn có thể khiếu nại.`);
+        `Chủ sân vẫn còn trong thời gian xác nhận${thanhToan.hanXacNhan ? ` (đến ${thanhToan.hanXacNhan})` : ''}. `
+        + 'Nếu quá hạn mà chủ sân chưa duyệt, bạn có thể khiếu nại.');
     }
     if (!dangChoDuyet) {
       throw AppError.duLieuKhongHopLe(
@@ -138,18 +139,17 @@ async function guiKhieuNai(maKhachHang, maDatSan, { noiDung, giaiDoan }) {
 
 async function guiKhieuNaiHoanTien(maKhachHang, maHoanTien, { lyDo }) {
   return thucHienGiaoDich(async (ketNoi) => {
-    const phutCho = await layCauHinhSo(ketNoi, 'refund_complaint_wait_minutes', PHUT_CHO_KHIEU_NAI_HOAN_MAC_DINH);
     const [[ht]] = await ketNoi.query(
       `SELECT h.MaHoanTien AS maHoanTien, h.MaDatSan AS maDatSan, h.TrangThai AS trangThai, h.SoTien AS soTien,
-         (h.NgayTao + INTERVAL ? MINUTE <= NOW()) AS daDuCho,
-         DATE_FORMAT(h.NgayTao + INTERVAL ? MINUTE, '%H:%i %d/%m/%Y') AS moKhiNao,
+         (h.HanHoan IS NOT NULL AND h.HanHoan < NOW()) AS daDuCho,
+         DATE_FORMAT(h.HanHoan, '%H:%i %d/%m/%Y') AS moKhiNao,
          d.MaDon AS maDon, d.TenKhach AS tenKhach, d.MaKhachHang AS maKhach,
          s.TenSan AS tenSan, cs.MaCoSo AS maCoSo, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan,
          DATE_FORMAT(NOW(), '%H:%i %d/%m/%Y') AS luc
        FROM HoanTien h JOIN DatSan d ON d.MaDatSan=h.MaDatSan
          JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        WHERE h.MaHoanTien=? FOR UPDATE`,
-      [phutCho, phutCho, maHoanTien]);
+      [maHoanTien]);
     if (!ht || Number(ht.maKhach) !== Number(maKhachHang)) throw AppError.khongTimThay('Không tìm thấy yêu cầu hoàn tiền');
     if (!['processing', 'not_received', 'escalated'].includes(ht.trangThai)) {
       throw AppError.biTrung(
@@ -159,8 +159,9 @@ async function guiKhieuNaiHoanTien(maKhachHang, maHoanTien, { lyDo }) {
     }
     if (!Number(ht.daDuCho)) {
       throw AppError.duLieuKhongHopLe(
-        `Chủ sân còn trong thời gian hoàn tiền. Sau ${ht.moKhiNao} nếu vẫn chưa nhận được tiền, bạn có thể báo chưa nhận được tiền hoàn.`,
-        );
+        ht.moKhiNao
+          ? `Chủ sân còn trong thời gian hoàn tiền. Sau ${ht.moKhiNao} nếu vẫn chưa nhận được tiền, bạn có thể báo chưa nhận được tiền hoàn.`
+          : 'Khoản hoàn này chưa có hạn chuyển hoàn (quản trị viên đang xử lý), bạn chưa cần báo chưa nhận được tiền.');
     }
     const [[daCo]] = await ketNoi.query(
       "SELECT MaKhieuNai AS maKhieuNai FROM KhieuNai WHERE MaDatSan=? AND Loai='refund'", [ht.maDatSan]);
@@ -212,7 +213,7 @@ async function lietKeKhieuNaiCuaKhach(maKhachHang) {
        cs.TenCoSo AS tenCoSo, k.NoiDung AS noiDung, k.TrangThai AS trangThai,
        k.GhiChuQuanTri AS ghiChuQuanTri, k.NgayTao AS ngayTao, k.NgayXuLy AS ngayXuLy
      FROM KhieuNai k JOIN DatSan d ON d.MaDatSan=k.MaDatSan JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
-     WHERE k.MaKhachHang=? ORDER BY k.NgayTao DESC`, [maKhachHang]);
+     WHERE k.MaKhachHang=? AND k.DaXoa=0 ORDER BY k.NgayTao DESC`, [maKhachHang]);
   return cacKhieuNai.map((k) => ({ ...k, maKhieuNaiHienThi: maKhieuNaiHienThi(k.maKhieuNai) }));
 }
 
@@ -246,7 +247,7 @@ async function lietKeKhieuNaiCuaChuSan(maChuSan, { trangThai = 'all', gioiHan = 
        JOIN NguoiDung kh ON kh.MaNguoiDung=k.MaKhachHang
        JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
        LEFT JOIN HoanTien h ON h.MaHoanTien=k.MaHoanTien
-     WHERE k.MaChuSan=? AND (? = 'all' OR k.TrangThai = ?)
+     WHERE k.MaChuSan=? AND k.DaXoa=0 AND (? = 'all' OR k.TrangThai = ?)
      ORDER BY (k.TrangThai='pending') DESC, k.NgayTao DESC LIMIT ?`,
     [gio, gioKhangNghi, gioKhangNghi, gio, gio, maChuSan, trangThai, trangThai, Number(gioiHan)]);
   return cacKhieuNai.map(({ bangChungQuanTri, ...k }) => ({
@@ -267,7 +268,7 @@ async function phanHoiKhieuNai(maChuSan, maKhieuNai, { noiDung }) {
          k.Loai AS loai, d.MaDon AS maDon, d.TenKhach AS tenKhach, cs.TenCoSo AS tenCoSo,
          DATE_FORMAT(NOW(), '%H:%i %d/%m/%Y') AS luc
        FROM KhieuNai k JOIN DatSan d ON d.MaDatSan=k.MaDatSan JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
-       WHERE k.MaKhieuNai=? AND k.MaChuSan=? FOR UPDATE`, [maKhieuNai, maChuSan]);
+       WHERE k.MaKhieuNai=? AND k.MaChuSan=? AND k.DaXoa=0 FOR UPDATE`, [maKhieuNai, maChuSan]);
     if (!kn) throw AppError.khongTimThay('Không tìm thấy khiếu nại');
     if (kn.trangThai !== 'pending') throw AppError.biTrung('Khiếu nại này đã được quản trị viên xử lý, không thể phản hồi thêm.');
     if (kn.daPhanHoi) throw AppError.biTrung('Bạn đã phản hồi khiếu nại này rồi.');
@@ -325,7 +326,7 @@ async function lietKeKhieuNai({ trangThai = 'pending', gioiHan = 50 } = {}) {
        END
        LEFT JOIN HoanTien ht ON ht.MaHoanTien=k.MaHoanTien
        LEFT JOIN Gay g ON g.MaKhieuNai=k.MaKhieuNai
-     WHERE (? = 'all' OR k.TrangThai = ?)
+     WHERE k.DaXoa=0 AND (? = 'all' OR k.TrangThai = ?)
      ORDER BY k.NgayTao ASC LIMIT ?`,
     [gioPhanHoi, gioPhanHoi, trangThai, trangThai, Number(gioiHan)]);
   return cacKhieuNai.map(({ bangChungQuanTri, ...muc }) => ({
@@ -346,7 +347,7 @@ async function xuLyKhieuNai(maQuanTri, maKhieuNai, { quyetDinh, ghiChu }, cacAnh
          k.MaChuSan AS maChuSan, k.MaDatSan AS maDatSan, k.Loai AS loai, k.MaHoanTien AS maHoanTien,
          d.MaDon AS maDon, cs.TenCoSo AS tenCoSo
        FROM KhieuNai k JOIN DatSan d ON d.MaDatSan=k.MaDatSan JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
-       WHERE k.MaKhieuNai=? FOR UPDATE`, [maKhieuNai]);
+       WHERE k.MaKhieuNai=? AND k.DaXoa=0 FOR UPDATE`, [maKhieuNai]);
     if (!khieuNai) throw AppError.khongTimThay('Không tìm thấy khiếu nại');
     if (khieuNai.trangThai !== 'pending') throw AppError.biTrung('Khiếu nại này đã được xử lý');
 
@@ -388,7 +389,7 @@ async function xuLyKhieuNai(maQuanTri, maKhieuNai, { quyetDinh, ghiChu }, cacAnh
     if (mucXuLy === 'banned') {
       await ketNoi.query(
         "UPDATE NguoiDung SET TrangThai='locked', LyDoKhoa=? WHERE MaNguoiDung=?",
-        [`Bị khoá do ${SO_LAN_KHOA} lần khiếu nại được xác nhận`, khieuNai.maChuSan]);
+        [lyDoKhoaTuDong(), khieuNai.maChuSan]);
       // Đang trong giao dịch → ngắt trễ để lệnh khóa kịp commit (G8.0).
       ngatKetNoiNguoiDung(khieuNai.maChuSan, { troMs: 1000 });
       await ketNoi.query("UPDATE CoSo SET TrangThai='hidden' WHERE MaChuSan=? AND TrangThai='active'", [khieuNai.maChuSan]);
@@ -405,12 +406,19 @@ async function xuLyKhieuNai(maQuanTri, maKhieuNai, { quyetDinh, ghiChu }, cacAnh
     // Khiếu nại hoàn tiền được chấp nhận: chủ sân phải hoàn trong hạn mới (mặc định 24 giờ), báo cho chủ sân.
     let hanHoanMoi = null;
     if (quyetDinh === 'upheld' && khieuNai.loai === 'refund' && khieuNai.maHoanTien) {
-      const gio = await layCauHinhSo(ketNoi, 'refund_grace_hours', GIO_HAN_HOAN_LAI_MAC_DINH);
+      // G9.C2: tính bằng phút (refund_grace_hours × 60) để cùng đơn vị với HanHoan ở hoanTienService.
+      const phut = (await layCauHinhSo(ketNoi, 'refund_grace_hours', GIO_HAN_HOAN_LAI_MAC_DINH)) * 60;
       const [capNhat] = await ketNoi.query(
-        `UPDATE HoanTien SET HanHoan=NOW() + INTERVAL ? HOUR, NgayNhacHan=NULL,
+        `UPDATE HoanTien SET HanHoan=NOW() + INTERVAL ? MINUTE, NgayNhacHan=NULL,
            TrangThai=IF(TrangThai='escalated','processing',TrangThai)
-         WHERE MaHoanTien=? AND TrangThai IN ('processing','not_received','escalated')`, [gio, khieuNai.maHoanTien]);
+         WHERE MaHoanTien=? AND TrangThai IN ('processing','not_received','escalated')`, [phut, khieuNai.maHoanTien]);
       if (capNhat.affectedRows) {
+        // Hạn mới → nhắc mốc và báo quá hạn (escalated) được phép chạy lại từ đầu (G9.C5).
+        const maHT = khieuNai.maHoanTien;
+        await giaiPhongKhoaNhac(ketNoi, `refund_expiring:${maHT}:`);
+        await giaiPhongKhoaNhac(ketNoi, `refund_escalated:${maHT}:`);
+        await giaiPhongKhoaNhac(ketNoi, `refund_escalated_khach:${maHT}`, { chinhXac: true });
+        await giaiPhongKhoaNhac(ketNoi, `refund_escalated_chu_san:${maHT}`, { chinhXac: true });
         const [[h]] = await ketNoi.query(
           "SELECT DATE_FORMAT(HanHoan, '%H:%i %d/%m/%Y') AS han FROM HoanTien WHERE MaHoanTien=?", [khieuNai.maHoanTien]);
         hanHoanMoi = h.han;
@@ -488,8 +496,20 @@ async function dongBoSoLanViPham(ketNoi, maChuSan) {
   return so;
 }
 
+// Số ảnh bằng chứng kháng nghị (G9.C9): bắt buộc ≥1, tối đa 3.
+const TOI_THIEU_ANH_KHANG_NGHI = 1;
+const TOI_DA_ANH_KHANG_NGHI = 3;
+
 // Chủ sân kháng nghị MỘT lần quyết định chấp nhận khiếu nại, trong appeal_hours kể từ lúc Admin xử lý.
-async function khangNghiKhieuNai(maChuSan, maKhieuNai, { noiDung }) {
+// G9.C9: kèm 1–3 ảnh bằng chứng (`KhangNghi.BangChung` = JSON mảng đường dẫn ảnh).
+async function khangNghiKhieuNai(maChuSan, maKhieuNai, { noiDung }, cacAnhBangChung = []) {
+  if (cacAnhBangChung.length < TOI_THIEU_ANH_KHANG_NGHI) {
+    throw AppError.duLieuKhongHopLe('Vui lòng đính kèm ít nhất 1 ảnh bằng chứng cho kháng nghị.');
+  }
+  if (cacAnhBangChung.length > TOI_DA_ANH_KHANG_NGHI) {
+    throw AppError.duLieuKhongHopLe(`Chỉ đính kèm tối đa ${TOI_DA_ANH_KHANG_NGHI} ảnh bằng chứng.`);
+  }
+  const bangChung = cacAnhBangChung.map((tep) => `/tep-tai-len/${tep.filename}`);
   const gio = await layCauHinhSo(pool, 'appeal_hours', GIO_KHANG_NGHI_MAC_DINH);
   return thucHienGiaoDich(async (ketNoi) => {
     const [[kn]] = await ketNoi.query(
@@ -498,7 +518,7 @@ async function khangNghiKhieuNai(maChuSan, maKhieuNai, { noiDung }) {
          (k.NgayXuLy + INTERVAL ? HOUR >= NOW()) AS conHan
        FROM KhieuNai k JOIN DatSan d ON d.MaDatSan=k.MaDatSan JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
          LEFT JOIN Gay g ON g.MaKhieuNai=k.MaKhieuNai
-       WHERE k.MaKhieuNai=? AND k.MaChuSan=? FOR UPDATE`, [gio, maKhieuNai, maChuSan]);
+       WHERE k.MaKhieuNai=? AND k.MaChuSan=? AND k.DaXoa=0 FOR UPDATE`, [gio, maKhieuNai, maChuSan]);
     if (!kn) throw AppError.khongTimThay('Không tìm thấy khiếu nại');
     if (kn.trangThai !== 'upheld' || !kn.maGay) throw AppError.biTrung('Chỉ kháng nghị được khiếu nại đã bị chấp nhận (có gậy).', 'APPEAL_NOT_ALLOWED');
     const [[daCo]] = await ketNoi.query('SELECT MaKhangNghi FROM KhangNghi WHERE MaKhieuNai=?', [maKhieuNai]);
@@ -507,11 +527,13 @@ async function khangNghiKhieuNai(maChuSan, maKhieuNai, { noiDung }) {
     if (kn.trangThaiGay !== 'active') throw AppError.biTrung('Gậy này không còn hiệu lực để kháng nghị.', 'APPEAL_NOT_ALLOWED');
 
     const [them] = await ketNoi.query(
-      'INSERT INTO KhangNghi (MaKhieuNai, MaGay, MaChuSan, NoiDung) VALUES (?,?,?,?)', [maKhieuNai, kn.maGay, maChuSan, noiDung]);
+      'INSERT INTO KhangNghi (MaKhieuNai, MaGay, MaChuSan, NoiDung, BangChung) VALUES (?,?,?,?,?)',
+      [maKhieuNai, kn.maGay, maChuSan, noiDung, JSON.stringify(bangChung)]);
     await ketNoi.query("UPDATE Gay SET TrangThai='appealed' WHERE MaGay=?", [kn.maGay]);
     await nhatKy.ghiNhatKy(ketNoi, {
       maNguoiThucHien: maChuSan, hanhDong: 'khang_nghi_khieu_nai', doiTuong: 'KhieuNai', maDoiTuong: maKhieuNai,
-      chiTiet: noiDung, truoc: { trangThaiGay: 'active' }, sau: { trangThaiGay: 'appealed', maKhangNghi: them.insertId },
+      chiTiet: noiDung, truoc: { trangThaiGay: 'active' },
+      sau: { trangThaiGay: 'appealed', maKhangNghi: them.insertId, soAnhBangChung: bangChung.length },
     });
     const maHienThi = maKhieuNaiHienThi(maKhieuNai);
     await guiChoQuanTri(ketNoi, {
@@ -519,7 +541,7 @@ async function khangNghiKhieuNai(maChuSan, maKhieuNai, { noiDung }) {
       noiDung: `Chủ sân (${kn.tenCoSo}) kháng nghị quyết định về khiếu nại ${maHienThi} (đơn ${kn.maDon}). Nội dung: ${rutGonVanBan(noiDung, 250)}`,
       loaiThamChieu: 'complaint', maThamChieu: Number(maKhieuNai), khoa: `appeal_admin:${maKhieuNai}`,
     });
-    return { maKhangNghi: them.insertId, maKhieuNai: Number(maKhieuNai), trangThai: 'pending' };
+    return { maKhangNghi: them.insertId, maKhieuNai: Number(maKhieuNai), trangThai: 'pending', bangChung };
   });
 }
 
@@ -527,18 +549,27 @@ async function lietKeKhangNghi({ trangThai = 'pending', gioiHan = 50 } = {}) {
   const [cacDong] = await pool.query(
     `SELECT kn.MaKhangNghi AS maKhangNghi, kn.MaKhieuNai AS maKhieuNai, kn.MaGay AS maGay, kn.NoiDung AS noiDung,
        kn.TrangThai AS trangThai, kn.GhiChuQuanTri AS ghiChuQuanTri, kn.NgayTao AS ngayTao, kn.NgayXuLy AS ngayXuLy,
+       kn.BangChung AS bangChungKhangNghi,
        k.NoiDung AS noiDungKhieuNai, k.GhiChuQuanTri AS lyDoQuyetDinh, k.BangChungQuanTri AS bangChungQuanTri,
-       k.PhanHoiChuSan AS phanHoiChuSan, g.TrangThai AS trangThaiGay,
-       cu.MaNguoiDung AS maChuSan, cu.HoTen AS tenChuSan, cs.TenCoSo AS tenCoSo, d.MaDon AS maDon
+       k.Loai AS loaiKhieuNai, k.PhanHoiChuSan AS phanHoiChuSan, g.TrangThai AS trangThaiGay,
+       cu.MaNguoiDung AS maChuSan, cu.HoTen AS tenChuSan, cs.TenCoSo AS tenCoSo, d.MaDon AS maDon,
+       -- G9.C9: để Admin biết khách đã nhận tiền hoàn chưa trước khi chấp nhận kháng nghị.
+       ht.MaHoanTien AS maHoanTien, ht.TrangThai AS trangThaiHoanTien, ht.NgayKhachXacNhan AS ngayKhachXacNhan,
+       ht.AnhChungTu AS anhChungTuHoan
      FROM KhangNghi kn
        JOIN KhieuNai k ON k.MaKhieuNai=kn.MaKhieuNai
+       LEFT JOIN HoanTien ht ON ht.MaHoanTien=k.MaHoanTien
        JOIN Gay g ON g.MaGay=kn.MaGay
        JOIN NguoiDung cu ON cu.MaNguoiDung=kn.MaChuSan
        JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
        JOIN DatSan d ON d.MaDatSan=k.MaDatSan
-     WHERE (? = 'all' OR kn.TrangThai = ?) ORDER BY kn.NgayTao ASC LIMIT ?`, [trangThai, trangThai, Number(gioiHan)]);
-  return cacDong.map(({ bangChungQuanTri, ...d }) => ({
-    ...d, bangChung: docBangChung(bangChungQuanTri), maKhieuNaiHienThi: maKhieuNaiHienThi(d.maKhieuNai),
+     WHERE k.DaXoa=0 AND (? = 'all' OR kn.TrangThai = ?) ORDER BY kn.NgayTao ASC LIMIT ?`, [trangThai, trangThai, Number(gioiHan)]);
+  // G9.C9: `bangChung` = ảnh chủ sân đính kèm kháng nghị; ảnh Admin đính kèm khi xử lý khiếu nại đổi tên `bangChungQuanTri`.
+  return cacDong.map(({ bangChungQuanTri, bangChungKhangNghi, ...d }) => ({
+    ...d,
+    bangChung: docBangChung(bangChungKhangNghi),
+    bangChungQuanTri: docBangChung(bangChungQuanTri),
+    maKhieuNaiHienThi: maKhieuNaiHienThi(d.maKhieuNai),
   }));
 }
 
@@ -548,11 +579,23 @@ async function xuLyKhangNghi(maQuanTri, maKhangNghi, { quyetDinh, ghiChu }) {
   return thucHienGiaoDich(async (ketNoi) => {
     const [[kn]] = await ketNoi.query(
       `SELECT kn.MaKhangNghi AS maKhangNghi, kn.TrangThai AS trangThai, kn.MaGay AS maGay, kn.MaKhieuNai AS maKhieuNai,
-         kn.MaChuSan AS maChuSan, d.MaDon AS maDon
+         kn.MaChuSan AS maChuSan, d.MaDon AS maDon, k.Loai AS loaiKhieuNai, k.MaHoanTien AS maHoanTien,
+         ht.TrangThai AS trangThaiHoanTien, ht.NgayKhachXacNhan AS ngayKhachXacNhan, ht.AnhChungTu AS anhChungTuHoan
        FROM KhangNghi kn JOIN KhieuNai k ON k.MaKhieuNai=kn.MaKhieuNai JOIN DatSan d ON d.MaDatSan=k.MaDatSan
-       WHERE kn.MaKhangNghi=? FOR UPDATE`, [maKhangNghi]);
+         LEFT JOIN HoanTien ht ON ht.MaHoanTien=k.MaHoanTien
+       WHERE kn.MaKhangNghi=? AND k.DaXoa=0 FOR UPDATE`, [maKhangNghi]);
     if (!kn) throw AppError.khongTimThay('Không tìm thấy kháng nghị');
     if (kn.trangThai !== 'pending') throw AppError.biTrung('Kháng nghị này đã được xử lý');
+    // G9.C9: kháng nghị khiếu nại hoàn tiền chỉ được CHẤP NHẬN khi khách đã bấm "đã nhận tiền" hoặc có ảnh chứng từ hoàn
+    // (điều kiện đã đồng ý). Khiếu nại `service` (chậm duyệt) không có khoản hoàn → không áp điều kiện này.
+    if (quyetDinh === 'accepted' && kn.loaiKhieuNai === 'refund' && kn.maHoanTien) {
+      const khachDaNhan = kn.trangThaiHoanTien === 'received' || kn.ngayKhachXacNhan != null;
+      if (!khachDaNhan && !kn.anhChungTuHoan) {
+        throw AppError.biTrung(
+          'Chưa thể chấp nhận kháng nghị: khách chưa xác nhận đã nhận tiền hoàn và chưa có ảnh chứng từ hoàn tiền.',
+          'APPEAL_REFUND_NOT_CONFIRMED');
+      }
+    }
     await ketNoi.query('SELECT MaNguoiDung FROM HoSoChuSan WHERE MaNguoiDung=? FOR UPDATE', [kn.maChuSan]);
     const chapNhan = quyetDinh === 'accepted';
     await ketNoi.query(
@@ -585,6 +628,111 @@ async function xuLyKhangNghi(maQuanTri, maKhangNghi, { quyetDinh, ghiChu }) {
   });
 }
 
+// ---------------- Thu hồi khiếu nại (G9.D3) ----------------
+// Admin "xoá" một khiếu nại đã xử lý nhầm (hoặc còn chờ). Xoá MỀM (KhieuNai.DaXoa=1) vì Gay.MaKhieuNai có FK + CHK_Gay_Nguon.
+// - Khiếu nại `upheld`: gậy (Gay) → revoked, tính lại SoLanViPham, kháng nghị đang chờ → cancelled.
+// - Chủ sân đang bị khoá CHỈ do đủ gậy (LyDoKhoa đúng chuỗi tự động) mà gậy hiệu lực nay < SO_LAN_KHOA → tự mở khoá,
+//   cơ sở `hidden` do khoá được bật lại qua kichHoatCoSoNeuSanSang. Khoá tay bởi Admin (lý do khác) giữ nguyên.
+// - Báo chủ sân + khách, ghi NhatKyHeThong. Không hoàn tác được các việc phụ của lần khoá cũ (sự kiện đã tự huỷ vẫn huỷ).
+async function thuHoiKhieuNai(maQuanTri, maKhieuNai, { lyDo }) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[kn]] = await ketNoi.query(
+      `SELECT k.MaKhieuNai AS maKhieuNai, k.TrangThai AS trangThai, k.MaKhachHang AS maKhachHang,
+         k.MaChuSan AS maChuSan, k.DaXoa AS daXoa, d.MaDon AS maDon, cs.TenCoSo AS tenCoSo
+       FROM KhieuNai k JOIN DatSan d ON d.MaDatSan=k.MaDatSan JOIN CoSo cs ON cs.MaCoSo=k.MaCoSo
+       WHERE k.MaKhieuNai=? FOR UPDATE`, [maKhieuNai]);
+    if (!kn) throw AppError.khongTimThay('Không tìm thấy khiếu nại');
+    if (Number(kn.daXoa)) throw AppError.biTrung('Khiếu nại này đã được thu hồi trước đó.', 'COMPLAINT_ALREADY_DELETED');
+
+    // Khoá hồ sơ chủ sân trước (cùng thứ tự với xuLyKhieuNai/xuLyKhangNghi) để các thao tác gậy không chạy song song.
+    await ketNoi.query('SELECT MaNguoiDung FROM HoSoChuSan WHERE MaNguoiDung=? FOR UPDATE', [kn.maChuSan]);
+    const soLanTruoc = await demGayHieuLuc(ketNoi, kn.maChuSan);
+
+    let daThuHoiGay = false;
+    let trangThaiGayTruoc = null;
+    if (kn.trangThai === 'upheld') {
+      const [[gay]] = await ketNoi.query(
+        'SELECT MaGay AS maGay, TrangThai AS trangThai FROM Gay WHERE MaKhieuNai=? FOR UPDATE', [maKhieuNai]);
+      if (gay) {
+        trangThaiGayTruoc = gay.trangThai;
+        if (gay.trangThai !== 'revoked') { // đã thu hồi qua kháng nghị rồi thì không làm lại
+          await ketNoi.query(
+            "UPDATE Gay SET TrangThai='revoked', NgayThuHoi=NOW(), LyDoThuHoi=?, MaQuanTriThuHoi=? WHERE MaGay=?",
+            [`Thu hồi khiếu nại: ${lyDo}`.slice(0, 500), maQuanTri, gay.maGay]);
+          daThuHoiGay = true;
+        }
+      }
+    }
+    // Kháng nghị chưa xử lý của khiếu nại này không còn đối tượng → huỷ (đã xử lý thì giữ làm lịch sử).
+    await ketNoi.query(
+      `UPDATE KhangNghi SET TrangThai='cancelled', GhiChuQuanTri=?, MaQuanTri=?, NgayXuLy=NOW()
+       WHERE MaKhieuNai=? AND TrangThai='pending'`,
+      [`Khiếu nại đã bị thu hồi: ${lyDo}`.slice(0, 500), maQuanTri, maKhieuNai]);
+
+    await ketNoi.query(
+      'UPDATE KhieuNai SET DaXoa=1, NgayXoa=NOW(), LyDoXoa=?, MaQuanTriXoa=? WHERE MaKhieuNai=?',
+      [lyDo, maQuanTri, maKhieuNai]);
+
+    const soLanViPham = await dongBoSoLanViPham(ketNoi, kn.maChuSan);
+
+    // Tự mở khoá khi tài khoản chỉ bị khoá do đủ gậy và nay không còn đủ.
+    let daMoKhoaChuSan = false;
+    let soCoSoBatLai = 0;
+    if (daThuHoiGay && soLanViPham < SO_LAN_KHOA) {
+      const [[tk]] = await ketNoi.query(
+        'SELECT TrangThai AS trangThai, LyDoKhoa AS lyDoKhoa FROM NguoiDung WHERE MaNguoiDung=? FOR UPDATE', [kn.maChuSan]);
+      if (tk?.trangThai === 'locked' && tk.lyDoKhoa === lyDoKhoaTuDong()) {
+        await ketNoi.query("UPDATE NguoiDung SET TrangThai='active', LyDoKhoa=NULL WHERE MaNguoiDung=?", [kn.maChuSan]);
+        daMoKhoaChuSan = true;
+        // Cơ sở bị ẩn lúc khoá (`hidden`): bật lại nếu đủ điều kiện hiển thị (sân hoạt động + bảng giá + chủ sân đã duyệt).
+        const [cacCoSoAn] = await ketNoi.query(
+          "SELECT MaCoSo AS maCoSo FROM CoSo WHERE MaChuSan=? AND TrangThai='hidden'", [kn.maChuSan]);
+        for (const { maCoSo } of cacCoSoAn) await sanCoSo.kichHoatCoSoNeuSanSang(ketNoi, maCoSo);
+        if (cacCoSoAn.length) {
+          const [[dem]] = await ketNoi.query(
+            `SELECT COUNT(*) AS so FROM CoSo WHERE MaCoSo IN (${cacCoSoAn.map(() => '?').join(',')}) AND TrangThai='active'`,
+            cacCoSoAn.map((c) => c.maCoSo));
+          soCoSoBatLai = Number(dem.so);
+        }
+      }
+    }
+
+    const maHienThi = maKhieuNaiHienThi(maKhieuNai);
+    await nhatKy.ghiNhatKy(ketNoi, {
+      maNguoiThucHien: maQuanTri, hanhDong: 'thu_hoi_khieu_nai', doiTuong: 'KhieuNai', maDoiTuong: maKhieuNai,
+      chiTiet: lyDo,
+      truoc: { trangThai: kn.trangThai, trangThaiGay: trangThaiGayTruoc, soLanViPham: soLanTruoc },
+      sau: { daXoa: true, daThuHoiGay, soLanViPham, daMoKhoaChuSan, soCoSoBatLai },
+    });
+
+    const tham = { loaiThamChieu: 'complaint', maThamChieu: Number(maKhieuNai) };
+    await guiThongBao(ketNoi, {
+      maNguoiDung: kn.maChuSan, loai: 'complaint_resolved',
+      tieuDe: `Khiếu nại ${maHienThi} đã được thu hồi`,
+      noiDung: `Quản trị viên đã thu hồi khiếu nại ${maHienThi} về đơn ${kn.maDon} (${kn.tenCoSo}).`
+        + (daThuHoiGay ? ` Lần vi phạm tương ứng đã được gỡ (hiện còn ${soLanViPham}/${SO_LAN_KHOA}).` : '')
+        + ` Lý do: ${lyDo}`,
+      ...tham, khoa: `complaint_revoked_owner:${maKhieuNai}`,
+    });
+    if (daMoKhoaChuSan) {
+      await guiThongBao(ketNoi, {
+        maNguoiDung: kn.maChuSan, loai: 'system', tieuDe: 'Tài khoản đã được mở khoá',
+        noiDung: 'Khiếu nại dẫn tới việc khoá tài khoản đã bị thu hồi, nên tài khoản chủ sân được mở khoá.'
+          + (soCoSoBatLai ? ` ${soCoSoBatLai} cơ sở đã hiển thị lại cho khách.` : ''),
+        ...tham, khoa: `owner_unlocked_by_revoke:${maKhieuNai}`,
+      });
+    }
+    await guiThongBao(ketNoi, {
+      maNguoiDung: kn.maKhachHang, loai: 'complaint_resolved',
+      tieuDe: `Khiếu nại ${maHienThi} đã bị thu hồi`,
+      noiDung: `Quản trị viên đã thu hồi khiếu nại ${maHienThi} của bạn về đơn ${kn.maDon}. Lý do: ${lyDo}`,
+      ...tham, khoa: `complaint_revoked_khach:${maKhieuNai}`,
+    });
+
+    return { maKhieuNai: Number(maKhieuNai), daThuHoi: daThuHoiGay, soLanViPham, daMoKhoaChuSan };
+  });
+}
+
 // Admin đặt/gỡ "khóa nhận đặt mới" cho chủ sân: chặn khách đặt MỚI, lịch đã đặt giữ nguyên (không tự hủy).
 async function datKhoaDatMoi(maQuanTri, maChuSan, { khoa, lyDo }) {
   return thucHienGiaoDich(async (ketNoi) => {
@@ -610,5 +758,5 @@ async function datKhoaDatMoi(maQuanTri, maChuSan, { khoa, lyDo }) {
 
 module.exports = {
   SO_LAN_KHOA, xacDinhMucXuLy, maKhieuNaiHienThi, guiKhieuNai, guiKhieuNaiHoanTien, lietKeKhieuNaiCuaChuSan, phanHoiKhieuNai, lietKeKhieuNaiCuaKhach, lietKeKhieuNai, xuLyKhieuNai,
-  khangNghiKhieuNai, lietKeKhangNghi, xuLyKhangNghi, datKhoaDatMoi,
+  khangNghiKhieuNai, lietKeKhangNghi, xuLyKhangNghi, thuHoiKhieuNai, datKhoaDatMoi,
 };

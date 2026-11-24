@@ -4,6 +4,7 @@
 // Quy tắc: docs/agent/features/events/rules.md. Sự kiện KHÔNG tạo DatSan: giữ lịch bằng KhoaSan(MaSuKien).
 const { pool, thucHienGiaoDich } = require('../config/db');
 const AppError = require('../utils/AppError');
+const { SAN_CHUA_XOA } = require('../utils/sanHienHanh');
 const { SLOT_BAN } = require('../utils/slot');
 const { laAnhThat, luuAnh, xoaAnhSuKien } = require('../middlewares/upload');
 const { layMucConThieuHoSo } = require('../utils/hoSoChuSan');
@@ -72,7 +73,7 @@ function chuanHoaNoiDung(du) {
 async function khoaCacSan(ketNoi, maCoSo, cacMaSan) {
   const [cacSan] = await ketNoi.query(
     `SELECT MaSan AS maSan FROM San
-     WHERE MaCoSo = ? AND TrangThai = 'active' AND MaSan IN (?) ORDER BY MaSan FOR UPDATE`,
+     WHERE MaCoSo = ? AND TrangThai = 'active' AND ${SAN_CHUA_XOA()} AND MaSan IN (?) ORDER BY MaSan FOR UPDATE`,
     [maCoSo, cacMaSan]);
   if (cacSan.length !== cacMaSan.length) {
     throw AppError.duLieuKhongHopLe('Có sân không thuộc cơ sở này hoặc đang không hoạt động', { truong: 'cacMaSan' });

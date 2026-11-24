@@ -4,12 +4,15 @@
 //
 // Vòng đời: waiting_info → processing → refunded → received (đóng)
 //                                         ↘ not_received (khách báo chưa nhận, vẫn tính HanHoan cũ) → refunded ...
-//           processing/not_received quá HanHoan → nhắc chủ sân; quá HanHoan + refund_grace_hours → escalated (báo Admin).
+//           processing/not_received: nhắc theo mốc trước HanHoan (refund_expiring); qua HanHoan + refund_overdue_grace_minutes → escalated NGAY (G9.C5).
+//           (refund_grace_hours chỉ còn dùng làm hạn mới khi Admin chấp nhận khiếu nại hoàn tiền.)
+//           Hạn HanHoan theo HoanTien.Loai, tính PHÚT (G9.C2): cancel 4320', owner_cancel/closure/incident 30', overpay tạm 3 ngày, late_proof Admin xử lý.
 // Chứng từ hoàn = ẢNH chuyển khoản (bắt buộc), không dùng mã giao dịch. Hệ thống không giữ/chuyển/hoàn tiền thay chủ sân:
 // Admin cũng chỉ được đánh dấu "đã hoàn" khi có ảnh chứng từ.
 const fs = require('fs/promises');
 const AppError = require('../utils/AppError');
-const { layCauHinhSo } = require('./cauHinhService');
+const { layCauHinhSo, layCauHinhDanhSach } = require('./cauHinhService');
+const { chonMocNhac } = require('../utils/mocNhac');
 const nhatKy = require('./nhatKyService');
 const { guiThongBao, guiChoQuanTri, dinhDangTien } = require('./notificationService');
 const { layDuongDanTep, laAnhThat } = require('../middlewares/upload');
@@ -17,8 +20,37 @@ const { layDuongDanTep, laAnhThat } = require('../middlewares/upload');
 const LOAI = ['cancel', 'owner_cancel', 'closure', 'incident', 'overpay', 'late_proof'];
 // Còn việc phải làm phía người chuyển tiền (chủ sân/Admin).
 const TRANG_THAI_CHO_HOAN = ['processing', 'not_received', 'escalated'];
-const HAN_HOAN_MAC_DINH_GIO = 24;
-const GIA_HAN_MAC_DINH_GIO = 24;
+// G9.C2: hạn hoàn tính bằng PHÚT (để hạn 30 phút không bị làm tròn thành giờ).
+const HAN_KHACH_HUY_MAC_DINH_PHUT = 4320; // 3 ngày
+const HAN_CHU_SAN_HUY_MAC_DINH_PHUT = 30;
+const HAN_LATE_PROOF_PHUT = 24 * 60; // late_proof do Admin xử lý (giữ nguyên 24 giờ như cũ), khoản waiting_info nên job không đụng tới
+// Loại hoàn → khoá cấu hình hạn (phút). overpay: TẠM dùng hạn 3 ngày (điểm mở §8.1 kế hoạch G9, chốt sau).
+const KHOA_HAN_THEO_LOAI = {
+  cancel: ['refund_deadline_minutes_customer_cancel', HAN_KHACH_HUY_MAC_DINH_PHUT],
+  overpay: ['refund_deadline_minutes_customer_cancel', HAN_KHACH_HUY_MAC_DINH_PHUT],
+  owner_cancel: ['refund_deadline_minutes_owner_cancel', HAN_CHU_SAN_HUY_MAC_DINH_PHUT],
+  closure: ['refund_deadline_minutes_owner_cancel', HAN_CHU_SAN_HUY_MAC_DINH_PHUT],
+  incident: ['refund_deadline_minutes_owner_cancel', HAN_CHU_SAN_HUY_MAC_DINH_PHUT],
+};
+
+// Hạn hoàn (phút kể từ lúc tạo khoản hoàn) theo HoanTien.Loai.
+async function layHanHoanPhut(ketNoi, loai) {
+  const cauHinh = KHOA_HAN_THEO_LOAI[loai];
+  return cauHinh ? layCauHinhSo(ketNoi, cauHinh[0], cauHinh[1]) : HAN_LATE_PROOF_PHUT;
+}
+
+// Số phút của hạn hoàn để HIỂN THỊ cho khách (`GET /khach/dat-san` → hanHoanPhut). late_proof do Admin xử lý → null (không nêu hạn).
+async function layHanHoanPhutChoKhach(ketNoi, loai) {
+  return loai === 'late_proof' ? null : layHanHoanPhut(ketNoi, loai);
+}
+
+// 30 → "30 phút", 90 → "90 phút", 360 → "6 giờ", 4320 → "3 ngày" (chỉ gọn khi chia hết).
+function dinhDangThoiGianPhut(phut) {
+  const so = Math.round(Number(phut) || 0);
+  if (so >= 1440 && so % 1440 === 0) return `${so / 1440} ngày`;
+  if (so >= 60 && so % 60 === 0) return `${so / 60} giờ`;
+  return `${so} phút`;
+}
 
 // ThanhToan.TrangThaiHoanTien (enum cũ) tương ứng với trạng thái HoanTien.
 const TRANG_THAI_THANH_TOAN = {
@@ -84,16 +116,16 @@ async function taoYeuCauHoan(ketNoi, {
   if (!LOAI.includes(loai)) throw new Error(`Loại hoàn tiền không hợp lệ: ${loai}`);
   const soTienHoan = Math.round(Number(soTien) || 0);
   if (soTienHoan <= 0) return null;
-  const hanGio = await layCauHinhSo(ketNoi, 'refund_deadline_hours', HAN_HOAN_MAC_DINH_GIO);
+  const hanPhut = await layHanHoanPhut(ketNoi, loai);
   const [[tk]] = await ketNoi.query(
     `SELECT TenNganHangHoan AS tenNganHang, MaNganHangHoan AS maNganHang, SoTaiKhoanHoan AS soTaiKhoan,
        ChuTaiKhoanHoan AS chuTaiKhoan FROM ThanhToan WHERE MaThanhToan=?`, [maThanhToan]);
   const [ketQua] = await ketNoi.query(
     `INSERT INTO HoanTien (MaThanhToan, MaDatSan, Loai, LyDo, TyLe, SoTien, TrangThai,
        TenNganHang, MaNganHang, SoTaiKhoan, ChuTaiKhoan, HanHoan)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?, NOW() + INTERVAL ? HOUR)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?, NOW() + INTERVAL ? MINUTE)`,
     [maThanhToan, maDatSan, loai, lyDo, tyLe, soTienHoan, trangThai,
-      tk?.tenNganHang ?? null, tk?.maNganHang ?? null, tk?.soTaiKhoan ?? null, tk?.chuTaiKhoan ?? null, hanGio]);
+      tk?.tenNganHang ?? null, tk?.maNganHang ?? null, tk?.soTaiKhoan ?? null, tk?.chuTaiKhoan ?? null, hanPhut]);
   const hoanTien = await layTheoMa(ketNoi, ketQua.insertId);
   await dongBoThanhToan(ketNoi, { ...hoanTien, tenNganHang: tk?.tenNganHang, maNganHang: tk?.maNganHang,
     soTaiKhoan: tk?.soTaiKhoan, chuTaiKhoan: tk?.chuTaiKhoan });
@@ -130,7 +162,7 @@ async function capNhatTaiKhoanNhan(ketNoi, maThanhToan, taiKhoan) {
 // Có khiếu nại hoàn tiền đang chờ cho khoản này → báo Admin diễn biến mới (chủ sân đã hoàn / khách đã nhận) để xử lý đúng.
 async function baoAdminKhieuNaiHoan(ketNoi, maHoanTien, maLoai, tieuDe, noiDung) {
   const [cacKn] = await ketNoi.query(
-    "SELECT MaKhieuNai AS ma FROM KhieuNai WHERE MaHoanTien=? AND Loai='refund' AND TrangThai='pending'", [maHoanTien]);
+    "SELECT MaKhieuNai AS ma FROM KhieuNai WHERE MaHoanTien=? AND Loai='refund' AND TrangThai='pending' AND DaXoa=0", [maHoanTien]);
   const lan = cacKn.length ? await soLanDaHoan(ketNoi, maHoanTien) : 0; // mỗi lần hoàn lại sau "chưa nhận" cần thông báo mới
   for (const { ma } of cacKn) {
     await guiChoQuanTri(ketNoi, {
@@ -262,63 +294,103 @@ async function khachBaoChuaNhan(ketNoi, maKhach, maHoanTien, ghiChu = null) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Quá hạn quá gia hạn → escalated + báo Admin (thang bậc khóa nhận đặt mới nối sang G5).
+// Quá HanHoan (+ refund_overdue_grace_minutes) → escalated + báo Admin, khách, chủ sân (thang bậc khóa nhận đặt mới nối sang G5).
 async function leoThang(ketNoi, maHoanTien) {
   const hoanTien = await layTheoMa(ketNoi, maHoanTien, true);
   if (!hoanTien || !['processing', 'not_received'].includes(hoanTien.trangThai)) return false;
   await ketNoi.query("UPDATE HoanTien SET TrangThai='escalated', NgayLeoThang=NOW() WHERE MaHoanTien=?", [maHoanTien]);
   await ghiNhatKy(ketNoi, null, 'leo_thang_hoan_tien', maHoanTien, `Quá hạn hoàn ${dinhDangTien(hoanTien.soTien)}, chuyển Admin`);
   const ben = await layBenLienQuan(ketNoi, maHoanTien);
-  await guiChoQuanTri(ketNoi, {
-    loai: 'refund_escalated', tieuDe: 'Hoàn tiền quá hạn cần xử lý',
-    noiDung: `Chủ sân chưa hoàn ${dinhDangTien(hoanTien.soTien)} cho đơn ${ben.maDon} (${ben.tenCoSo}) dù đã quá hạn.`,
-    loaiThamChieu: 'payment', maThamChieu: hoanTien.maThanhToan, khoa: `refund_escalated:${maHoanTien}`,
-  });
+  // G9.C10: khoản này đã có khiếu nại hoàn tiền được Admin chấp nhận (hạn mới = refund_grace_hours) mà chủ sân vẫn không hoàn.
+  // Khách không khiếu nại lần 2 được (UNIQUE (MaDatSan, Loai)) → báo Admin xử lý trực tiếp thay vì chờ khách.
+  const [[khieuNaiDaChapNhan]] = await ketNoi.query(
+    "SELECT MaKhieuNai AS maKhieuNai FROM KhieuNai WHERE MaHoanTien=? AND Loai='refund' AND TrangThai='upheld' AND DaXoa=0 LIMIT 1", [maHoanTien]);
+  if (khieuNaiDaChapNhan) {
+    await guiChoQuanTri(ketNoi, {
+      loai: 'refund_escalated', tieuDe: 'Chủ sân vẫn không hoàn tiền sau khi khiếu nại được chấp nhận',
+      noiDung: `Đơn ${ben.maDon} (${ben.tenCoSo}): khiếu nại hoàn tiền đã được chấp nhận nhưng chủ sân vẫn chưa hoàn `
+        + `${dinhDangTien(hoanTien.soTien)} trong hạn mới. Khách không khiếu nại lần 2 được, Admin cần xử lý trực tiếp `
+        + `(có thể khoá nhận đặt mới của chủ sân #${ben.maChuSan} qua PATCH /quan-tri/chu-san/${ben.maChuSan}/khoa-dat-moi).`,
+      loaiThamChieu: 'complaint', maThamChieu: Number(khieuNaiDaChapNhan.maKhieuNai),
+      khoa: `refund_escalated_truc_tiep:${maHoanTien}`,
+    });
+  } else {
+    await guiChoQuanTri(ketNoi, {
+      loai: 'refund_escalated', tieuDe: 'Hoàn tiền quá hạn cần xử lý',
+      noiDung: `Chủ sân chưa hoàn ${dinhDangTien(hoanTien.soTien)} cho đơn ${ben.maDon} (${ben.tenCoSo}) dù đã quá hạn.`,
+      loaiThamChieu: 'payment', maThamChieu: hoanTien.maThanhToan, khoa: `refund_escalated:${maHoanTien}`,
+    });
+  }
   await guiThongBao(ketNoi, {
     maNguoiDung: ben.maKhachHang, loai: 'refund_escalated', tieuDe: 'Hoàn tiền đang được Admin theo dõi',
     noiDung: `Khoản hoàn ${dinhDangTien(hoanTien.soTien)} của đơn ${ben.maDon} đã quá hạn, Admin đã được báo để hỗ trợ bạn.`,
     loaiThamChieu: 'booking', maThamChieu: hoanTien.maDatSan, khoa: `refund_escalated_khach:${maHoanTien}`,
   });
-  return true;
-}
-
-// Nhắc chủ sân quá hạn (1 lần / khoản).
-async function nhacChuSan(ketNoi, maHoanTien) {
-  const hoanTien = await layTheoMa(ketNoi, maHoanTien, true);
-  if (!hoanTien || !['processing', 'not_received'].includes(hoanTien.trangThai) || hoanTien.ngayNhacHan) return false;
-  await ketNoi.query('UPDATE HoanTien SET NgayNhacHan=NOW() WHERE MaHoanTien=?', [maHoanTien]);
-  const ben = await layBenLienQuan(ketNoi, maHoanTien);
-  const graceGio = await layCauHinhSo(ketNoi, 'refund_grace_hours', GIA_HAN_MAC_DINH_GIO);
   await guiThongBao(ketNoi, {
-    maNguoiDung: ben.maChuSan, loai: 'refund_reminder', tieuDe: 'Quá hạn hoàn tiền cho khách',
-    noiDung: `Bạn chưa hoàn ${dinhDangTien(hoanTien.soTien)} cho đơn ${ben.maDon} và đã quá hạn. `
-      + `Vui lòng chuyển khoản và tải ảnh chứng từ trong ${graceGio} giờ tới, nếu không khoản này sẽ chuyển cho Admin.`,
-    loaiThamChieu: 'payment', maThamChieu: hoanTien.maThanhToan, khoa: `refund_reminder:${maHoanTien}`,
+    maNguoiDung: ben.maChuSan, loai: 'refund_escalated', tieuDe: 'Hoàn tiền đã quá hạn, chuyển Admin',
+    noiDung: `Khoản hoàn ${dinhDangTien(hoanTien.soTien)} cho đơn ${ben.maDon} (${ben.tenCoSo}) đã quá hạn và được chuyển cho Admin. `
+      + 'Bạn vẫn có thể chuyển khoản và tải ảnh chứng từ ngay để hoàn tất.',
+    loaiThamChieu: 'payment', maThamChieu: hoanTien.maThanhToan, khoa: `refund_escalated_chu_san:${maHoanTien}`,
   });
   return true;
 }
 
-// Một lượt job: nhắc các khoản quá HanHoan; leo thang các khoản quá HanHoan + refund_grace_hours.
+// G9.C5: nhắc chủ sân hoàn tiền theo MỐC (loại thông báo `refund_expiring`).
+//   - Hạn ngắn (tổng hạn ≤ refund_deadline_minutes_owner_cancel, vd 30'): refund_reminder_steps_short (20/10/5).
+//   - Hạn dài (vd 3 ngày, hoặc hạn đặt lại sau khi Admin chấp nhận khiếu nại): refund_reminder_steps_long (1440/360/60).
+//   Mốc lớn hơn tổng hạn bị bỏ. Mỗi lượt chọn mốc nhỏ nhất s thoả conPhut <= s; chống trùng KhoaChongTrung
+//   'refund_expiring:<maHoanTien>:<s>'. Trả số thông báo đã gửi.
+async function nhacTheoMoc(ketNoi) {
+  const hanNganToiDa = await layCauHinhSo(ketNoi, 'refund_deadline_minutes_owner_cancel', HAN_CHU_SAN_HUY_MAC_DINH_PHUT);
+  const mocNgan = await layCauHinhDanhSach(ketNoi, 'refund_reminder_steps_short', [20, 10, 5]);
+  const mocDai = await layCauHinhDanhSach(ketNoi, 'refund_reminder_steps_long', [1440, 360, 60]);
+  const mocLonNhat = Math.max(mocNgan[0], mocDai[0]);
+  const [cacKhoan] = await ketNoi.query(
+    `SELECT MaHoanTien AS ma,
+       GREATEST(CEIL(TIMESTAMPDIFF(SECOND, NOW(), HanHoan) / 60), 1) AS conPhut,
+       TIMESTAMPDIFF(MINUTE, NgayTao, HanHoan) AS tongHanPhut
+     FROM HoanTien
+     WHERE TrangThai IN ('processing','not_received') AND HanHoan IS NOT NULL
+       AND HanHoan > NOW() AND HanHoan <= NOW() + INTERVAL ? MINUTE
+     ORDER BY MaHoanTien LIMIT 200`, [mocLonNhat]);
+  let soNhac = 0;
+  for (const khoan of cacKhoan) {
+    const tongHan = Number(khoan.tongHanPhut);
+    const moc = chonMocNhac(Number(khoan.conPhut), tongHan <= hanNganToiDa ? mocNgan : mocDai, tongHan);
+    if (moc === null) continue;
+    const hoanTien = await layTheoMa(ketNoi, khoan.ma, true);
+    if (!hoanTien || !['processing', 'not_received'].includes(hoanTien.trangThai)) continue;
+    const ben = await layBenLienQuan(ketNoi, khoan.ma);
+    await guiThongBao(ketNoi, {
+      maNguoiDung: ben.maChuSan, loai: 'refund_expiring', tieuDe: 'Sắp hết hạn hoàn tiền cho khách',
+      noiDung: `Bạn còn khoảng ${dinhDangThoiGianPhut(khoan.conPhut)} để hoàn ${dinhDangTien(hoanTien.soTien)} cho đơn ${ben.maDon} `
+        + `(${ben.tenCoSo}). Vui lòng chuyển khoản và tải ảnh chứng từ, quá hạn khoản này sẽ chuyển cho Admin xử lý.`,
+      loaiThamChieu: 'payment', maThamChieu: hoanTien.maThanhToan, khoa: `refund_expiring:${khoan.ma}:${moc}`,
+    });
+    soNhac += 1;
+  }
+  return soNhac;
+}
+
+// Một lượt job (G9.C5, chu kỳ 1 phút):
+//   1) khoản `processing`/`not_received` qua HanHoan + refund_overdue_grace_minutes (mặc định 0) → `escalated` NGAY,
+//      báo Admin + khách + chủ sân (không còn nhánh "nhắc quá hạn rồi chờ refund_grace_hours"). Chủ sân vẫn hoàn được khi escalated.
+//   2) khoản còn hạn → nhắc theo mốc (nhacTheoMoc).
 async function chayJobHanHoan(ketNoi) {
-  const graceGio = await layCauHinhSo(ketNoi, 'refund_grace_hours', GIA_HAN_MAC_DINH_GIO);
+  const gracePhut = await layCauHinhSo(ketNoi, 'refund_overdue_grace_minutes', 0);
   const [cacLeoThang] = await ketNoi.query(
     `SELECT MaHoanTien AS ma FROM HoanTien
-     WHERE TrangThai IN ('processing','not_received') AND HanHoan IS NOT NULL AND HanHoan + INTERVAL ? HOUR < NOW()
-     ORDER BY MaHoanTien LIMIT 200 FOR UPDATE`, [graceGio]);
+     WHERE TrangThai IN ('processing','not_received') AND HanHoan IS NOT NULL AND HanHoan + INTERVAL ? MINUTE < NOW()
+     ORDER BY MaHoanTien LIMIT 200 FOR UPDATE`, [gracePhut]);
   let soLeoThang = 0;
   for (const { ma } of cacLeoThang) if (await leoThang(ketNoi, ma)) soLeoThang += 1;
-  const [cacNhac] = await ketNoi.query(
-    `SELECT MaHoanTien AS ma FROM HoanTien
-     WHERE TrangThai IN ('processing','not_received') AND HanHoan IS NOT NULL AND HanHoan < NOW() AND NgayNhacHan IS NULL
-     ORDER BY MaHoanTien LIMIT 200 FOR UPDATE`);
-  let soNhac = 0;
-  for (const { ma } of cacNhac) if (await nhacChuSan(ketNoi, ma)) soNhac += 1;
+  const soNhac = await nhacTheoMoc(ketNoi);
   return { soNhac, soLeoThang };
 }
 
 module.exports = {
   LOAI, TRANG_THAI_CHO_HOAN,
   taoYeuCauHoan, dongBoHoanTienQuaHan, capNhatTaiKhoanNhan, kiemTraAnhChungTu,
-  danhDauDaHoan, khachXacNhan, khachBaoChuaNhan, leoThang, nhacChuSan, chayJobHanHoan,
-  layYeuCauDangMo, layTheoMa, dongBoThanhToan,
+  danhDauDaHoan, khachXacNhan, khachBaoChuaNhan, leoThang, nhacTheoMoc, chayJobHanHoan,
+  layYeuCauDangMo, layTheoMa, dongBoThanhToan, layHanHoanPhut, layHanHoanPhutChoKhach, dinhDangThoiGianPhut,
 };
