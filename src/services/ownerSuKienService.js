@@ -413,11 +413,14 @@ async function suaSuKien(maChuSan, maSuKien, du) {
       const coSuaHangMuc = du.themHangMuc?.length || du.suaHangMuc?.length || du.xoaHangMuc?.length;
       if (coSuaHangMuc) {
         if (sk.loai !== 'tournament') throw AppError.duLieuKhongHopLe('Chỉ Giải đấu mới có hạng mục', { truong: 'hangMuc' });
+        // [TiDB] Không dùng GROUP BY ... FOR UPDATE: khóa riêng các dòng hạng mục rồi mới đếm (không khóa).
+        await ketNoi.query(
+          'SELECT MaHangMuc FROM HangMucSuKien WHERE MaSuKien = ? ORDER BY MaHangMuc FOR UPDATE', [maSuKien]);
         const [cacHangMuc] = await ketNoi.query(
           `SELECT hm.MaHangMuc AS maHangMuc, hm.TenHangMuc AS tenHangMuc, hm.SoLuongToiDa AS soLuongToiDa,
              COUNT(dk.MaDangKy) AS tong, COALESCE(SUM(dk.TrangThai = 'accepted'), 0) AS daNhan
            FROM HangMucSuKien hm LEFT JOIN DangKySuKien dk ON dk.MaHangMuc = hm.MaHangMuc
-           WHERE hm.MaSuKien = ? GROUP BY hm.MaHangMuc FOR UPDATE`, [maSuKien]);
+           WHERE hm.MaSuKien = ? GROUP BY hm.MaHangMuc`, [maSuKien]);
         const theoMa = new Map(cacHangMuc.map((hm) => [hm.maHangMuc, hm]));
         const timHangMuc = (ma) => {
           const hm = theoMa.get(ma);

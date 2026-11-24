@@ -9,17 +9,26 @@ const pool = mysql.createPool({
   password: cauHinh.coSoDuLieu.matKhau,
   database: cauHinh.coSoDuLieu.ten,
 
-  // SSL/TLS cho TiDB Cloud
-  // ssl: {
-  //   minVersion: 'TLSv1.2',
-  // },
+  // [TiDB] TiDB Cloud bắt buộc TLS. Đặt DB_SSL=false chỉ khi chạy DB local không TLS.
+  ssl: process.env.DB_SSL === 'false' ? undefined : { minVersion: 'TLSv1.2', rejectUnauthorized: true },
 
   waitForConnections: true,
   connectionLimit: 10,
+  // [TiDB] TiDB Cloud ngắt kết nối nhàn rỗi -> giữ kết nối sống và tự dọn kết nối idle
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+  maxIdle: 10,
+  idleTimeout: 60000,
   timezone: '+07:00',
   dateStrings: true,
   decimalNumbers: true,
   namedPlaceholders: true,
+});
+
+// [TiDB] TiDB Cloud mặc định múi giờ UTC. Option `timezone` của mysql2 KHÔNG đổi NOW()/CURDATE()/CURRENT_TIMESTAMP
+// trong SQL, nên phải ép time_zone cho TỪNG kết nối, nếu không hạn giữ chỗ/hạn hoàn/giờ chơi lệch 7 tiếng.
+pool.pool.on('connection', (ketNoi) => {
+  ketNoi.query("SET time_zone = '+07:00'");
 });
 
 async function thucHienGiaoDich(hamThucThi) {

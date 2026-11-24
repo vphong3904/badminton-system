@@ -1,4 +1,11 @@
 -- =====================================================================
+-- [TiDB CLOUD] Bản dành cho TiDB Cloud (TiDB >= 8.5: khóa ngoại + CHECK có hiệu lực).
+-- Nội dung dữ liệu giữ nguyên bản gốc; chỉ khác phần ghi chú này.
+-- Nếu import báo lỗi ở cột sinh STORED (San.TenDangDung, DangKySuKien.KhoaHangMuc)
+-- thì đổi "STORED" thành "VIRTUAL" ở 2 chỗ đó.
+-- Chạy: 1) db_sancaulong_tidb.sql   2) db_sancaulong_data_tidb.sql
+-- =====================================================================
+-- =====================================================================
 -- HỆ THỐNG ĐẶT SÂN CẦU LÔNG - db_sancaulong_data.sql (CHỈ DỮ LIỆU)
 -- Chạy SAU khi đã chạy db_sancaulong.sql (file cấu trúc).
 -- Gồm: 1) cấu hình hệ thống  2) tài khoản admin (MaNguoiDung = 1)  3) dữ liệu mẫu
