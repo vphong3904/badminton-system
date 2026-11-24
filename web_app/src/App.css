@@ -3619,3 +3619,156 @@ a.btn {
 .table-scroll .table.table-revenue-detail th,
 .table-scroll .table.table-revenue-detail td,
 .table-revenue-detail th .th-sort { text-align: left; }
+
+/* ===== Chuông thông báo ===== */
+.page-banner { overflow: visible; position: relative; }
+.bell { position: relative; margin-left: auto; z-index: 50; }
+.bell-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; color: #fff; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); border-radius: 12px; cursor: pointer; }
+.bell-btn:hover { background: rgba(255,255,255,.28); }
+.bell-badge { position: absolute; top: -6px; right: -6px; min-width: 20px; padding: 1px 5px; font-size: 11px; font-weight: 700; line-height: 18px; color: #fff; background: #d93025; border-radius: 999px; }
+.bell-panel { position: absolute; top: 50px; right: 0; width: 380px; max-width: 90vw; color: #1a1a1a; background: #fff; border: 1px solid #d8dedb; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.2); text-align: left; }
+.bell-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #e6ebe8; }
+.bell-readall { font-size: 12px; color: #19654d; background: none; border: 0; cursor: pointer; text-decoration: underline; }
+.bell-list { max-height: 380px; overflow-y: auto; }
+.bell-empty { padding: 18px 14px; margin: 0; color: #666; }
+.bell-item { display: block; width: 100%; padding: 10px 14px; text-align: left; background: #fff; border: 0; border-bottom: 1px solid #eef1ef; cursor: pointer; }
+.bell-item:hover { background: #f4f8f6; }
+.bell-item.is-unread { background: #eaf5f0; }
+.bell-title { display: block; font-weight: 700; font-size: 14px; color: #000;}
+.bell-text { display: block; margin-top: 2px; font-size: 13px; color: #333; white-space: normal; overflow-wrap: anywhere; }
+.bell-time { display: block; margin-top: 4px; font-size: 12px; color: #777; }
+
+/* ===== Hoàn tiền: 7 cột, chữ canh lề trái ===== */
+.table-refunds thead th,
+.table-refunds tbody td { text-align: left !important; }
+.table-refunds .th-sort { justify-content: flex-start; text-align: left; }
+.table-refunds thead th:nth-child(1), .table-refunds tbody td:nth-child(1) { width: 14%; }
+.table-refunds thead th:nth-child(2), .table-refunds tbody td:nth-child(2) { width: 15%; }
+.table-refunds thead th:nth-child(3), .table-refunds tbody td:nth-child(3) { width: 11%; }
+.table-refunds thead th:nth-child(4), .table-refunds tbody td:nth-child(4) { width: 12%; }
+.table-refunds thead th:nth-child(5), .table-refunds tbody td:nth-child(5) { width: 19%; }
+.table-refunds thead th:nth-child(6), .table-refunds tbody td:nth-child(6) { width: 15%; }
+.table-refunds thead th:nth-child(7), .table-refunds tbody td:nth-child(7) { width: 14%; }
+.table-scroll .table-refunds { min-width: 1100px; }
+
+/* ===== Quản lý đặt sân: nút thao tác xếp 2x2, nút Chuyển sân, cửa sổ lý do huỷ ===== */
+.row-actions.row-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  max-width: 220px;
+}
+.row-actions.row-actions-grid .btn {
+  width: 100% !important;
+  white-space: nowrap;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.btn-transfer {
+  color: #fff;
+  background: #1f56b8;
+  border: 1px solid #1f56b8;
+}
+.btn-transfer:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cancel-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.cancel-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid #d5ddd9;
+  border-radius: 10px;
+}
+.cancel-reason.is-selected {
+  background: #e3f1ea;
+  border-color: #1f7a5d;
+}
+.cancel-reason input {
+  margin-top: 4px;
+}
+.cancel-reason small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted, #6b7378);
+}
+.cancel-other input.input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: #eef1ef;
+}
+.cancel-other.is-active input.input {
+  background: #fff;
+  border-color: #1f7a5d;
+  box-shadow: 0 0 0 3px rgba(31, 122, 93, 0.22);
+}
+.clock-sync {
+  padding: 32px;
+  text-align: center;
+}
+
+/* ===== Quản lý đặt sân: cột Sân thu nhỏ, mở rộng Ngày giờ thanh toán và Thao tác ===== */
+.table-scroll .table.table-bookings.table-bookings-fit {
+  table-layout: fixed;
+  min-width: 1500px;
+}
+.table-bookings-fit th,
+.table-bookings-fit td {
+  padding-left: 10px;
+  padding-right: 10px;
+  text-align: left !important;
+}
+.table-bookings-fit td {
+  overflow-wrap: anywhere;
+}
+/* Không xuống dòng ở cột Ngày giờ thanh toán, Giờ, Ngày */
+.table-bookings-fit td:nth-child(8),
+.table-bookings-fit td:nth-child(4),
+.table-bookings-fit td:nth-child(5) {
+  white-space: nowrap;
+}
+/* Có cột Ngày (Mọi ngày): 11 cột */
+.table-scroll .table-bookings-fit.has-day th:nth-child(1), .table-scroll .table-bookings-fit.has-day td:nth-child(1) { width: 10% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(2), .table-scroll .table-bookings-fit.has-day td:nth-child(2) { width: 8% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(3), .table-scroll .table-bookings-fit.has-day td:nth-child(3) { width: 5% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(4), .table-scroll .table-bookings-fit.has-day td:nth-child(4) { width: 7% !important; white-space: nowrap; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(5), .table-scroll .table-bookings-fit.has-day td:nth-child(5) { width: 6% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(6), .table-scroll .table-bookings-fit.has-day td:nth-child(6) { width: 6% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(7), .table-scroll .table-bookings-fit.has-day td:nth-child(7) { width: 9% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(8), .table-scroll .table-bookings-fit.has-day td:nth-child(8) { width: 8% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(9), .table-scroll .table-bookings-fit.has-day td:nth-child(9) { width: 13% !important; white-space: nowrap; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(10), .table-scroll .table-bookings-fit.has-day td:nth-child(10) { width: 11% !important; }
+.table-scroll .table-bookings-fit.has-day th:nth-child(11), .table-scroll .table-bookings-fit.has-day td:nth-child(11) { width: 17% !important; }
+/* Không có cột Ngày: 10 cột */
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(1), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(1) { width: 11% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(2), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(2) { width: 9% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(3), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(3) { width: 5% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(4), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(4) { width: 7% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(5), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(5) { width: 7% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(6), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(6) { width: 10% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(7), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(7) { width: 9% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(8), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(8) { width: 14% !important; white-space: nowrap; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(9), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(9) { width: 11% !important; }
+.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(10), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(10) { width: 17% !important; }
+/* Cột Ngày giờ thanh toán là cột 9 (có cột Ngày) hoặc 8 (không có): không xuống dòng */
+.table-bookings-fit.has-day td:nth-child(4),
+.table-bookings-fit.has-day td:nth-child(9) { white-space: nowrap; }
+.table-bookings-fit:not(.has-day) td:nth-child(8) { white-space: nowrap; }
+.table-bookings-fit.has-day td:nth-child(8) { white-space: normal; }
+/* Thao tác: nút lưới 2x2, nút đơn chiếm cả hàng */
+.table-bookings-fit .row-actions.row-actions-grid {
+  max-width: none;
+}
+.row-actions-grid .row-actions-span {
+  grid-column: 1 / -1;
+}
