@@ -10,7 +10,7 @@ const pool = mysql.createPool({
   database: cauHinh.coSoDuLieu.ten,
 
   // [TiDB] TiDB Cloud bắt buộc TLS. Đặt DB_SSL=false chỉ khi chạy DB local không TLS.
-  ssl: process.env.DB_SSL === 'false' ? undefined : { minVersion: 'TLSv1.2', rejectUnauthorized: true },
+  ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
 
   waitForConnections: true,
   connectionLimit: 10,
