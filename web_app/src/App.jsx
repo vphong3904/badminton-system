@@ -13,7 +13,7 @@ const MENU = [
   { id: 'calendar', label: 'Lịch hoạt động' },
   { id: 'refunds', label: 'Hoàn tiền' },
   { id: 'complaints', label: 'Khiếu nại' },
-  { id: 'reviews', label: 'Đánh giá khách hàng' },
+  { id: 'reviews', label: 'Đánh giá của Khách hàng' },
   { id: 'users', label: 'Danh sách khách đặt sân' },
   { id: 'overview', label: 'Doanh thu của cơ sở' },
 ]
@@ -58,7 +58,10 @@ function eachDay(fromIso, toIso) {
   return days
 }
 const MAX_RANGE_DAYS = 90
-const BOOKING_STATUSES = ['Chờ thanh toán', 'Đã chuyển khoản', 'Đã thanh toán', 'Chờ hoàn tiền', 'Đã huỷ']
+// Cơ sở bị khoá (chủ sân khoá = closed, quản trị viên khoá = locked): khách không đặt được, các chức năng liên quan bị vô hiệu
+const isBranchBlocked = (b) => b?.trangThai === 'closed' || b?.trangThai === 'locked'
+const MAPS_PREFIX = 'https://maps.google.com/?q='
+const BOOKING_STATUSES = ['Chờ thanh toán', 'Đã chuyển khoản', 'Đã thanh toán', 'Đã sử dụng sân', 'Chờ hoàn tiền', 'Đã huỷ']
 
 // Trạng thái hiển thị = gộp trạng thái đơn (DatSan.TrangThai) và trạng thái thanh toán (ThanhToan.TrangThai) của backend:
 //  - pending_payment + pending: khách vừa đặt từ app, chưa chuyển khoản → "Chưa hoàn tiền"
@@ -68,7 +71,11 @@ function layTrangThaiDon(d) {
   // Đơn khách vừa đặt chưa chuyển khoản (pending) và đơn hết hạn không hiển thị ở Quản lý đặt sân (trả về null)
   if (d.trangThai === 'pending_payment') return d.trangThaiThanhToan === 'confirming' ? 'Đã chuyển khoản' : null
   // Chủ sân tạo đơn ở Lịch hoạt động → "Chờ thanh toán" cho đến khi bấm "Thu tiền" thì thành "Đã thanh toán"; đơn của khách (chuyển khoản) → "Đã chuyển khoản"
-  if (d.trangThai === 'confirmed' || d.trangThai === 'completed') {
+  if (d.trangThai === 'confirmed' || d.trangThai === 'completed' || d.trangThai === 'checked_in') {
+    // Đơn đã thanh toán (khách chuyển khoản hoặc chủ sân đã thu tiền) mà đã qua giờ kết thúc → "Đã sử dụng sân"
+    const daThanhToan = d.nguon !== 'owner' || d.trangThaiThu === 'paid'
+    const quaGio = d.trangThai === 'completed' || Date.now() >= mocGioDon(d, d.gioKetThuc)
+    if (daThanhToan && quaGio) return 'Đã sử dụng sân'
     if (d.nguon !== 'owner') return 'Đã chuyển khoản'
     return d.trangThaiThu === 'paid' ? 'Đã thanh toán' : 'Chờ thanh toán'
   }
@@ -98,9 +105,66 @@ function coTheHuyDon(d, now = Date.now()) {
 async function huyDonTheoLoai(token, d, lyDo) {
   if (d.nguon === 'owner') return callApi(`/api/chu-san/dat-san/${d.maDatSan}/huy`, { method: 'PATCH', token, body: { lyDo } })
   if (d.trangThai === 'pending_payment' && d.trangThaiThanhToan === 'confirming') {
+    // API huỷ đơn của khách chỉ nhận trước giờ bắt đầu: kiểm tra trước để không xác nhận thanh toán rồi mới báo lỗi
+    if (Date.now() >= mocGioDon(d, d.gioBatDau)) throw new ApiError(0, 'Đơn đã quá giờ bắt đầu nên hệ thống không huỷ được nữa.')
     await callApi(`/api/chu-san/dat-san/${d.maDatSan}/xac-nhan-thanh-toan`, { method: 'POST', token })
   }
   return callApi(`/api/chu-san/dat-san/${d.maDatSan}/huy`, { method: 'POST', token, body: { lyDo } })
+}
+
+// Đổi giờ hoạt động của cơ sở → xử lý bảng giá (API có sẵn GET/PUT /api/chu-san/co-so/:maCoSo/bang-gia):
+//  - Giờ mở cửa tăng / giờ đóng cửa giảm (thu hẹp): cắt các khung giá cho vừa giờ mới (khung nằm hẳn ngoài thì bỏ).
+//  - Giờ mở cửa giảm / giờ đóng cửa tăng (mở rộng): giữ nguyên khung giá, nhắc chủ sân bổ sung bảng giá cho phần mới;
+//    yêu cầu mọi sân của cơ sở đã khoá (Quản lý sân) trước.
+// Trả về { restore, reminder }; restore() khôi phục bảng giá cũ nếu bước lưu cơ sở sau đó bị lỗi.
+async function prepareHoursChange(token, b, newOpen, newClose) {
+  const oldOpen = cut5(b.gioMoCua)
+  const oldClose = cut5(b.gioDongCua)
+  if (newOpen === oldOpen && newClose === oldClose) return { restore: null, reminder: '' }
+  const moRong = newOpen < oldOpen || newClose > oldClose
+  const thuHep = newOpen > oldOpen || newClose < oldClose
+  if (moRong && Number(b.soSanHoatDong ?? 0) > 0) {
+    throw new ApiError(0, 'Muốn mở rộng giờ hoạt động, hãy khoá tất cả sân của cơ sở này ở trang Quản lý sân trước (sân phải không còn đơn đặt).')
+  }
+  let restore = null
+  if (thuHep) {
+    const bg = await callApi(`/api/chu-san/co-so/${b.maCoSo}/bang-gia`, { token })
+    const goc = bg.khungGias ?? []
+    const mapKhung = (k, start, end) => {
+      const co7 = Array.isArray(k.giaTheoThu) && k.giaTheoThu.length === 7 && k.giaTheoThu.every((g) => g.giaKhachVangLai != null && g.giaKhachCoDinh != null)
+      return co7
+        ? { gioBatDau: start, gioKetThuc: end, giaTheoThu: k.giaTheoThu }
+        : {
+            gioBatDau: start,
+            gioKetThuc: end,
+            giaNgayThuongKhachVangLai: k.giaNgayThuongKhachVangLai,
+            giaNgayThuongKhachCoDinh: k.giaNgayThuongKhachCoDinh,
+            giaCuoiTuanKhachVangLai: k.giaCuoiTuanKhachVangLai,
+            giaCuoiTuanKhachCoDinh: k.giaCuoiTuanKhachCoDinh,
+          }
+    }
+    const moi = []
+    let doi = false
+    goc.forEach((k) => {
+      const start = toMinutes(cut5(k.gioBatDau)) < toMinutes(newOpen) ? newOpen : cut5(k.gioBatDau)
+      const end = toMinutes(cut5(k.gioKetThuc)) > toMinutes(newClose) ? newClose : cut5(k.gioKetThuc)
+      if (toMinutes(end) <= toMinutes(start)) {
+        doi = true
+        return
+      }
+      if (start !== cut5(k.gioBatDau) || end !== cut5(k.gioKetThuc)) doi = true
+      moi.push(mapKhung(k, start, end))
+    })
+    if (doi) {
+      if (moi.length === 0) throw new ApiError(0, 'Không còn khung giá nào nằm trong giờ hoạt động mới. Hãy thêm khung giá phù hợp ở Quản lý bảng giá trước.')
+      await callApi(`/api/chu-san/co-so/${b.maCoSo}/bang-gia`, { method: 'PUT', token, body: { khungGias: moi } })
+      restore = () => callApi(`/api/chu-san/co-so/${b.maCoSo}/bang-gia`, { method: 'PUT', token, body: { khungGias: goc.map((k) => mapKhung(k, cut5(k.gioBatDau), cut5(k.gioKetThuc))) } }).catch(() => {})
+    }
+  }
+  const reminder = moRong
+    ? `Giờ hoạt động đã mở rộng: hãy bổ sung bảng giá cho phần giờ mới ở Quản lý bảng giá (bảng giá phải phủ hết ${newOpen}–${newClose}) rồi mới mở lại các sân.`
+    : ''
+  return { restore, reminder }
 }
 
 // Tự tải lại dữ liệu mỗi 45 giây (trong khoảng 30–60 giây) để thông tin luôn mới; bỏ qua khi tab đang ẩn.
@@ -116,14 +180,23 @@ function useAutoRefresh(ms = 45000) {
   return tick
 }
 
-// Giá (đ/giờ, khách vãng lai) của cơ sở tại một thời điểm theo bảng giá: ngày thường T2–T6, cuối tuần T7–CN
+// Giá của một khung giờ theo từng thứ (1 = Thứ 2 … 7 = Chủ nhật): backend trả `giaTheoThu` (7 thứ riêng); thiếu thì dùng 4 trường cũ (T2–T6 / T7–CN).
+function giaCuaThu(k, thu, coDinh = false) {
+  const g = Array.isArray(k.giaTheoThu) ? k.giaTheoThu.find((x) => x.thu === thu) : null
+  if (g) return (coDinh ? g.giaKhachCoDinh : g.giaKhachVangLai) ?? null
+  const cuoi = thu >= 6
+  const v = coDinh ? (cuoi ? k.giaCuoiTuanKhachCoDinh : k.giaNgayThuongKhachCoDinh) : cuoi ? k.giaCuoiTuanKhachVangLai : k.giaNgayThuongKhachVangLai
+  return v ?? null
+}
+const thuTuJs = (getDay) => (getDay === 0 ? 7 : getDay) // getDay(): 0 = Chủ nhật → 7
+
+// Giá (đ/giờ, khách vãng lai) của cơ sở tại một thời điểm theo bảng giá (giá riêng từng thứ)
 function priceAt(khungGias, thoiDiem) {
-  const thu = thoiDiem.getDay()
-  const cuoiTuan = thu === 0 || thu === 6
   const phut = thoiDiem.getHours() * 60 + thoiDiem.getMinutes()
   const k = (khungGias ?? []).find((x) => toMinutes(cut5(x.gioBatDau)) <= phut && phut < toMinutes(cut5(x.gioKetThuc)))
   if (!k) return null
-  return Number(cuoiTuan ? k.giaCuoiTuanKhachVangLai : k.giaNgayThuongKhachVangLai)
+  const gia = giaCuaThu(k, thuTuJs(thoiDiem.getDay()))
+  return gia == null ? null : Number(gia)
 }
 
 // Ngân hàng trong nước (nhà nước, và Techcombank/MB Bank theo yêu cầu). `code` là mã ngân hàng
@@ -298,6 +371,49 @@ const Y_TICKS = [800, 700, 600, 500, 400, 300, 200, 100, 0]
 
 const formatVnd = (n) => `${Number(n).toLocaleString('vi-VN')}đ`
 
+// ---- Sắp xếp bảng (dùng chung cho mọi bảng): ô "Sắp xếp" giống trang Quản lý đặt sân. Giá trị rỗng = thứ tự mặc định.
+// cols: [{ key, label, type: 'text' | 'number' | 'date' | 'time', get: (dòng) => giá trị }]. Dòng thiếu giá trị luôn xếp cuối.
+const SORT_NHAN = {
+  text: [['asc', 'A → Z'], ['desc', 'Z → A']],
+  number: [['asc', 'thấp → cao'], ['desc', 'cao → thấp']],
+  date: [['desc', 'mới nhất → cũ nhất'], ['asc', 'cũ nhất → mới nhất']],
+  time: [['asc', 'sớm → muộn'], ['desc', 'muộn → sớm']],
+}
+function sortRows(rows, cols, sel) {
+  if (!sel) return rows
+  const [key, dir] = sel.split('|')
+  const col = cols.find((c) => c.key === key)
+  if (!col) return rows
+  const sign = dir === 'desc' ? -1 : 1
+  const rong = (v) => v === null || v === undefined || v === '' || (typeof v === 'number' && Number.isNaN(v))
+  return [...rows].sort((a, b) => {
+    const va = col.get(a)
+    const vb = col.get(b)
+    if (rong(va) && rong(vb)) return 0
+    if (rong(va)) return 1
+    if (rong(vb)) return -1
+    const c = col.type === 'text' ? String(va).localeCompare(String(vb), 'vi', { sensitivity: 'base', numeric: true }) : va < vb ? -1 : va > vb ? 1 : 0
+    return c * sign
+  })
+}
+// Tiêu đề cột bấm để sắp xếp: bấm lần 1 = chiều đầu, bấm lần 2 = chiều ngược lại, bấm lần 3 = về mặc định. Bấm cột khác thì đổi sang cột đó.
+function SortTh({ cols, k, sel, onSel, children }) {
+  const col = cols.find((c) => c.key === k)
+  const [key, dir] = (sel || '').split('|')
+  const active = key === k
+  const [truoc, sau] = SORT_NHAN[col.type].map((x) => x[0])
+  const bam = () => onSel(!active ? `${k}|${truoc}` : dir === truoc ? `${k}|${sau}` : '')
+  return (
+    <th className={col.num ? 'num' : undefined} aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="th-sort" onClick={bam} title="Bấm để sắp xếp theo cột này">
+        {children}
+        <span className={`sort-ind${active ? ' on' : ''}`} aria-hidden="true">{active ? (dir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </button>
+    </th>
+  )
+}
+const ngayGioKey = (ngay, gio) => `${String(ngay ?? '').slice(0, 10)} ${String(gio ?? '').slice(0, 5)}`
+
 // Bỏ dấu để tìm kiếm tiếng Việt dễ hơn ("minh anh" khớp "Minh Anh")
 const normalize = (s) =>
   s
@@ -366,7 +482,7 @@ function Filters({ date, setDate, branch, setBranch, branches }) {
   )
 }
 
-function BarChart({ data, max = 800, ticks = Y_TICKS, label = 'Biểu đồ doanh thu' }) {
+function BarChart({ data, max = 800, ticks = Y_TICKS, label = 'Biểu đồ doanh thu', onSelect }) {
   const [hover, setHover] = useState(null) // { i: cột, key: phần màu đang trỏ chuột }
   return (
     <div className="chart" role="img" aria-label={label}>
@@ -387,9 +503,11 @@ function BarChart({ data, max = 800, ticks = Y_TICKS, label = 'Biểu đồ doan
             return (
               <div
                 key={d.day}
-                className={`chart-col${i < 2 ? ' tip-left' : ''}${i >= data.length - 2 ? ' tip-right' : ''}`}
+                className={`chart-col${i < 2 ? ' tip-left' : ''}${i >= data.length - 2 ? ' tip-right' : ''}${onSelect ? ' is-clickable' : ''}`}
                 tabIndex={0}
                 onMouseLeave={() => setHover(null)}
+                onClick={onSelect ? () => onSelect(i) : undefined}
+                onKeyDown={onSelect ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(i) } } : undefined}
               >
                 {d.parts ? (
                   // Cột chồng: đỏ = chuyển khoản (dưới), xanh dương = tiền mặt (trên)
@@ -477,6 +595,139 @@ function niceScale(maxVal) {
   return { max, ticks }
 }
 
+// Chi tiết doanh thu theo từng sân của một ngày (xem theo tuần) hoặc một tháng (xem theo tháng).
+// Dùng API có sẵn: GET /api/chu-san/san?maCoSo= và GET /api/chu-san/dat-san?maCoSo=&tuNgay=&denNgay=&soDong=200&trang=
+// Cách tính giống backend (bao-cao/doanh-thu): đơn app đã xác nhận/check-in/hoàn thành, hoặc đơn app đã huỷ sau khi thanh toán (trừ tiền đã hoàn)
+// = online (chuyển khoản); đơn chủ sân tạo đã bấm "Thu tiền" = offline (tiền mặt).
+async function layDonTheoKhoang(token, maCoSo, tuNgay, denNgay) {
+  const ketQua = []
+  for (let trang = 1; trang <= 25; trang++) {
+    const data = await callApi(`/api/chu-san/dat-san?maCoSo=${maCoSo}&tuNgay=${tuNgay}&denNgay=${denNgay}&soDong=200&trang=${trang}`, { token })
+    const ds = data.cacDon ?? []
+    ketQua.push(...ds)
+    if (ds.length === 0 || ketQua.length >= Number(data.tong ?? 0)) break
+  }
+  return ketQua
+}
+function gomDoanhThuTheoSan(cacSan, cacDon) {
+  const choi = ['confirmed', 'checked_in', 'completed']
+  const map = new Map(cacSan.map((s) => [s.maSan, { maSan: s.maSan, tenSan: s.tenSan, luot: 0, online: 0, offline: 0 }]))
+  for (const d of cacDon) {
+    let r = map.get(d.maSan)
+    if (!r) {
+      r = { maSan: d.maSan, tenSan: d.tenSan, luot: 0, online: 0, offline: 0 }
+      map.set(d.maSan, r)
+    }
+    const tien = Number(d.tongTien) || 0
+    if (d.nguon === 'owner') {
+      if (d.trangThaiThu === 'paid' && choi.includes(d.trangThai)) {
+        r.luot += 1
+        r.offline += tien
+      }
+    } else if (choi.includes(d.trangThai)) {
+      r.luot += 1
+      r.online += tien
+    } else if (d.trangThai === 'cancelled' && d.trangThaiThanhToan === 'success') {
+      const hoan = ['refunded', 'received'].includes(d.trangThaiHoanTien) ? Math.min(tien, Number(d.soTienHoan) || 0) : 0
+      r.online += tien - hoan
+    }
+  }
+  return [...map.values()].map((r) => ({ ...r, tong: r.online + r.offline }))
+}
+const REVENUE_SORT_COLS = [
+  { key: 'san', label: 'Sân', type: 'text', get: (r) => r.tenSan },
+  { key: 'luot', label: 'Số lần hoạt động', type: 'number', num: true, get: (r) => r.luot },
+  { key: 'online', label: 'Online (Chuyển khoản)', type: 'number', num: true, get: (r) => r.online },
+  { key: 'offline', label: 'Offline (Tiền mặt)', type: 'number', num: true, get: (r) => r.offline },
+  { key: 'tong', label: 'Tổng doanh thu', type: 'number', num: true, get: (r) => r.tong },
+]
+function RevenueDetailDialog({ token, maCoSo, tenCoSo, tuNgay, denNgay, title, onClose }) {
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState('')
+  const [sortSel, setSortSel] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([callApi(`/api/chu-san/san?maCoSo=${maCoSo}`, { token }), layDonTheoKhoang(token, maCoSo, tuNgay, denNgay)])
+      .then(([cacSan, cacDon]) => {
+        if (!cancelled) setRows(gomDoanhThuTheoSan(cacSan, cacDon))
+      })
+      .catch((err) => {
+        if (!cancelled) setError(describeApiError(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, maCoSo, tuNgay, denNgay])
+
+  const tong = (rows ?? []).reduce((a, r) => ({ luot: a.luot + r.luot, online: a.online + r.online, offline: a.offline + r.offline, tong: a.tong + r.tong }), { luot: 0, online: 0, offline: 0, tong: 0 })
+
+  return (
+    <Dialog title={`Doanh thu các sân · ${title}`} width={760} fit onClose={onClose}>
+      <p className="picker-hint">
+        {tenCoSo}. Online (Chuyển khoản) = khách chuyển khoản qua hệ thống (đã trừ tiền hoàn); Offline (Tiền mặt) = đơn chủ sân tạo đã bấm “Thu tiền”.
+      </p>
+      {error && <p className="dialog-error">{error}</p>}
+      <div className="table-scroll dialog-table-scroll">
+        <table className="table table-revenue-detail">
+          <thead>
+            <tr>
+              {REVENUE_SORT_COLS.map((c) => (
+                <SortTh key={c.key} cols={REVENUE_SORT_COLS} k={c.key} sel={sortSel} onSel={setSortSel}>
+                  {c.label}
+                </SortTh>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows === null && !error && (
+              <tr>
+                <td colSpan={5} className="table-empty">
+                  Đang tải...
+                </td>
+              </tr>
+            )}
+            {rows && rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="table-empty">
+                  Cơ sở chưa có sân nào.
+                </td>
+              </tr>
+            )}
+            {sortRows(rows ?? [], REVENUE_SORT_COLS, sortSel).map((r) => (
+              <tr key={r.maSan}>
+                <td>{r.tenSan}</td>
+                <td className="num">{r.luot}</td>
+                <td className="num">{formatVnd(r.online)}</td>
+                <td className="num">{formatVnd(r.offline)}</td>
+                <td className="num">
+                  <strong>{formatVnd(r.tong)}</strong>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {rows && rows.length > 0 && (
+            <tfoot>
+              <tr className="revenue-total">
+                <td>Tổng cộng</td>
+                <td className="num">{tong.luot}</td>
+                <td className="num">{formatVnd(tong.online)}</td>
+                <td className="num">{formatVnd(tong.offline)}</td>
+                <td className="num">{formatVnd(tong.tong)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      <div className="dialog-two">
+        <button type="button" className="dialog-primary" onClick={onClose}>
+          Đóng
+        </button>
+      </div>
+    </Dialog>
+  )
+}
+
 function Overview({ user, onNavigate }) {
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
@@ -492,6 +743,7 @@ function Overview({ user, onNavigate }) {
   const tick = useAutoRefresh() // tự tải lại mỗi 45 giây
   const [range, setRange] = useState('week') // biểu đồ xem theo tuần hoặc tháng
   const [dayStats, setDayStats] = useState(null) // { count, revenue } của ngày đã chọn (null = đang tải)
+  const [detail, setDetail] = useState(null) // cửa sổ chi tiết doanh thu các sân: { tuNgay, denNgay, title }
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
 
@@ -504,7 +756,7 @@ function Overview({ user, onNavigate }) {
         if (cancelled) return
         const all = Array.isArray(list) ? list : []
         setBranches(all)
-        setMaCoSo((prev) => prev ?? all[0]?.maCoSo ?? null)
+        setMaCoSo((prev) => prev ?? (all.find((b) => !isBranchBlocked(b)) ?? all[0])?.maCoSo ?? null)
         if (all.length === 0) setLoading(false)
       })
       .catch((err) => {
@@ -644,6 +896,17 @@ function Overview({ user, onNavigate }) {
         })
   const scale = niceScale(Math.max(0, ...chartData.map((w) => w.value)))
   const weekEnd = addDays(weekStart, 6)
+  // Bấm cột: xem theo tuần → đúng ngày của cột; xem theo tháng → cả tháng của cột
+  const openDetail = (i) => {
+    if (range === 'week') {
+      const iso = addDays(weekStart, i)
+      setDetail({ tuNgay: iso, denNgay: iso, title: `${WEEK_LABELS[i]} ${toViDate(iso)}` })
+    } else {
+      const m = i + 1
+      const lastDay = new Date(year, m, 0).getDate()
+      setDetail({ tuNgay: `${year}-${pad2(m)}-01`, denNgay: `${year}-${pad2(m)}-${pad2(lastDay)}`, title: `Tháng ${m}/${year}` })
+    }
+  }
 
   return (
     <Page subtitle="">
@@ -668,8 +931,8 @@ function Overview({ user, onNavigate }) {
           <span>Cơ sở: </span>
           <select className="input" value={maCoSo ?? ''} onChange={(e) => setMaCoSo(Number(e.target.value))} disabled={branches.length < 2}>
             {branches.map((b) => (
-              <option key={b.maCoSo} value={b.maCoSo}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={b.maCoSo} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
@@ -738,7 +1001,8 @@ function Overview({ user, onNavigate }) {
             <i className="chart-legend-box seg-cash" /> Doanh thu tiền mặt
           </span>
         </div>
-        <BarChart data={chartData} max={scale.max} ticks={scale.ticks} label={range === 'week' ? 'Biểu đồ doanh thu theo tuần' : 'Biểu đồ doanh thu theo tháng'} />
+        <BarChart data={chartData} max={scale.max} ticks={scale.ticks} onSelect={maCoSo ? openDetail : undefined} label={range === 'week' ? 'Biểu đồ doanh thu theo tuần (bấm vào cột để xem chi tiết từng sân)' : 'Biểu đồ doanh thu theo tháng (bấm vào cột để xem chi tiết từng sân)'} />
+        <p className="hint">Bấm vào một cột để xem doanh thu từng sân của {range === 'week' ? 'ngày' : 'tháng'} đó.</p>
       </section>
 
       <div className="actions">
@@ -749,6 +1013,18 @@ function Overview({ user, onNavigate }) {
           Quản lý đặt sân
         </button>
       </div>
+
+      {detail && maCoSo && (
+        <RevenueDetailDialog
+          token={token}
+          maCoSo={maCoSo}
+          tenCoSo={branches.find((b) => b.maCoSo === maCoSo)?.tenCoSo ?? ''}
+          tuNgay={detail.tuNgay}
+          denNgay={detail.denNgay}
+          title={detail.title}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </Page>
   )
 }
@@ -810,14 +1086,12 @@ function ViDateInput({ value, onChange, disabled = false, min, ariaLabel = 'Ch�
 function tinhTongGia(khungGias, cacNgay, gioBatDau, gioKetThuc, coDinh) {
   let tong = 0
   for (const ngay of cacNgay) {
-    const cuoiTuan = [0, 6].includes(new Date(`${ngay}T00:00:00Z`).getUTCDay())
+    const thu = thuTuJs(new Date(`${ngay}T00:00:00Z`).getUTCDay())
     let ngayTien = 0
     for (let phut = toMinutes(gioBatDau); phut < toMinutes(gioKetThuc); phut += SLOT_MIN) {
       const k = (khungGias ?? []).find((x) => toMinutes(cut5(x.gioBatDau)) <= phut && toMinutes(cut5(x.gioKetThuc)) >= phut + SLOT_MIN)
       if (!k) return null
-      const gia = coDinh
-        ? cuoiTuan ? k.giaCuoiTuanKhachCoDinh : k.giaNgayThuongKhachCoDinh
-        : cuoiTuan ? k.giaCuoiTuanKhachVangLai : k.giaNgayThuongKhachVangLai
+      const gia = giaCuaThu(k, thu, coDinh)
       if (gia == null) return null
       ngayTien += Number(gia) / 2
     }
@@ -1197,7 +1471,7 @@ function CreateOrderDialog({ token, courts, branch, defaultCourtId, defaultDate,
         </label>
         <label className="dialog-field">
           <span>Số điện thoại</span>
-          <input className="input" type="tel" placeholder="VD: 0912345678" value={soDienThoai} onChange={(e) => setSoDienThoai(e.target.value)} />
+          <input className="input" type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={11} placeholder="VD: 0912345678" value={soDienThoai} onChange={(e) => setSoDienThoai(onlyDigits(e.target.value))} />
         </label>
       </div>
       <label className="dialog-field">
@@ -1263,7 +1537,9 @@ function CourtMatrix({ user, onGoBookings }) {
   const [donTheoNgay, setDonTheoNgay] = useState([])
   const [khoaTheoNgay, setKhoaTheoNgay] = useState([]) // khung giờ khoá bảo trì của ngày đang xem (GET /api/chu-san/khoa-san)
   // Cơ sở đang xem: cơ sở chọn cuối cùng nếu còn tồn tại, không thì cơ sở đầu tiên
-  const branch = branches?.find((b) => String(b.maCoSo) === branchId) ?? branches?.[0] ?? null
+  // Cơ sở bị khoá không chọn được; mặc định lấy cơ sở chọn cuối (nếu không bị khoá) hoặc cơ sở dùng được đầu tiên
+  const dungDuoc = (branches ?? []).filter((b) => !isBranchBlocked(b))
+  const branch = dungDuoc.find((b) => String(b.maCoSo) === branchId) ?? dungDuoc[0] ?? null
   const maCoSoLich = branch?.maCoSo
   const chooseBranch = (id) => {
     setBranchId(id)
@@ -1380,6 +1656,7 @@ function CourtMatrix({ user, onGoBookings }) {
     <Page>
       {(error || branchError) && <Alert type="error">{error || branchError}</Alert>}
       {notice && <Alert type="success">{notice}</Alert>}
+      {branches !== null && branches.length > 0 && dungDuoc.length === 0 && <Alert type="warning">Tất cả cơ sở của bạn đang bị khoá nên chưa xem được lịch hoạt động.</Alert>}
 
       <div className="filters filters-inline">
         <label className="field-inline">
@@ -1390,8 +1667,9 @@ function CourtMatrix({ user, onGoBookings }) {
           <span>Cơ sở: </span>
           <select className="input" value={branch ? String(branch.maCoSo) : ''} onChange={(e) => chooseBranch(e.target.value)}>
             {(branches ?? []).map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
                 {b.tenCoSo}
+                {isBranchBlocked(b) ? ' (bị khoá)' : ''}
               </option>
             ))}
           </select>
@@ -1579,10 +1857,24 @@ function QrCheckin({ bookings, setBookings }) {
   )
 }
 
+// Cột sắp xếp của bảng đặt sân (giờ thanh toán = lúc khách gửi ảnh chuyển khoản, ngayGuiAnh)
+const BOOKING_SORT_COLS = [
+  { key: 'khach', label: 'Khách', type: 'text', get: (d) => d.tenKhach },
+  { key: 'sdt', label: 'Số điện thoại', type: 'text', get: (d) => d.soDienThoaiLienHe },
+  { key: 'san', label: 'Sân', type: 'text', get: (d) => d.tenSan },
+  { key: 'ngayDat', label: 'Ngày đặt sân', type: 'date', get: (d) => d.ngayTao },
+  { key: 'ngayChoi', label: 'Ngày chơi', type: 'date', get: (d) => ngayGioKey(d.ngay, d.gioBatDau) },
+  { key: 'gioBd', label: 'Giờ bắt đầu', type: 'time', get: (d) => String(d.gioBatDau ?? '').slice(0, 5) },
+  { key: 'gioKt', label: 'Giờ kết thúc', type: 'time', get: (d) => String(d.gioKetThuc ?? '').slice(0, 5) },
+  { key: 'coSo', label: 'Cơ sở', type: 'text', get: (d) => d.tenCoSo },
+  { key: 'thanhToan', label: 'Ngày giờ thanh toán', type: 'date', get: (d) => d.ngayGuiAnh },
+  { key: 'trangThai', label: 'Trạng thái', type: 'text', get: (d) => d.hienThi },
+]
 const BOOKING_BADGE = {
   'Chờ thanh toán': 'unpaid',
   'Đã chuyển khoản': 'paid',
   'Đã thanh toán': 'ok',
+  'Đã sử dụng sân': 'ok',
   'Chờ hoàn tiền': 'wait',
   'Đã huỷ': 'no',
 }
@@ -1592,6 +1884,35 @@ const BOOKING_BADGE = {
 //   GET /api/chu-san/dat-san, GET /api/chu-san/dat-san/:maDatSan (lý do),
 //   POST /api/chu-san/dat-san/:maDatSan/xac-nhan-thanh-toan (Xác nhận), POST .../tu-choi-thanh-toan (Huỷ đơn đặt + lý do)
 // Giờ hiện tại (ms), tự cập nhật theo chu kỳ để các nút phụ thuộc thời gian tự ẩn
+const DIALOG_TABLE_CSS = `
+.dialog.dialog-fit { display: flex; flex-direction: column; max-width: min(1240px, 96vw) !important; max-height: 94vh; overflow: hidden; }
+.dialog-fit .dialog-head, .dialog-fit .picker-hint, .dialog-fit .dialog-error, .dialog-fit .dialog-two { flex: none; }
+.dialog-fit .dialog-table-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto; border: 1px solid #dfe6e2; border-radius: 8px; }
+.dialog-fit .dialog-table-scroll .table { table-layout: auto; width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0; }
+.dialog-fit .dialog-table-scroll .table-collect { min-width: 1000px; }
+.dialog-fit .dialog-table-scroll .table-detail { min-width: 820px; }
+.dialog-fit .dialog-table-scroll .table-revenue-detail { min-width: 760px; }
+.dialog-fit .dialog-table-scroll .table th, .dialog-fit .dialog-table-scroll .table td { padding: 10px 14px; white-space: nowrap; }
+.dialog-fit .dialog-table-scroll thead th { position: sticky; top: 0; z-index: 3; background: #eef3f0; box-shadow: 0 1px 0 #dfe6e2; }
+.dialog-fit .dialog-table-scroll thead th:first-child, .dialog-fit .dialog-table-scroll tbody td:first-child, .dialog-fit .dialog-table-scroll tfoot td:first-child { position: sticky; left: 0; background: #fff; box-shadow: 1px 0 0 #dfe6e2; }
+.dialog-fit .dialog-table-scroll tbody td:first-child { z-index: 2; }
+.dialog-fit .dialog-table-scroll thead th:first-child { z-index: 4; background: #eef3f0; }
+.dialog-fit .dialog-table-scroll tfoot td { position: sticky; bottom: 0; z-index: 2; background: #f4f7f5; box-shadow: 0 -1px 0 #dfe6e2; }
+.dialog-fit .dialog-table-scroll tfoot td:first-child { z-index: 4; }
+.table-scroll .table th.num, .table-scroll .table td.num, .table-scroll .table-revenue-detail th.num, .table-scroll .table-revenue-detail td.num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.table th.num .th-sort { justify-content: flex-end; }
+.table-revenue-detail tfoot td.num, .table-revenue-detail tbody td.num strong { font-weight: 700; }
+`
+function useDialogTableCss() {
+  useEffect(() => {
+    if (document.getElementById('dialog-table-css')) return
+    const el = document.createElement('style')
+    el.id = 'dialog-table-css'
+    el.textContent = DIALOG_TABLE_CSS
+    document.head.appendChild(el)
+  }, [])
+}
+
 function useNow(ms) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -1603,7 +1924,17 @@ function useNow(ms) {
 
 // Cửa sổ "Thu tiền": các đơn chủ sân đã tạo mà chưa thu tiền (vd khách đặt trước qua Zalo). Bấm "Thu tiền" → đơn thành "Đã thanh toán" và lên lịch.
 // API có sẵn: GET /api/chu-san/dat-san (lọc đơn của chủ sân chưa thu phía web), PATCH /api/chu-san/dat-san/:maDatSan/da-thu
+const COLLECT_SORT_COLS = [
+  { key: 'khach', label: 'Khách', type: 'text', get: (d) => d.tenKhach },
+  { key: 'sdt', label: 'Số điện thoại', type: 'text', get: (d) => d.soDienThoaiLienHe },
+  { key: 'san', label: 'Sân', type: 'text', get: (d) => d.tenSan },
+  { key: 'ngay', label: 'Ngày', type: 'date', get: (d) => ngayGioKey(d.ngay, d.gioBatDau) },
+  { key: 'gio', label: 'Giờ', type: 'time', get: (d) => String(d.gioBatDau ?? '').slice(0, 5) },
+  { key: 'coSo', label: 'Cơ sở', type: 'text', get: (d) => d.tenCoSo },
+  { key: 'tien', label: 'Tổng tiền', type: 'number', get: (d) => Number(d.tongTien) },
+]
 function CollectMoneyDialog({ token, onClose, onChanged }) {
+  const [sortSel, setSortSel] = useState('')
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState(null)
@@ -1646,20 +1977,20 @@ function CollectMoneyDialog({ token, onClose, onChanged }) {
   }
 
   return (
-    <Dialog title="Thu tiền" width={820} onClose={onClose}>
+    <Dialog title="Thu tiền" width={820} fit onClose={onClose}>
       <p className="picker-hint">Các đơn bạn đã tạo và đang chờ thu tiền. Bấm “Thu tiền” khi khách đã trả.</p>
       {error && <p className="dialog-error">{error}</p>}
-      <div className="table-scroll" style={{ maxHeight: 380, overflowY: 'auto' }}>
-        <table className="table">
+      <div className="table-scroll dialog-table-scroll">
+        <table className="table table-collect">
           <thead>
             <tr>
-              <th>Khách</th>
-              <th>Số điện thoại</th>
-              <th>Sân</th>
-              <th>Ngày</th>
-              <th>Giờ</th>
-              <th>Cơ sở</th>
-              <th>Tổng tiền</th>
+              <SortTh cols={COLLECT_SORT_COLS} k="khach" sel={sortSel} onSel={setSortSel}>Khách</SortTh>
+              <SortTh cols={COLLECT_SORT_COLS} k="sdt" sel={sortSel} onSel={setSortSel}>Số điện thoại</SortTh>
+              <SortTh cols={COLLECT_SORT_COLS} k="san" sel={sortSel} onSel={setSortSel}>Sân</SortTh>
+              <SortTh cols={COLLECT_SORT_COLS} k="ngay" sel={sortSel} onSel={setSortSel}>Ngày</SortTh>
+              <SortTh cols={COLLECT_SORT_COLS} k="gio" sel={sortSel} onSel={setSortSel}>Giờ</SortTh>
+              <SortTh cols={COLLECT_SORT_COLS} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
+              <SortTh cols={COLLECT_SORT_COLS} k="tien" sel={sortSel} onSel={setSortSel}>Tổng tiền</SortTh>
               <th>Thao tác</th>
             </tr>
           </thead>
@@ -1678,7 +2009,7 @@ function CollectMoneyDialog({ token, onClose, onChanged }) {
                 </td>
               </tr>
             )}
-            {(rows ?? []).map((d) => (
+            {sortRows(rows ?? [], COLLECT_SORT_COLS, sortSel).map((d) => (
               <tr key={d.maDatSan}>
                 <td>{d.tenKhach}</td>
                 <td>{d.soDienThoaiLienHe ?? '—'}</td>
@@ -1720,6 +2051,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
   const [allDays, setAllDays] = useState(false)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('Mọi trạng thái')
+  const [sortSel, setSortSel] = useState('') // sắp xếp bảng (xem sortRows); rỗng = mặc định
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -1831,16 +2163,30 @@ function BookingsPage({ user, filters, onGoRefunds }) {
   }
 
   const q = normalize(query.trim())
-  const visible = orders
+  const visibleBase = orders
     .map((d) => ({ ...d, hienThi: layTrangThaiDon(d) }))
     .filter((d) => {
       if (!d.hienThi) return false
       if (status !== 'Mọi trạng thái' && d.hienThi !== status) return false
-      if (q && !normalize(d.tenKhach ?? '').includes(q) && !normalize(d.tenSan ?? '').includes(q)) return false
+      const sdt = String(d.soDienThoaiLienHe ?? '')
+      if (q && !normalize(d.tenKhach ?? '').includes(q) && !normalize(d.tenSan ?? '').includes(q) && !sdt.includes(query.trim())) return false
       return true
     })
-    .sort((a, b) => (allDays ? 0 : a.gioBatDau.localeCompare(b.gioBatDau)))
-  const colCount = allDays ? 8 : 7
+    .map((d) => ({ ...d, coSoKhoa: isBranchBlocked((branches ?? []).find((b) => b.maCoSo === d.maCoSo)) }))
+    // Đơn còn hủy được của cơ sở bị khoá (chưa chuyển khoản / đã chuyển khoản) đứng đầu để chủ sân huỷ
+    .sort((a, b) => {
+      const ua = a.coSoKhoa && coTheHuyDon(a, nowTick) ? 0 : 1
+      const ub = b.coSoKhoa && coTheHuyDon(b, nowTick) ? 0 : 1
+      if (ua !== ub) return ua - ub
+      return allDays ? 0 : a.gioBatDau.localeCompare(b.gioBatDau)
+    })
+  // Có chọn sắp xếp: đơn của cơ sở bị khoá cần huỷ vẫn đứng đầu, mỗi nhóm xếp theo cột đã chọn
+  const canHuyNgay = (d) => d.coSoKhoa && coTheHuyDon(d, nowTick)
+  const visible = sortSel
+    ? [...sortRows(visibleBase.filter(canHuyNgay), BOOKING_SORT_COLS, sortSel), ...sortRows(visibleBase.filter((d) => !canHuyNgay(d)), BOOKING_SORT_COLS, sortSel)]
+    : visibleBase
+  const soDonCanHuy = visible.filter((d) => d.coSoKhoa && coTheHuyDon(d, nowTick)).length
+  const colCount = allDays ? 11 : 10
 
   if (!isOwner) {
     return (
@@ -1854,6 +2200,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
     <Page>
       {(error || branchError) && <Alert type="error">{error || branchError}</Alert>}
       {notice && <Alert type="success">{notice}</Alert>}
+      {soDonCanHuy > 0 && <Alert type="warning">Có {soDonCanHuy} đơn của cơ sở đang bị khoá cần huỷ (đang đứng đầu danh sách).</Alert>}
 
       <div className="filters filters-inline">
         <label className="field-inline">
@@ -1869,8 +2216,8 @@ function BookingsPage({ user, filters, onGoRefunds }) {
           <select className="input" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
             <option value="all">Hiển thị tất cả cơ sở</option>
             {(branches ?? []).map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
@@ -1884,10 +2231,10 @@ function BookingsPage({ user, filters, onGoRefunds }) {
         <input
           className="input"
           type="search"
-          placeholder="Tìm tên khách hoặc sân"
+          placeholder="Tìm tên khách, số điện thoại hoặc sân"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          aria-label="Tìm tên khách hoặc sân"
+          aria-label="Tìm tên khách, số điện thoại hoặc sân"
         />
         <select className="input" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Lọc trạng thái">
           <option>Mọi trạng thái</option>
@@ -1902,13 +2249,16 @@ function BookingsPage({ user, filters, onGoRefunds }) {
           <table className="table table-bookings">
             <thead>
               <tr>
-                <th>Khách</th>
-                <th>Sân</th>
-                {allDays && <th>Ngày</th>}
-                <th>Giờ bắt đầu</th>
-                <th>Giờ kết thúc</th>
-                <th>Cơ sở</th>
-                <th>Trạng thái</th>
+                <SortTh cols={BOOKING_SORT_COLS} k="khach" sel={sortSel} onSel={setSortSel}>Khách</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="sdt" sel={sortSel} onSel={setSortSel}>Số điện thoại</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="san" sel={sortSel} onSel={setSortSel}>Sân</SortTh>
+                {allDays && <SortTh cols={BOOKING_SORT_COLS} k="ngayChoi" sel={sortSel} onSel={setSortSel}>Ngày</SortTh>}
+                <SortTh cols={BOOKING_SORT_COLS} k="gioBd" sel={sortSel} onSel={setSortSel}>Giờ bắt đầu</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="gioKt" sel={sortSel} onSel={setSortSel}>Giờ kết thúc</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="ngayDat" sel={sortSel} onSel={setSortSel}>Ngày đặt sân</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="thanhToan" sel={sortSel} onSel={setSortSel}>Ngày giờ thanh toán</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="trangThai" sel={sortSel} onSel={setSortSel}>Trạng thái</SortTh>
                 <th>Thao tác</th>
               </tr>
             </thead>
@@ -1932,11 +2282,17 @@ function BookingsPage({ user, filters, onGoRefunds }) {
                   <Fragment key={d.maDatSan}>
                     <tr>
                       <td>{d.tenKhach}</td>
+                      <td>{d.soDienThoaiLienHe ?? '—'}</td>
                       <td>{d.tenSan}</td>
                       {allDays && <td>{toViDate(String(d.ngay).slice(0, 10))}</td>}
                       <td>{d.gioBatDau.slice(0, 5)}</td>
                       <td>{d.gioKetThuc.slice(0, 5)}</td>
-                      <td>{d.tenCoSo ?? '—'}</td>
+                      <td>
+                        {d.tenCoSo ?? '—'}
+                        {d.coSoKhoa && <span className="branch-locked-tag"> (cơ sở bị khoá)</span>}
+                      </td>
+                      <td>{d.ngayTao ? toViDate(String(d.ngayTao).slice(0, 10)) : '—'}</td>
+                      <td>{d.ngayGuiAnh ? `${toViDate(String(d.ngayGuiAnh).slice(0, 10))} ${String(d.ngayGuiAnh).slice(11, 16)}` : '—'}</td>
                       <td>
                         <span className={`status-badge status-${BOOKING_BADGE[d.hienThi] ?? 'unpaid'}`}>{d.hienThi}</span>
                       </td>
@@ -1955,6 +2311,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
                             )
                           }
                           if (!choXacNhan && !duocHuy) return null
+                          const hienHuy = choXacNhan || duocHuy // đơn chờ xác nhận luôn có nút Huỷ đơn (huỷ trước hay sau Xác nhận đều được)
                           return (
                             <div className="row-actions row-actions-stack">
                               {choXacNhan && d.anhChuyenKhoanUrl && (
@@ -1967,7 +2324,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
                                   Xác nhận
                                 </button>
                               )}
-                              {duocHuy && (
+                              {hienHuy && (
                                 <button type="button" className="btn btn-sm btn-reject" disabled={busyId === d.maDatSan} onClick={() => openCancel(d)}>
                                   Huỷ đơn
                                 </button>
@@ -2003,7 +2360,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
 
       {/* Xem ảnh chuyển khoản khách gửi */}
       {preview && (
-        <div className="modal-backdrop" onClick={() => setPreview('')}>
+        <div className="modal-backdrop">
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <img src={preview} alt="Ảnh chuyển khoản của khách" />
             <button type="button" className="btn btn-primary btn-sm" onClick={() => setPreview('')}>
@@ -2046,6 +2403,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
 // Hoàn tiền: khách huỷ đơn đã thanh toán → chủ sân chuyển khoản hoàn rồi bấm "Đã hoàn tiền"
 // API có sẵn: GET /api/chu-san/hoan-tien?trangThai=processing|refunded, POST /api/chu-san/hoan-tien/:maThanhToan/hoan-thanh
 function RefundsPage({ user, onNavigate }) {
+  const [sortSel, setSortSel] = useState('')
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
   const [tab, setTab] = useState('processing')
@@ -2079,25 +2437,39 @@ function RefundsPage({ user, onNavigate }) {
   }, [isOwner, token, tab, reload, tick])
 
   const [confirming, setConfirming] = useState(null) // yêu cầu đang mở hộp xác nhận hoàn tiền
-  const [maGD, setMaGD] = useState('')
+  const [anhFile, setAnhFile] = useState(null) // ảnh chứng từ chuyển khoản hoàn
+  const [anhXem, setAnhXem] = useState('') // đường dẫn xem trước ảnh vừa chọn
   const [daChuyen, setDaChuyen] = useState(false)
   const [dialogError, setDialogError] = useState('')
 
   const openConfirm = (r) => {
     setConfirming(r)
-    setMaGD('')
+    setAnhFile(null)
+    setAnhXem('')
     setDaChuyen(false)
     setDialogError('')
   }
 
-  // Chủ sân chuyển khoản cho khách trước, rồi nhập mã giao dịch (biên lai) và xác nhận.
-  // API có sẵn: POST /api/chu-san/hoan-tien/:maThanhToan/hoan-thanh { maGiaoDichHoan } — backend gửi thông báo kèm mã này cho khách.
+  const chonAnh = (e) => {
+    const f = e.target.files?.[0] ?? null
+    e.target.value = ''
+    if (anhXem) URL.revokeObjectURL(anhXem)
+    setAnhFile(f)
+    setAnhXem(f ? URL.createObjectURL(f) : '')
+    setDialogError('')
+  }
+
+  // Chủ sân chuyển khoản cho khách trước, rồi tải ảnh chứng từ chuyển khoản và xác nhận.
+  // API có sẵn: POST /api/chu-san/hoan-tien/:maThanhToan/hoan-thanh (multipart, trường anhChungTu bắt buộc) — khách nhận thông báo kèm ảnh.
   const complete = async (e) => {
     e.preventDefault()
     const r = confirming
-    const text = maGD.trim()
-    if (!text) {
-      setDialogError('Vui lòng nhập mã giao dịch (mã biên lai chuyển tiền) để khách đối chiếu.')
+    if (!anhFile) {
+      setDialogError('Vui lòng thêm ảnh chứng từ chuyển khoản hoàn tiền để khách đối chiếu.')
+      return
+    }
+    if (!/^image\/(jpeg|png|webp)$/.test(anhFile.type)) {
+      setDialogError('Chỉ nhận ảnh JPG, PNG hoặc WEBP.')
       return
     }
     if (!daChuyen) {
@@ -2108,12 +2480,11 @@ function RefundsPage({ user, onNavigate }) {
     setDialogError('')
     setError('')
     try {
-      await callApi(`/api/chu-san/hoan-tien/${r.maThanhToan}/hoan-thanh`, {
-        method: 'POST',
-        token,
-        body: { maGiaoDichHoan: text },
-      })
-      setNotice(`Đã ghi nhận hoàn tiền cho ${r.tenKhach}. Khách sẽ nhận thông báo kèm mã giao dịch ${text}.`)
+      const body = new FormData()
+      body.append('anhChungTu', anhFile)
+      await postMultipart(token, `/api/chu-san/hoan-tien/${r.maThanhToan}/hoan-thanh`, body)
+      setNotice(`Đã ghi nhận hoàn tiền cho ${r.tenKhach}. Khách sẽ nhận thông báo kèm ảnh chứng từ.`)
+      if (anhXem) URL.revokeObjectURL(anhXem)
       setConfirming(null)
       setReload((n) => n + 1)
     } catch (err) {
@@ -2136,6 +2507,14 @@ function RefundsPage({ user, onNavigate }) {
     }
     return { pct, hours }
   }
+  const refundCols = [
+    { key: 'khach', label: 'Khách', type: 'text', get: (r) => r.tenKhach },
+    { key: 'don', label: 'Đơn đặt', type: 'date', get: (r) => ngayGioKey(r.ngay, r.gioBatDau) },
+    { key: 'muc', label: 'Mức hoàn', type: 'number', get: (r) => refundLevel(r).pct },
+    { key: 'tien', label: 'Số tiền hoàn', type: 'number', get: (r) => Number(r.soTienHoan ?? r.soTienDaTra) },
+    { key: 'nganHang', label: 'Tài khoản nhận hoàn tiền', type: 'text', get: (r) => r.tenNganHang },
+    { key: 'ngayHoan', label: 'Ngày hoàn', type: 'date', get: (r) => r.ngayHoan ?? r.ngayHuy },
+  ]
 
   if (!isOwner) {
     return (
@@ -2162,7 +2541,7 @@ function RefundsPage({ user, onNavigate }) {
       {tab === 'processing' && (
         <p className="hint refund-policy">
           Quy định hoàn tiền: khách huỷ sân trước giờ chơi <strong>từ 24 giờ trở lên</strong> được hoàn <strong>100%</strong>; <strong>từ 12 đến dưới 24 giờ</strong> hoàn <strong>50%</strong>; dưới 12 giờ không hoàn tiền.
-          Hãy chuyển khoản cho khách trước, sau đó bấm “Hoàn tiền” và nhập mã giao dịch (biên lai) để khách đối chiếu.
+          Hãy chuyển khoản cho khách trước, sau đó bấm “Hoàn tiền” và thêm ảnh chứng từ chuyển khoản để khách đối chiếu.
         </p>
       )}
 
@@ -2171,12 +2550,12 @@ function RefundsPage({ user, onNavigate }) {
           <table className="table table-refunds">
             <thead>
               <tr>
-                <th>Khách</th>
-                <th>Đơn đặt</th>
-                <th>Mức hoàn</th>
-                <th>Số tiền hoàn</th>
-                <th>Tài khoản nhận hoàn tiền</th>
-                <th>{tab === 'processing' ? 'Thao tác' : 'Ngày hoàn · mã giao dịch'}</th>
+                <SortTh cols={refundCols} k="khach" sel={sortSel} onSel={setSortSel}>Khách</SortTh>
+                <SortTh cols={refundCols} k="don" sel={sortSel} onSel={setSortSel}>Đơn đặt</SortTh>
+                <SortTh cols={refundCols} k="muc" sel={sortSel} onSel={setSortSel}>Mức hoàn</SortTh>
+                <SortTh cols={refundCols} k="tien" sel={sortSel} onSel={setSortSel}>Số tiền hoàn</SortTh>
+                <SortTh cols={refundCols} k="nganHang" sel={sortSel} onSel={setSortSel}>Tài khoản nhận hoàn tiền</SortTh>
+                {tab === 'processing' ? <th>Thao tác</th> : <SortTh cols={refundCols} k="ngayHoan" sel={sortSel} onSel={setSortSel}>Ngày hoàn · ảnh chứng từ</SortTh>}
               </tr>
             </thead>
             <tbody>
@@ -2195,7 +2574,7 @@ function RefundsPage({ user, onNavigate }) {
                 </tr>
               )}
               {!loading &&
-                rows.map((r) => (
+                sortRows(rows, refundCols, sortSel).map((r) => (
                   <tr key={r.maThanhToan}>
                     <td>
                       {r.tenKhach}
@@ -2230,7 +2609,11 @@ function RefundsPage({ user, onNavigate }) {
                       ) : (
                         <>
                           {r.ngayHoan ? toViDate(String(r.ngayHoan).slice(0, 10)) : '—'}
-                          {r.maGiaoDichHoan && <div className="cell-sub">Mã GD: {r.maGiaoDichHoan}</div>}
+                          {r.anhChungTuUrl && (
+                            <a href={fileUrl(r.anhChungTuUrl)} target="_blank" rel="noreferrer" className="refund-proof-link" title="Mở ảnh chứng từ">
+                              <img className="refund-proof-thumb" src={fileUrl(r.anhChungTuUrl)} alt="Ảnh chứng từ hoàn tiền" />
+                            </a>
+                          )}
                         </>
                       )}
                     </td>
@@ -2268,12 +2651,13 @@ function RefundsPage({ user, onNavigate }) {
               </div>
             </div>
             <label className="dialog-field">
-              <span>Mã giao dịch (mã biên lai chuyển tiền) *</span>
-              <input className="input" value={maGD} onChange={(e) => setMaGD(e.target.value)} maxLength={100} placeholder="Nhập mã giao dịch trên biên lai" autoFocus />
+              <span>Ảnh chứng từ chuyển khoản hoàn tiền *</span>
+              <input className="input input-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={chonAnh} />
             </label>
+            {anhXem && <img className="refund-proof-preview" src={anhXem} alt="Ảnh chứng từ đã chọn" />}
             <label className="refund-check">
               <input type="checkbox" checked={daChuyen} onChange={(e) => setDaChuyen(e.target.checked)} />
-              <span>Tôi đã chuyển khoản đúng số tiền cho khách. Khách sẽ nhận thông báo kèm mã giao dịch này.</span>
+              <span>Tôi đã chuyển khoản đúng số tiền cho khách. Khách sẽ nhận thông báo kèm ảnh chứng từ này.</span>
             </label>
             {dialogError && <p className="dialog-error">{dialogError}</p>}
             <div className="dialog-two">
@@ -2315,10 +2699,10 @@ function PageBanner({ title, icon }) {
 const BRANCH_STATUS = {
   hidden: { label: 'Chưa hiển thị cho khách', className: 'status-wait', hint: 'Cần có ít nhất 1 sân hoạt động và bảng giá thì cơ sở mới hiện cho khách đặt.' },
   active: { label: 'Đang hoạt động', className: 'status-ok', hint: '' },
-  closed: { label: 'Tạm đóng', className: 'status-maint', hint: 'Cơ sở đang tạm đóng, khách không đặt được.' },
+  closed: { label: 'Đã khoá', className: 'status-maint', hint: 'Cơ sở đã bị khoá: khách không đặt được và các sân, bảng giá, lịch của cơ sở này không dùng được. Bấm "Mở khoá" để hoạt động lại.' },
   locked: { label: 'Bị khoá', className: 'status-maint', hint: 'Cơ sở bị quản trị viên khoá, vui lòng liên hệ quản trị viên.' },
 }
-const MIN_BOOKING_OPTIONS = [30, 60, 90, 120]
+const MIN_BOOKING_OPTIONS = [60, 90, 120]
 const EMPTY_BRANCH_FORM = {
   tenCoSo: '',
   diaChi: '',
@@ -2326,13 +2710,11 @@ const EMPTY_BRANCH_FORM = {
   quanHuyen: '',
   soDienThoai: '',
   zalo: '',
-  linkBanDo: '',
+  linkBanDo: '', // chỉ nhập toạ độ "vĩ độ, kinh độ"; phần https://maps.google.com/?q= được gắn cứng
   moTa: '',
   gioMoCua: '06:00',
   gioDongCua: '22:00',
   soPhutDatToiThieu: '60',
-  viDo: '',
-  kinhDo: '',
 }
 // Số liên hệ giống backend: di động 10 số (03/05/07/08/09) hoặc số bàn 11 số, bắt đầu bằng 0 (chấp nhận +84 / khoảng trắng)
 const CONTACT_PHONE_RE = /^0([35789]\d{8}|2\d{9})$/
@@ -2350,10 +2732,9 @@ function validateBranchForm(f) {
   const diaChi = text(f.diaChi)
   const tinhThanh = text(f.tinhThanh)
   const quanHuyen = text(f.quanHuyen)
-  const linkBanDo = text(f.linkBanDo)
   const zalo = text(f.zalo)
   const moTa = String(f.moTa ?? '').trim()
-  if (!tenCoSo || !diaChi || !tinhThanh || !quanHuyen || !text(f.soDienThoai) || !linkBanDo) {
+  if (!tenCoSo || !diaChi || !tinhThanh || !quanHuyen || !text(f.soDienThoai) || !text(f.linkBanDo)) {
     return { error: 'Vui lòng nhập đầy đủ các mục có dấu *.' }
   }
   if (tenCoSo.length < 2 || tenCoSo.length > 150) return { error: 'Tên cơ sở từ 2 đến 150 ký tự.' }
@@ -2365,36 +2746,24 @@ function validateBranchForm(f) {
     return { error: 'Số điện thoại không hợp lệ (di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0).' }
   }
   if (zalo.length > 30) return { error: 'Zalo tối đa 30 ký tự.' }
-  try {
-    const u = new URL(linkBanDo)
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('x')
-  } catch {
-    return { error: 'Link bản đồ không hợp lệ (bắt đầu bằng https://).' }
-  }
-  if (linkBanDo.length > 500) return { error: 'Link bản đồ tối đa 500 ký tự.' }
+  const toa = /^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/.exec(f.linkBanDo.trim())
+  if (!toa) return { error: 'Toạ độ bản đồ nhập theo dạng "vĩ độ, kinh độ", ví dụ 10.8012, 106.6399.' }
+  if (Math.abs(Number(toa[1])) > 90) return { error: 'Vĩ độ phải từ -90 đến 90.' }
+  if (Math.abs(Number(toa[2])) > 180) return { error: 'Kinh độ phải từ -180 đến 180.' }
   if (moTa.length > 2000) return { error: 'Mô tả tối đa 2000 ký tự.' }
   if (!f.gioMoCua || !f.gioDongCua) return { error: 'Vui lòng chọn giờ mở cửa và giờ đóng cửa.' }
   if (f.gioMoCua >= f.gioDongCua) return { error: 'Giờ đóng cửa phải sau giờ mở cửa.' }
   const soPhut = Number(f.soPhutDatToiThieu)
   if (!Number.isInteger(soPhut) || soPhut < 30 || soPhut % 30 !== 0) return { error: 'Thời gian đặt tối thiểu phải là bội số của 30 phút.' }
 
+  const linkBanDo = `${MAPS_PREFIX}${toa[1]},${toa[2]}`
   const body = { tenCoSo, diaChi, tinhThanh, quanHuyen, soDienThoai, linkBanDo, gioMoCua: f.gioMoCua, gioDongCua: f.gioDongCua, soPhutDatToiThieu: soPhut }
   if (zalo) body.zalo = zalo
   if (moTa) body.moTa = moTa
-  if (text(f.viDo) !== '') {
-    const v = Number(f.viDo)
-    if (!Number.isFinite(v) || v < -90 || v > 90) return { error: 'Vĩ độ phải từ -90 đến 90.' }
-    body.viDo = v
-  }
-  if (text(f.kinhDo) !== '') {
-    const v = Number(f.kinhDo)
-    if (!Number.isFinite(v) || v < -180 || v > 180) return { error: 'Kinh độ phải từ -180 đến 180.' }
-    body.kinhDo = v
-  }
   return { body }
 }
 
-function BranchCard({ b, uploading, onChangeImage }) {
+function BranchCard({ b, busy, onEdit, onToggleLock, onDelete }) {
   const st = BRANCH_STATUS[b.trangThai] ?? { label: b.trangThai, className: 'status-wait', hint: '' }
   const place = [b.quanHuyen, b.tinhThanh].filter(Boolean).join(', ')
   return (
@@ -2407,21 +2776,36 @@ function BranchCard({ b, uploading, onChangeImage }) {
           <h3>{b.tenCoSo}</h3>
           <span className={`status-badge ${st.className}`}>{st.label}</span>
         </div>
-        {/* Nút đổi ảnh cơ sở nằm trên phần địa chỉ (API có sẵn POST /api/chu-san/co-so/:maCoSo/anh) */}
-        <label className={`btn btn-ghost btn-sm file-btn branch-photo-btn${uploading ? ' is-disabled' : ''}`}>
-          {uploading ? 'Đang tải ảnh...' : 'Đổi ảnh cơ sở'}
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            hidden
-            disabled={uploading}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) onChangeImage(b, file)
-            }}
-          />
-        </label>
+        {/* Sửa cơ sở (gồm cả đổi ảnh, giờ hoạt động) – Khoá / Mở khoá cơ sở – Xoá cơ sở */}
+        <div className="branch-actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(b)} disabled={busy || b.trangThai === 'locked'}>
+            Sửa cơ sở
+          </button>
+          {b.trangThai === 'closed' ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onToggleLock(b)} disabled={busy}>
+              Mở khoá cơ sở
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => onToggleLock(b)}
+              disabled={busy || b.trangThai === 'locked' || Number(b.soSanHoatDong ?? 0) > 0}
+              title={b.trangThai === 'locked' ? 'Cơ sở do quản trị viên khoá' : Number(b.soSanHoatDong ?? 0) > 0 ? 'Cần khoá tất cả sân của cơ sở trước (sân không còn đơn đặt)' : undefined}
+            >
+              Khoá cơ sở
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-danger-text"
+            onClick={() => onDelete(b)}
+            disabled={busy || b.trangThai !== 'closed'}
+            title={b.trangThai === 'closed' ? 'Xoá cơ sở khỏi hệ thống' : 'Cần khoá cơ sở trước khi xoá'}
+          >
+            Xoá cơ sở
+          </button>
+        </div>
         <dl className="branch-info">
           <div>
             <dt>Địa chỉ</dt>
@@ -2481,7 +2865,9 @@ function BranchesPage({ user, onCreated }) {
   const [loading, setLoading] = useState(isOwner)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [uploadingId, setUploadingId] = useState(null) // cơ sở đang tải ảnh
+  const [busyId, setBusyId] = useState(null) // cơ sở đang thao tác
+  const [editing, setEditing] = useState(null) // cơ sở đang sửa (null = đang thêm mới)
+  const [confirm, setConfirm] = useState(null) // { type: 'lock' | 'unlock' | 'delete', b, lyDo, busy, error }
   const [dialogOpen, setDialogOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_BRANCH_FORM)
   const [imageFile, setImageFile] = useState(null)
@@ -2516,23 +2902,55 @@ function BranchesPage({ user, onCreated }) {
     )
   }
 
-  // Đổi ảnh cơ sở: POST /api/chu-san/co-so/:maCoSo/anh (multipart, trường tepAnh)
-  const changeImage = async (b, file) => {
-    setUploadingId(b.maCoSo)
-    setError('')
-    setSuccess('')
+  // Khoá / mở khoá / xoá cơ sở: PATCH .../co-so/:maCoSo/dong, PATCH .../co-so/:maCoSo/mo, DELETE .../co-so/:maCoSo
+  const runConfirm = async () => {
+    const { type, b, lyDo } = confirm
+    setConfirm((c) => ({ ...c, busy: true, error: '' }))
     try {
-      const saved = await uploadBranchImage(token, file, b.maCoSo)
-      setBranches((prev) => prev.map((x) => (x.maCoSo === b.maCoSo ? { ...x, duongDanAnh: saved.duongDanAnh } : x)))
-      setSuccess(`Đã cập nhật ảnh của ${b.tenCoSo}.`)
+      if (type === 'delete') {
+        await callApi(`/api/chu-san/co-so/${b.maCoSo}`, { method: 'DELETE', token, body: lyDo.trim() ? { lyDo: lyDo.trim() } : {} })
+        setBranches((prev) => prev.filter((x) => x.maCoSo !== b.maCoSo))
+        setSuccess(`Đã xoá cơ sở ${b.tenCoSo}.`)
+      } else {
+        const kq = await callApi(`/api/chu-san/co-so/${b.maCoSo}/${type === 'lock' ? 'dong' : 'mo'}`, {
+          method: 'PATCH',
+          token,
+          body: type === 'lock' && lyDo.trim() ? { lyDo: lyDo.trim() } : {},
+        })
+        setBranches((prev) => prev.map((x) => (x.maCoSo === b.maCoSo ? { ...x, trangThai: kq.trangThai } : x)))
+        setSuccess(type === 'lock' ? `Đã khoá cơ sở ${b.tenCoSo}.` : `Đã mở khoá cơ sở ${b.tenCoSo}.`)
+      }
+      setConfirm(null)
+      onCreated?.()
     } catch (err) {
-      setError(describeApiError(err))
-    } finally {
-      setUploadingId(null)
+      const hint = err.status === 409 && type !== 'unlock' ? ' Hãy huỷ các đơn còn lại và khoá tất cả sân của cơ sở trước.' : ''
+      setConfirm((c) => ({ ...c, busy: false, error: `${describeApiError(err)}${hint}` }))
     }
   }
 
+  const openEdit = (b) => {
+    const m = /(?:@|[?&](?:q|query|ll|center)=)(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i.exec(b.linkBanDo ?? '')
+    const toa = b.viDo != null && b.kinhDo != null ? `${b.viDo}, ${b.kinhDo}` : m ? `${m[1]}, ${m[2]}` : ''
+    setEditing(b)
+    setForm({
+      tenCoSo: b.tenCoSo ?? '',
+      diaChi: b.diaChi ?? '',
+      tinhThanh: b.tinhThanh ?? '',
+      quanHuyen: b.quanHuyen ?? '',
+      soDienThoai: b.soDienThoai ?? '',
+      zalo: b.zalo ?? '',
+      linkBanDo: toa,
+      moTa: b.moTa ?? '',
+      gioMoCua: cut5(b.gioMoCua) || '06:00',
+      gioDongCua: cut5(b.gioDongCua) || '22:00',
+      soPhutDatToiThieu: String(b.soPhutDatToiThieu ?? 60),
+    })
+    setImageFile(null)
+    setDialogError('')
+    setDialogOpen(true)
+  }
   const openDialog = () => {
+    setEditing(null)
     setForm(EMPTY_BRANCH_FORM)
     setImageFile(null)
     setDialogError('')
@@ -2553,6 +2971,32 @@ function BranchesPage({ user, onCreated }) {
     setSaving(true)
     setDialogError('')
     try {
+      if (editing) {
+        // Sửa cơ sở: PUT /api/chu-san/co-so/:maCoSo. Đổi giờ hoạt động thì xử lý bảng giá trước (prepareHoursChange)
+        const prep = await prepareHoursChange(token, editing, body.gioMoCua, body.gioDongCua)
+        let updated
+        try {
+          updated = await callApi(`/api/chu-san/co-so/${editing.maCoSo}`, { method: 'PUT', token, body })
+        } catch (err) {
+          if (prep.restore) await prep.restore()
+          throw err
+        }
+        let imageWarning = ''
+        if (imageFile) {
+          try {
+            const saved = await uploadBranchImage(token, imageFile, editing.maCoSo)
+            updated = { ...updated, duongDanAnh: saved.duongDanAnh }
+          } catch (err) {
+            imageWarning = ` Nhưng chưa lưu được ảnh (${describeApiError(err)}).`
+          }
+        }
+        setBranches((prev) => prev.map((x) => (x.maCoSo === editing.maCoSo ? { ...x, ...updated } : x)))
+        setDialogOpen(false)
+        setError('')
+        setSuccess(`Đã lưu cơ sở ${updated.tenCoSo ?? editing.tenCoSo}.${imageWarning}${prep.reminder ? ` ${prep.reminder}` : ''}`)
+        onCreated?.()
+        return
+      }
       let created = await callApi('/api/chu-san/co-so', { method: 'POST', token, body })
       let imageWarning = ''
       if (imageFile) {
@@ -2601,26 +3045,26 @@ function BranchesPage({ user, onCreated }) {
         {branches.length > 0 && (
           <div className="branch-list" ref={listRef}>
             {branches.map((b) => (
-              <BranchCard key={b.maCoSo} b={b} uploading={uploadingId === b.maCoSo} onChangeImage={changeImage} />
+              <BranchCard key={b.maCoSo} b={b} busy={busyId === b.maCoSo} onEdit={openEdit} onToggleLock={(x) => setConfirm({ type: x.trangThai === 'closed' ? 'unlock' : 'lock', b: x, lyDo: '', busy: false, error: '' })} onDelete={(x) => setConfirm({ type: 'delete', b: x, lyDo: '', busy: false, error: '' })} />
             ))}
           </div>
         )}
       </section>
 
       {dialogOpen && (
-        <Dialog title="Thêm cơ sở" width={640} onClose={() => !saving && setDialogOpen(false)}>
+        <Dialog title={editing ? 'Sửa cơ sở' : 'Thêm cơ sở'} width={640} onClose={() => !saving && setDialogOpen(false)}>
           <form onSubmit={submit} noValidate>
             <div className="branch-form">
               <label className="dialog-field branch-wide">
-                <span>Tên cơ sở *</span>
+                <span>Tên cơ sở</span>
                 <input className="input" value={form.tenCoSo} onChange={update('tenCoSo')} maxLength={150} autoFocus />
               </label>
               <label className="dialog-field branch-wide">
-                <span>Địa chỉ *</span>
+                <span>Địa chỉ </span>
                 <input className="input" value={form.diaChi} onChange={update('diaChi')} maxLength={255} placeholder="Số nhà, đường, phường" />
               </label>
               <label className="dialog-field">
-                <span>Tỉnh/Thành *</span>
+                <span>Tỉnh/Thành </span>
                 <select className="input" value={form.tinhThanh} onChange={(e) => setForm((f) => ({ ...f, tinhThanh: e.target.value, quanHuyen: '' }))}>
                   <option value="">Chọn Tỉnh/Thành</option>
                   {[BRANCH_PROVINCE].map((t) => (
@@ -2631,7 +3075,7 @@ function BranchesPage({ user, onCreated }) {
                 </select>
               </label>
               <label className="dialog-field">
-                <span>Quận/Huyện *</span>
+                <span>Quận/Huyện </span>
                 <select className="input" value={form.quanHuyen} onChange={update('quanHuyen')} disabled={!form.tinhThanh}>
                   <option value="">{form.tinhThanh ? 'Chọn Quận/Huyện' : 'Chọn Tỉnh/Thành trước'}</option>
                   {(form.tinhThanh === BRANCH_PROVINCE ? BRANCH_DISTRICTS : []).map((q) => (
@@ -2642,27 +3086,30 @@ function BranchesPage({ user, onCreated }) {
                 </select>
               </label>
               <label className="dialog-field">
-                <span>Số điện thoại *</span>
+                <span>Số điện thoại </span>
                 <input className="input" type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={11} value={form.soDienThoai} onChange={(e) => setForm((f) => ({ ...f, soDienThoai: onlyDigits(e.target.value) }))} />
               </label>
               <label className="dialog-field">
-                <span>Zalo</span>
+                <span>Zalo (Tuỳ chọn)</span>
                 <input className="input" inputMode="numeric" pattern="[0-9]*" value={form.zalo} onChange={(e) => setForm((f) => ({ ...f, zalo: onlyDigits(e.target.value) }))} maxLength={30} />
               </label>
               <label className="dialog-field branch-wide">
-                <span>Link bản đồ (Google Maps) *</span>
-                <input className="input" type="url" value={form.linkBanDo} onChange={update('linkBanDo')} placeholder="https://maps.google.com/..." />
+                <span>Toạ độ bản đồ (Google Maps) </span>
+                <span className="input-prefixed">
+                  <span className="input-prefix">{MAPS_PREFIX}</span>
+                  <input className="input" value={form.linkBanDo} onChange={(e) => setForm((f) => ({ ...f, linkBanDo: e.target.value.replace(/[^0-9.,\-\s]/g, '') }))} placeholder="10.8012, 106.6399" inputMode="decimal" />
+                </span>
               </label>
               <label className="dialog-field">
-                <span>Giờ mở cửa *</span>
+                <span>Giờ mở cửa </span>
                 <input className="input" type="time" value={form.gioMoCua} onChange={update('gioMoCua')} />
               </label>
               <label className="dialog-field">
-                <span>Giờ đóng cửa *</span>
+                <span>Giờ đóng cửa </span>
                 <input className="input" type="time" value={form.gioDongCua} onChange={update('gioDongCua')} />
               </label>
               <label className="dialog-field">
-                <span>Thời gian đặt tối thiểu *</span>
+                <span>Thời gian đặt tối thiểu </span>
                 <select className="input" value={form.soPhutDatToiThieu} onChange={update('soPhutDatToiThieu')}>
                   {MIN_BOOKING_OPTIONS.map((m) => (
                     <option key={m} value={m}>
@@ -2672,33 +3119,55 @@ function BranchesPage({ user, onCreated }) {
                 </select>
               </label>
               <label className="dialog-field">
-                <span>Ảnh cơ sở</span>
+                <span>{editing ? 'Đổi ảnh cơ sở (tuỳ chọn)' : 'Ảnh cơ sở'}</span>
                 <input className="input input-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] ?? null)} />
-              </label>
-              <label className="dialog-field">
-                <span>Vĩ độ (tuỳ chọn)</span>
-                <input className="input" inputMode="decimal" value={form.viDo} onChange={(e) => setForm((f) => ({ ...f, viDo: onlyDecimal(e.target.value) }))} placeholder="10.8012" />
-              </label>
-              <label className="dialog-field">
-                <span>Kinh độ (tuỳ chọn)</span>
-                <input className="input" inputMode="decimal" value={form.kinhDo} onChange={(e) => setForm((f) => ({ ...f, kinhDo: onlyDecimal(e.target.value) }))} placeholder="106.6399" />
               </label>
               <label className="dialog-field branch-wide">
                 <span>Mô tả</span>
                 <textarea className="input branch-textarea" rows={3} value={form.moTa} onChange={update('moTa')} maxLength={2000} />
               </label>
             </div>
-            <p className="picker-hint">Cơ sở mới ở trạng thái &quot;Chưa hiển thị cho khách&quot; cho tới khi có sân hoạt động và bảng giá.</p>
+            {!editing && <p className="picker-hint">Cơ sở mới ở trạng thái &quot;Chưa hiển thị cho khách&quot; cho tới khi có sân hoạt động và bảng giá.</p>}
             {dialogError && <p className="dialog-error">{dialogError}</p>}
             <div className="dialog-two">
               <button type="button" className="dialog-ghost" onClick={() => setDialogOpen(false)} disabled={saving}>
                 Huỷ
               </button>
               <button type="submit" className="dialog-primary" disabled={saving}>
-                {saving ? 'Đang lưu...' : 'Lưu'}
+                {saving ? 'Đang lưu...' : editing ? 'Lưu thay đổi' : 'Lưu'}
               </button>
             </div>
           </form>
+        </Dialog>
+      )}
+
+      {confirm && (
+        <Dialog
+          title={confirm.type === 'lock' ? 'Khoá cơ sở' : confirm.type === 'unlock' ? 'Mở khoá cơ sở' : 'Xoá cơ sở'}
+          width={460}
+          onClose={() => !confirm.busy && setConfirm(null)}
+        >
+          <p className="picker-hint">
+            {confirm.type === 'lock' &&
+              `Khoá "${confirm.b.tenCoSo}": khách không đặt được cơ sở này; sân, bảng giá và lịch của cơ sở không dùng được cho tới khi mở khoá. Chỉ khoá được khi tất cả sân của cơ sở đã khoá. Mở khoá cơ sở thì các sân vẫn khoá cho tới khi bạn mở từng sân.`}
+            {confirm.type === 'unlock' && `Mở khoá "${confirm.b.tenCoSo}" để cơ sở hoạt động trở lại (hiển thị cho khách khi có sân hoạt động và bảng giá).`}
+            {confirm.type === 'delete' && `Xoá "${confirm.b.tenCoSo}" khỏi hệ thống? Thao tác này không hoàn tác được. Cơ sở còn đơn đặt hoặc đã từng có đơn đặt thì không xoá được.`}
+          </p>
+          {confirm.type !== 'unlock' && (
+            <label className="dialog-field">
+              <span>Lý do (tuỳ chọn)</span>
+              <input className="input" value={confirm.lyDo} maxLength={255} onChange={(e) => setConfirm((c) => ({ ...c, lyDo: e.target.value }))} />
+            </label>
+          )}
+          {confirm.error && <p className="dialog-error">{confirm.error}</p>}
+          <div className="dialog-two">
+            <button type="button" className="dialog-ghost" onClick={() => setConfirm(null)} disabled={confirm.busy}>
+              Đóng
+            </button>
+            <button type="button" className={confirm.type === 'delete' ? 'dialog-danger' : 'dialog-primary'} onClick={runConfirm} disabled={confirm.busy}>
+              {confirm.busy ? 'Đang xử lý...' : confirm.type === 'lock' ? 'Khoá cơ sở' : confirm.type === 'unlock' ? 'Mở khoá' : 'Xoá cơ sở'}
+            </button>
+          </div>
         </Dialog>
       )}
     </Page>
@@ -2882,6 +3351,7 @@ function ComplaintsPage({ user }) {
 }
 
 function CourtsPage({ user }) {
+  const [sortSel, setSortSel] = useState('')
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
@@ -2942,9 +3412,10 @@ function CourtsPage({ user }) {
         const conKhach = new Set(
           (don.cacDon ?? [])
             .filter((d) => {
-              if (d.trangThai === 'pending_payment') return true
-              if (d.trangThai !== 'confirmed') return false
-              return new Date(`${String(d.ngay).slice(0, 10)}T${cut5(d.gioKetThuc)}:00`) > bayGio
+              // Giống backend: đơn chuyển khoản chờ duyệt còn hạn giữ chỗ, hoặc đơn đã xác nhận mà CHƯA qua giờ kết thúc (đơn cũ/đã qua ngày không tính)
+              if (d.trangThai === 'pending_payment') return !d.hetHanGiuCho || Number.isNaN(Date.parse(d.hetHanGiuCho)) || new Date(d.hetHanGiuCho.replace(' ', 'T')) > bayGio
+              if (d.trangThai !== 'confirmed' && d.trangThai !== 'checked_in') return false
+              return new Date(`${String(d.ngay).slice(0, 10)}T${cut5(d.gioKetThuc)}:00+07:00`) > bayGio
             })
             .map((d) => d.maSan),
         )
@@ -2976,6 +3447,8 @@ function CourtsPage({ user }) {
   }
 
   const branch = branches.find((b) => String(b.maCoSo) === addBranchId) ?? null
+  const branchOf = (maCoSo) => branches.find((b) => b.maCoSo === maCoSo)
+  const themDuoc = branches.filter((b) => !isBranchBlocked(b)) // chỉ thêm sân vào cơ sở không bị khoá
 
   // Giá hiện tại của sân = giá của CƠ SỞ chứa sân theo Quản lý bảng giá (thời điểm hiện tại, ngày thường / cuối tuần)
   const priceOf = (court) => {
@@ -2985,6 +3458,12 @@ function CourtsPage({ user }) {
     return khungGias.length > 0 ? 'Ngoài giờ' : '—'
   }
 
+  const courtCols = [
+    { key: 'san', label: 'Sân', type: 'text', get: (c) => c.tenSan },
+    { key: 'coSo', label: 'Cơ sở', type: 'text', get: (c) => c.tenCoSo ?? branchOf(c.maCoSo)?.tenCoSo },
+    { key: 'gia', label: 'Giá', type: 'number', get: (c) => priceAt(giaTheoCoSo[c.maCoSo] ?? [], new Date()) },
+    { key: 'trangThai', label: 'Trạng thái', type: 'text', get: (c) => (c.trangThai === 'active' && !isBranchBlocked(branchOf(c.maCoSo)) ? 'Hoạt động' : 'Đã khoá') },
+  ]
   const changeFilter = (e) => {
     setFilterId(e.target.value)
     setCourts([])
@@ -2998,6 +3477,7 @@ function CourtsPage({ user }) {
   // API có sẵn GET /api/chu-san/co-so/:maCoSo/bang-gia (đọc mới nhất, không dùng dữ liệu cũ).
   const kiemTraBangGia = async (maCoSo) => {
     const bg = await callApi(`/api/chu-san/co-so/${maCoSo}/bang-gia`, { token })
+    if ((bg.khungGias ?? []).length === 0) return `Chưa thể mở khoá sân: cơ sở "${bg.tenCoSo}" chưa có bảng giá. Hãy thêm bảng giá ở trang Quản lý bảng giá.`
     const open = cut5(bg.gioMoCua)
     const close = cut5(bg.gioDongCua)
     const gaps = findPriceGaps((bg.khungGias ?? []).map(toRow), open, close)
@@ -3007,9 +3487,17 @@ function CourtsPage({ user }) {
 
   const toggleStatus = async (court) => {
     const closing = court.trangThai === 'active'
-    setBusyId(court.maSan)
     setError('')
     setSuccess('')
+    if (closing && busyCourts.has(court.maSan)) {
+      setError(`Sân "${court.tenSan}" còn đơn đặt (đã thanh toán hoặc đã xác nhận). Hãy huỷ đơn ở trang Quản lý đặt sân, khi sân đã trống mới khoá được.`)
+      return
+    }
+    if (!closing && isBranchBlocked(branchOf(court.maCoSo))) {
+      setError('Cơ sở đang bị khoá nên chưa mở được sân.')
+      return
+    }
+    setBusyId(court.maSan)
     try {
       if (!closing) {
         const thieu = await kiemTraBangGia(court.maCoSo)
@@ -3051,7 +3539,8 @@ function CourtsPage({ user }) {
   const openAddDialog = () => {
     setAddError('')
     setNewName('')
-    if (filterId !== 'all') setAddBranchId(filterId) // mặc định chọn cơ sở đang lọc
+    const loc = themDuoc.find((b) => String(b.maCoSo) === filterId)
+    setAddBranchId(String((loc ?? themDuoc[0])?.maCoSo ?? '')) // mặc định chọn cơ sở đang lọc (nếu không bị khoá)
     setAddOpen(true)
   }
 
@@ -3102,14 +3591,14 @@ function CourtsPage({ user }) {
           <select className="input" value={filterId} onChange={changeFilter}>
             <option value="all">Hiển thị tất cả cơ sở</option>
             {branches.map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
         </label>
         {/* Nút mở cửa sổ Thêm sân, nằm cạnh ô chọn cơ sở */}
-        <button type="button" className="btn btn-primary" onClick={openAddDialog} disabled={branches.length === 0}>
+        <button type="button" className="btn btn-primary" onClick={openAddDialog} disabled={themDuoc.length === 0}>
           <PlusIcon /> Thêm sân
         </button>
       </div>
@@ -3119,10 +3608,10 @@ function CourtsPage({ user }) {
           <table className="table table-courts">
             <thead>
               <tr>
-                <th>Sân</th>
-                <th>Cơ sở</th>
-                <th>Giá</th>
-                <th>Trạng thái</th>
+                <SortTh cols={courtCols} k="san" sel={sortSel} onSel={setSortSel}>Sân</SortTh>
+                <SortTh cols={courtCols} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
+                <SortTh cols={courtCols} k="gia" sel={sortSel} onSel={setSortSel}>Giá</SortTh>
+                <SortTh cols={courtCols} k="trangThai" sel={sortSel} onSel={setSortSel}>Trạng thái</SortTh>
                 <th className="th-center">Thao tác</th>
               </tr>
             </thead>
@@ -3141,12 +3630,13 @@ function CourtsPage({ user }) {
                   </td>
                 </tr>
               )}
-              {courts.map((c) => {
+              {sortRows(courts, courtCols, sortSel).map((c) => {
+                const coSoKhoa = isBranchBlocked(branchOf(c.maCoSo)) // cơ sở bị khoá → sân tự khoá theo
                 const active = c.trangThai === 'active'
                 const conKhach = busyCourts.has(c.maSan)
-                const coTheXoa = !active && !conKhach
+                const coTheXoa = c.trangThai !== 'active' && !conKhach
                 let tieuDeXoa = 'Xoá sân khỏi hệ thống'
-                if (active) tieuDeXoa = 'Cần khoá sân trước khi xoá'
+                if (c.trangThai === 'active') tieuDeXoa = 'Cần khoá sân trước khi xoá'
                 else if (conKhach) tieuDeXoa = 'Sân còn khách đã đặt, chưa xoá được'
                 return (
                   <tr key={c.maSan}>
@@ -3154,7 +3644,7 @@ function CourtsPage({ user }) {
                     <td>{c.tenCoSo ?? branch?.tenCoSo}</td>
                     <td>{priceOf(c)}</td>
                     <td>
-                      <span className={`status-badge ${active ? 'status-ok' : 'status-maint'}`}>{active ? 'Hoạt động' : 'Đã khoá'}</span>
+                      <span className={`status-badge ${active ? 'status-ok' : 'status-maint'}`}>{active ? (coSoKhoa ? 'Hoạt động (cơ sở bị khoá)' : 'Hoạt động') : 'Đã khoá'}</span>
                     </td>
                     <td className="td-center">
                       <div className="row-actions row-actions-center">
@@ -3163,8 +3653,8 @@ function CourtsPage({ user }) {
                           type="button"
                           className={`icon-btn icon-btn-wrench${active ? '' : ' is-on'}`}
                           onClick={() => toggleStatus(c)}
-                          disabled={busyId === c.maSan}
-                          title={active ? 'Khoá sân' : 'Sân đang khoá — bấm để mở khoá (cần bảng giá phủ hết giờ hoạt động của cơ sở)'}
+                          disabled={busyId === c.maSan || (coSoKhoa && !active)}
+                          title={coSoKhoa && !active ? 'Cơ sở đang bị khoá nên chưa mở được sân' : active && busyCourts.has(c.maSan) ? 'Sân còn đơn đặt — huỷ đơn trước khi khoá' : active ? 'Khoá sân' : 'Sân đang khoá — bấm để mở khoá (cần bảng giá phủ hết giờ hoạt động của cơ sở)'}
                           aria-label={active ? 'Khoá sân' : 'Mở khoá sân'}
                         >
                           {active ? <LockOpenIcon /> : <LockClosedIcon />}
@@ -3200,9 +3690,9 @@ function CourtsPage({ user }) {
             <label className="dialog-field">
               <span>Cơ sở *</span>
               <select className="input" value={addBranchId} onChange={(e) => setAddBranchId(e.target.value)}>
-                {branches.map((b) => (
-                  <option key={b.maCoSo} value={String(b.maCoSo)}>
-                    {b.tenCoSo}
+                {themDuoc.map((b) => (
+                  <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                    {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
                   </option>
                 ))}
               </select>
@@ -3223,12 +3713,8 @@ function CourtsPage({ user }) {
   )
 }
 
-// Bảng giá của cơ sở: mỗi dòng là một khung giờ, có 2 mức giá (ngày thường / cuối tuần).
-// Backend vẫn lưu 4 mức (vãng lai / cố định): web hiển thị giá vãng lai và khi lưu gửi cùng một giá cho cả hai loại khách.
-const PRICE_FIELDS = [
-  { key: 'giaNgayThuong', label: 'Ngày thường' },
-  { key: 'giaCuoiTuan', label: 'Cuối tuần' },
-]
+// Bảng giá của cơ sở: mỗi khung giờ có giá riêng cho từng thứ trong tuần (backend `giaTheoThu`, 7 thứ).
+// Web hiển thị giá vãng lai và khi lưu gửi cùng một giá cho cả hai loại khách.
 const MAX_PRICE = 10_000_000
 
 const toMinutes = (t) => {
@@ -3240,8 +3726,10 @@ const cut5 = (t) => String(t ?? '').slice(0, 5)
 
 function toRow(k) {
   const row = { gioBatDau: cut5(k.gioBatDau), gioKetThuc: cut5(k.gioKetThuc), saved: true } // saved = đã có trong database
-  row.giaNgayThuong = k.giaNgayThuongKhachVangLai == null ? '' : String(k.giaNgayThuongKhachVangLai)
-  row.giaCuoiTuan = k.giaCuoiTuanKhachVangLai == null ? '' : String(k.giaCuoiTuanKhachVangLai)
+  row.gia = [1, 2, 3, 4, 5, 6, 7].map((thu) => {
+    const g = giaCuaThu(k, thu)
+    return g == null ? '' : String(g)
+  }) // giá từng thứ: gia[0] = Thứ 2 … gia[6] = Chủ nhật
   return row
 }
 
@@ -3261,10 +3749,11 @@ function validatePricing(rows, open, close) {
     }
     if (s < prevEnd) return 'Các khung giờ bị chồng nhau.'
     prevEnd = e
-    for (const { key, label } of PRICE_FIELDS) {
-      const v = Number(r[key])
-      if (r[key] === '' || !Number.isInteger(v) || v < 0 || v > MAX_PRICE) {
-        return `Khung ${r.gioBatDau}–${r.gioKetThuc}: giá "${label}" phải là số nguyên từ 0 đến ${MAX_PRICE.toLocaleString('vi-VN')}.`
+    for (let i = 0; i < 7; i++) {
+      const raw = r.gia?.[i]
+      const v = Number(raw)
+      if (raw === '' || raw == null || !Number.isInteger(v) || v < 0 || v > MAX_PRICE) {
+        return `Khung ${r.gioBatDau}–${r.gioKetThuc}: giá ${DAY_NAMES[i].long} phải là số nguyên từ 0 đến ${MAX_PRICE.toLocaleString('vi-VN')}.`
       }
     }
   }
@@ -3296,21 +3785,39 @@ const DAY_NAMES = [
   { n: 6, short: 'T7', long: 'Thứ 7' },
   { n: 7, short: 'CN', long: 'C.Nhật' },
 ]
-const dayLong = (n) => DAY_NAMES.find((d) => d.n === n)?.long ?? ''
 
-// Backend chỉ có 2 loại ngày để tính giá: ngày thường (T2–T6) và cuối tuần (T7–CN)
-function dayRangeKind(a, b) {
-  if (a === 1 && b === 5) return 'weekday'
-  if (a === 6 && b === 7) return 'weekend'
-  if (a === 1 && b === 7) return 'both'
-  return null
+// Chủ sân chọn thứ tự do (bất kỳ tập con của T2–CN). Hiển thị gọn: từ 3 thứ liên tiếp trở lên gộp thành khoảng
+// (T2, T3, T4 → "T2 - T4"); các thứ lẻ liệt kê cách nhau dấu phẩy (T2, T4, T6 → "T2, T4, T6").
+function daysText(days) {
+  const d = [...new Set(days ?? [])].sort((a, b) => a - b)
+  const ten = (n) => DAY_NAMES.find((x) => x.n === n)?.short ?? ''
+  const parts = []
+  let i = 0
+  while (i < d.length) {
+    let j = i
+    while (j + 1 < d.length && d[j + 1] === d[j] + 1) j++
+    if (j - i + 1 >= 3) parts.push(`${ten(d[i])} - ${ten(d[j])}`)
+    else for (let k = i; k <= j; k++) parts.push(ten(d[k]))
+    i = j + 1
+  }
+  return parts.join(', ')
+}
+const daysOverlap = (a, b) => (a ?? []).some((n) => (b ?? []).includes(n))
+// Dòng giá đã lưu trên máy ở dạng cũ ({ kind }) → dạng mới ({ days })
+function normEntry(e) {
+  if (Array.isArray(e.days) && e.days.length > 0) return { ...e, days: [...new Set(e.days)].sort((a, b) => a - b) }
+  const days = e.kind === 'weekday' ? [1, 2, 3, 4, 5] : e.kind === 'weekend' ? [6, 7] : [1, 2, 3, 4, 5, 6, 7]
+  const rest = { ...e }
+  delete rest.kind
+  return { ...rest, days }
 }
 
 // Cửa sổ chung (nền mờ + hộp có tiêu đề và nút đóng)
-function Dialog({ title, onClose, children, level = 1, width = 480 }) {
+// fit = cửa sổ chứa bảng: rộng và dài ra theo bảng (tối đa gần hết màn hình), chỉ phần bảng cuộn, tiêu đề + cột đầu được đóng băng
+function Dialog({ title, onClose, children, level = 1, width = 480, fit = false }) {
   return (
-    <div className={`dialog-backdrop dialog-level-${level}`} onClick={onClose}>
-      <div className="dialog" style={{ maxWidth: width }} onClick={(e) => e.stopPropagation()}>
+    <div className={`dialog-backdrop dialog-level-${level}`}>
+      <div className={`dialog${fit ? ' dialog-fit' : ''}`} style={{ maxWidth: width }} onClick={(e) => e.stopPropagation()}>
         <div className="dialog-head">
           <h3>{title}</h3>
           <button type="button" className="dialog-close" onClick={onClose} aria-label="Đóng">
@@ -3374,21 +3881,21 @@ function TimeRangeDialog({ open, close, initial, onConfirm, onClose }) {
           )
         })}
       </div>
-      <button type="button" className="dialog-primary" disabled={!start || !end} onClick={() => onConfirm([start, end])}>
-        Chọn
-      </button>
+      <div className="dialog-two">
+        <button type="button" className="dialog-ghost" onClick={onClose}>
+          Thoát
+        </button>
+        <button type="button" className="dialog-primary" disabled={!start || !end} onClick={() => onConfirm([start, end])}>
+          Chọn
+        </button>
+      </div>
     </Dialog>
   )
 }
 
-// Chọn thứ: bấm từng thứ một để chọn / bỏ chọn. Backend chỉ lưu giá Ngày thường (T2–T6), Cuối tuần (T7–CN) hoặc cả tuần,
-// nên tập thứ đã chọn phải khớp một trong ba nhóm này.
+// Chọn thứ: bấm từng thứ một để chọn / bỏ chọn, chọn tự do bất kỳ thứ nào (vd T2, T4, T6).
 function DayRangeDialog({ initial, onConfirm, onClose }) {
-  const [selected, setSelected] = useState(() => {
-    const set = new Set()
-    if (initial) for (let n = initial[0]; n <= initial[1]; n += 1) set.add(n)
-    return set
-  })
+  const [selected, setSelected] = useState(() => new Set(initial ?? []))
   const [error, setError] = useState('')
 
   const toggle = (n) => {
@@ -3403,16 +3910,11 @@ function DayRangeDialog({ initial, onConfirm, onClose }) {
   const confirm = () => {
     const list = [...selected].sort((a, b) => a - b)
     if (list.length === 0) return setError('Vui lòng chọn ít nhất một thứ.')
-    const key = list.join(',')
-    if (key === '1,2,3,4,5') return onConfirm([1, 5])
-    if (key === '6,7') return onConfirm([6, 7])
-    if (key === '1,2,3,4,5,6,7') return onConfirm([1, 7])
-    setError('Backend chỉ có giá cho Ngày thường (chọn đủ T2–T6), Cuối tuần (chọn T7 và CN) hoặc cả tuần (chọn đủ 7 thứ). Vui lòng chọn một trong các nhóm này.')
+    onConfirm(list)
   }
 
   return (
     <Dialog title="Chọn thứ" level={2} width={480} onClose={onClose}>
-      <p className="picker-hint">Bấm từng thứ để chọn hoặc bỏ chọn</p>
       <div className="day-row">
         {DAY_NAMES.map((d) => {
           const on = selected.has(d.n)
@@ -3439,13 +3941,13 @@ function DayRangeDialog({ initial, onConfirm, onClose }) {
           Chọn
         </button>
       </div>
+      <button type="button" className="dialog-ghost dialog-exit" onClick={onClose}>
+        Thoát
+      </button>
     </Dialog>
   )
 }
 
-const kindToDays = (k) => (k === 'weekday' ? [1, 5] : k === 'weekend' ? [6, 7] : [1, 7])
-const kindText = (k) => `${dayLong(kindToDays(k)[0])} - ${dayLong(kindToDays(k)[1])}`
-const kindsOverlap = (a, b) => a === 'both' || b === 'both' || a === b
 
 // Cửa sổ thêm / sửa khung giờ: cơ sở, tên sự kiện, khung giờ, thứ, giá. Nút Thêm / Lưu ghi thẳng vào database.
 function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lockName = false, onSubmit, onClose }) {
@@ -3462,7 +3964,6 @@ function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lock
   const chosen = branches.find((b) => String(b.maCoSo) === maCoSo) ?? null
   const open = cut5(chosen?.gioMoCua)
   const close = cut5(chosen?.gioDongCua)
-  const kind = days ? dayRangeKind(days[0], days[1]) : null
 
   const changeBranch = (e) => {
     setMaCoSo(e.target.value)
@@ -3492,8 +3993,8 @@ function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lock
           <span>Cơ sở:</span>
           <select className="input" value={maCoSo} onChange={changeBranch} disabled={mode === 'edit' || busy}>
             {branches.map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
@@ -3525,7 +4026,7 @@ function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lock
           )}
           {open && (
             <small className="dialog-note">
-              Giờ mở cửa của cơ sở: {open}–{close}. Khung giờ không được trùng khung đã có của cùng cơ sở VÀ cùng loại thứ (khác cơ sở, hoặc khác thứ T2–T6 / T7–CN thì được trùng giờ).
+              Giờ mở cửa của cơ sở: {open}–{close}. Khung giờ không được trùng khung đã có của cùng cơ sở VÀ có thứ chung (khác cơ sở, hoặc không có thứ nào chung thì được trùng giờ).
             </small>
           )}
         </div>
@@ -3534,15 +4035,15 @@ function AddPriceDialog({ branches, defaultBranchId, mode = 'add', initial, lock
           <span>Chọn thứ:</span>
           {days ? (
             <button type="button" className="pill-group" onClick={() => setShowDays(true)}>
-              <span className="pill">{dayLong(days[0])}</span> - <span className="pill">{dayLong(days[1])}</span>
+              <span className="pill">{daysText(days)}</span>
             </button>
           ) : (
             <button type="button" className="dialog-outline" onClick={() => setShowDays(true)}>
               Chọn thứ
             </button>
           )}
-          {(kind === 'weekday' || kind === 'weekend') && (
-            <small className="dialog-note">Backend cần giá cho cả ngày thường và cuối tuần: ngày còn lại tạm dùng cùng mức giá này.</small>
+          {days && days.length < 7 && (
+            <small className="dialog-note">Backend cần đủ giá cho 7 thứ: thứ không chọn (nếu chưa có khung giá khác phủ giờ đó) tạm dùng cùng mức giá này.</small>
           )}
         </div>
 
@@ -3615,40 +4116,38 @@ function readPriceMeta(maCoSo) {
 
 function writePriceMeta(maCoSo, entries, dated) {
   const names = {}
-  const kinds = {}
   entries.forEach((e) => {
-    const key = keyOfTime(e.time)
-    if (e.ten) names[key] = e.ten
-    kinds[key] = [...(kinds[key] ?? []), e.kind]
+    if (e.ten) names[keyOfTime(e.time)] = e.ten
   })
   try {
-    localStorage.setItem(priceMetaKey(maCoSo), JSON.stringify({ entries, names, kinds, dated }))
+    localStorage.setItem(priceMetaKey(maCoSo), JSON.stringify({ entries, names, dated }))
   } catch {
     // trình duyệt không cho lưu: bỏ qua
   }
 }
 
-// Khung giá từ database → các dòng giá (dùng ghi nhớ loại ngày nếu còn khớp với giá)
+// Khung giá từ database → các dòng giá: trong mỗi khung giờ, các thứ cùng mức giá gộp thành một dòng (vd T2–T6 giá A, T7–CN giá B)
 function entriesFromRows(rows, meta) {
   const out = []
   rows.forEach((r) => {
     const time = [r.gioBatDau, r.gioKetThuc]
     const key = keyOfTime(time)
-    const wd = Number(r.giaNgayThuong)
-    const we = Number(r.giaCuoiTuan)
     const ten = meta.names?.[key] ?? ''
-    let kinds = meta.kinds?.[key]
-    const hopLe = Array.isArray(kinds) && kinds.length > 0 && (!kinds.includes('both') || (kinds.length === 1 && wd === we))
-    if (!hopLe) kinds = wd === we ? ['both'] : ['weekday', 'weekend']
-    kinds.forEach((k) => out.push({ id: `${key}-${k}`, ten, time, kind: k, gia: String(k === 'weekend' ? we : wd) }))
+    const theoGia = new Map()
+    ;(r.gia ?? []).forEach((g, i) => {
+      if (g === '' || g == null) return
+      theoGia.set(String(Number(g)), [...(theoGia.get(String(Number(g))) ?? []), i + 1])
+    })
+    ;[...theoGia.entries()]
+      .sort((a, b) => a[1][0] - b[1][0])
+      .forEach(([gia, days]) => out.push({ id: `${key}-${days.join('')}`, ten, time, days, gia }))
   })
   return out
 }
 
-// Các dòng giá → khung giá gửi backend (loại ngày chưa có giá thì tạm lấy cùng mức giá với loại còn lại)
-// Các dòng giá → khung giá gửi backend. Backend bắt buộc các khung giờ KHÔNG chồng nhau và mỗi khung có đủ giá ngày thường + cuối tuần,
-// nên web cắt trục giờ tại mọi mốc: mỗi đoạn lấy giá ngày thường (dòng T2–T6 hoặc cả tuần) và giá cuối tuần (dòng T7–CN hoặc cả tuần).
-// Loại ngày nào chưa có giá trong đoạn đó thì tạm lấy cùng mức giá của loại còn lại; đoạn nào không có dòng giá nào thì để trống.
+// Các dòng giá → khung giá gửi backend. Backend bắt buộc các khung giờ KHÔNG chồng nhau và mỗi khung có đủ giá cho 7 thứ,
+// nên web cắt trục giờ tại mọi mốc: mỗi đoạn lấy giá của dòng giá có chứa thứ đó. Thứ nào chưa có dòng giá trong đoạn
+// thì tạm lấy mức giá của dòng giá đầu tiên phủ đoạn đó; đoạn nào không có dòng giá nào thì để trống.
 function rowsFromEntries(entries) {
   const moc = new Set()
   entries.forEach((e) => {
@@ -3660,14 +4159,14 @@ function rowsFromEntries(entries) {
   for (let i = 0; i < diem.length - 1; i++) {
     const a = diem[i]
     const b = diem[i + 1]
-    const phu = (e) => toMinutes(e.time[0]) <= a && b <= toMinutes(e.time[1])
-    const wd = entries.find((e) => e.kind !== 'weekend' && phu(e))
-    const we = entries.find((e) => e.kind !== 'weekday' && phu(e))
-    if (!wd && !we) continue
-    const row = { gioBatDau: toHHMM(a), gioKetThuc: toHHMM(b), giaNgayThuong: String((wd ?? we).gia), giaCuoiTuan: String((we ?? wd).gia) }
+    const phu = entries.filter((e) => toMinutes(e.time[0]) <= a && b <= toMinutes(e.time[1]))
+    if (phu.length === 0) continue
+    const goc = [...phu].sort((x, y) => x.days[0] - y.days[0])[0]
+    const gia = [1, 2, 3, 4, 5, 6, 7].map((thu) => String((phu.find((e) => e.days.includes(thu)) ?? goc).gia))
+    const row = { gioBatDau: toHHMM(a), gioKetThuc: toHHMM(b), gia }
     const truoc = rows[rows.length - 1]
     // đoạn liền kề cùng giá thì gộp lại
-    if (truoc && truoc.gioKetThuc === row.gioBatDau && truoc.giaNgayThuong === row.giaNgayThuong && truoc.giaCuoiTuan === row.giaCuoiTuan) {
+    if (truoc && truoc.gioKetThuc === row.gioBatDau && truoc.gia.join() === row.gia.join()) {
       truoc.gioKetThuc = row.gioKetThuc
     } else {
       rows.push(row)
@@ -3678,25 +4177,28 @@ function rowsFromEntries(entries) {
 
 // Chữ ký của danh sách khung giá (để biết các dòng giá đã lưu trên máy có còn khớp với database không)
 function rowsSig(rows) {
-  return JSON.stringify(rows.map((r) => [cut5(r.gioBatDau), cut5(r.gioKetThuc), Number(r.giaNgayThuong), Number(r.giaCuoiTuan)]).sort())
+  return JSON.stringify(rows.map((r) => [cut5(r.gioBatDau), cut5(r.gioKetThuc), ...(r.gia ?? []).map(Number)]).sort())
 }
 
 // Dựng các dòng giá hiển thị từ khung giá backend: còn khớp với bản ghi nhớ trên máy thì dùng lại (giữ đúng khung giờ gốc, tên sự kiện), nếu không thì suy ra từ khung giá
 function restoreEntries(rows, meta) {
-  if (Array.isArray(meta.entries) && meta.entries.length > 0 && rowsSig(rowsFromEntries(meta.entries)) === rowsSig(rows)) return meta.entries
+  if (Array.isArray(meta.entries) && meta.entries.length > 0) {
+    const entries = meta.entries.map(normEntry)
+    if (rowsSig(rowsFromEntries(entries)) === rowsSig(rows)) return entries
+  }
   return entriesFromRows(rows, meta)
 }
 
 // Tìm khung giá MỚI (newId) trùng giờ + trùng thứ với một khung đã có (khác loại thứ thì được trùng giờ)
 function findClassOverlap(entries, newId) {
   const moi = entries.find((x) => x.id === newId)
-  const tx = (a, b) => kindsOverlap(a.kind, b.kind) && toMinutes(a.time[0]) < toMinutes(b.time[1]) && toMinutes(b.time[0]) < toMinutes(a.time[1])
-  const mo = (e) => `${e.time[0]}–${e.time[1]} (${kindText(e.kind)})`
+  const tx = (a, b) => daysOverlap(a.days, b.days) && toMinutes(a.time[0]) < toMinutes(b.time[1]) && toMinutes(b.time[0]) < toMinutes(a.time[1])
+  const mo = (e) => `${e.time[0]}–${e.time[1]} (${daysText(e.days)})`
   // 1) Khung vừa chọn (khung mới) so với các khung đã có: báo đúng giờ và thứ của khung mới
   if (moi) {
     const c = entries.find((x) => x !== moi && tx(moi, x))
     if (c) {
-      return `Khung giờ mới ${mo(moi)} trùng với khung giờ đã có ${mo(c)} của sự kiện "${c.ten || 'Giờ cố định'}". Hãy đổi sang khoảng thứ khác (T2–T6 hoặc T7–CN) hoặc đổi giờ.`
+      return `Khung giờ mới ${mo(moi)} trùng với khung giờ đã có ${mo(c)} của sự kiện "${c.ten || 'Giờ cố định'}". Hãy đổi sang thứ khác hoặc đổi giờ.`
     }
   }
   // 2) Các khung đã lưu từ trước tự trùng nhau (không liên quan khung mới)
@@ -3719,6 +4221,7 @@ function findClassOverlap(entries, newId) {
 const ALL_BRANCHES_ID = 'all'
 
 function PricingPage({ user }) {
+  const [sortSel, setSortSel] = useState('')
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
@@ -3801,7 +4304,19 @@ function PricingPage({ user }) {
   }
 
   const showAll = selectedId === ALL_BRANCHES_ID
-  const blocks = visibleIds.map((id) => data[id]).filter(Boolean) // các cơ sở đang hiển thị (đã tải xong)
+  // Cơ sở bị khoá: bảng giá giữ nguyên nhưng không sửa được
+  const idKhoa = (id) => isBranchBlocked(branches.find((b) => String(b.maCoSo) === String(id)))
+  const themDuoc = branches.filter((b) => !isBranchBlocked(b))
+  const blocksGoc = visibleIds.map((id) => data[id]).filter(Boolean) // các cơ sở đang hiển thị (đã tải xong)
+  // Sắp xếp: theo cơ sở (khi xem tất cả cơ sở), hoặc theo sự kiện / khung giờ / giá trong từng cơ sở
+  const pricingCols = [
+    ...(showAll ? [{ key: 'coSo', label: 'Cơ sở', type: 'text', get: (b) => b.branch.tenCoSo }] : []),
+    { key: 'ten', label: 'Tên sự kiện', type: 'text', get: (g) => g.ten },
+    { key: 'thu', label: 'Thứ', type: 'number', get: (g) => Math.min(...g.items.map((i) => i.days[0])) },
+    { key: 'gio', label: 'Khung giờ', type: 'time', get: (g) => String(Math.min(...g.items.map((i) => toMinutes(i.time[0])))).padStart(4, '0') },
+    { key: 'gia', label: 'Giá', type: 'number', get: (g) => Math.min(...g.items.map((i) => Number(i.gia))) },
+  ]
+  const blocks = sortRows(blocksGoc, pricingCols.filter((c) => c.key === 'coSo'), sortSel) // sắp xếp cơ sở
   const single = !showAll ? data[selectedId] : null
 
   const changeBranch = (e) => {
@@ -3827,17 +4342,14 @@ function PricingPage({ user }) {
         khungGias: list.map((r) => ({
           gioBatDau: r.gioBatDau,
           gioKetThuc: r.gioKetThuc,
-          giaNgayThuongKhachVangLai: Number(r.giaNgayThuong),
-          giaNgayThuongKhachCoDinh: Number(r.giaNgayThuong),
-          giaCuoiTuanKhachVangLai: Number(r.giaCuoiTuan),
-          giaCuoiTuanKhachCoDinh: Number(r.giaCuoiTuan),
+          giaTheoThu: r.gia.map((g, i) => ({ thu: i + 1, giaKhachVangLai: Number(g), giaKhachCoDinh: Number(g) })),
         })),
       },
     })
 
   // Nút Thêm / Lưu trong cửa sổ: ghi thẳng vào database, trả về thông báo lỗi (hoặc null nếu thành công)
   const submitEntry = async ({ id, maCoSo: idCoSo, ten, time, days, gia }) => {
-    const kind = dayRangeKind(days[0], days[1])
+    if (idKhoa(idCoSo)) return 'Cơ sở đang bị khoá nên không sửa được bảng giá.'
     const [s, e] = time
 
     if (!id) {
@@ -3849,7 +4361,7 @@ function PricingPage({ user }) {
         const close = cut5(cur.gioDongCua)
         const cu = restoreEntries((cur.khungGias ?? []).map(toRow), readPriceMeta(idCoSo))
         const moiId = `moi-${Date.now()}`
-        const next = [...cu, { id: moiId, ten, time, kind, gia: String(Number(gia)) }]
+        const next = [...cu, { id: moiId, ten, time, days, gia: String(Number(gia)) }]
         const trung = findClassOverlap(next, moiId)
         if (trung) return trung
         const message = validatePricing(rowsFromEntries(next), open, close)
@@ -3863,7 +4375,7 @@ function PricingPage({ user }) {
           setSelectedId(String(idCoSo))
           setData({})
         }
-        setResult({ type: 'success', message: `Đã thêm khung giờ ${s}–${e} (${kindText(kind)}) vào ${cur.tenCoSo}.` })
+        setResult({ type: 'success', message: `Đã thêm khung giờ ${s}–${e} (${daysText(days)}) vào ${cur.tenCoSo}.` })
         return null
       } catch (err) {
         return describeApiError(err)
@@ -3875,7 +4387,7 @@ function PricingPage({ user }) {
     if (!block) return 'Chưa tải xong bảng giá của cơ sở này.'
     const open = cut5(block.branch.gioMoCua)
     const close = cut5(block.branch.gioDongCua)
-    const next = [...block.entries.filter((x) => x.id !== id), { id, ten, time, kind, gia }]
+    const next = [...block.entries.filter((x) => x.id !== id), { id, ten, time, days, gia }]
     const trung = findClassOverlap(next, id)
     if (trung) return trung
     const message = validatePricing(rowsFromEntries(next), open, close)
@@ -3892,12 +4404,13 @@ function PricingPage({ user }) {
 
   // Xóa một dòng giá: lưu ngay vào database
   const removeEntry = async (block, item) => {
+    if (idKhoa(block.branch.maCoSo)) return setResult({ type: 'error', message: 'Cơ sở đang bị khoá nên không sửa được bảng giá.' })
     const idCoSo = block.branch.maCoSo
     const next = block.entries.filter((x) => x.id !== item.id)
     if (next.length === 0) {
       return setResult({ type: 'error', message: `${block.branch.tenCoSo}: cơ sở cần có ít nhất 1 khung giá, không thể xóa khung cuối cùng.` })
     }
-    if (!window.confirm(`Xóa khung giờ ${item.time[0]}–${item.time[1]} (${kindText(item.kind)}) của ${block.branch.tenCoSo}? Thay đổi được lưu ngay vào database.`)) return
+    if (!window.confirm(`Xóa khung giờ ${item.time[0]}–${item.time[1]} (${daysText(item.days)}) của ${block.branch.tenCoSo}? Thay đổi được lưu ngay vào database.`)) return
     const rows = rowsFromEntries(next)
     const message = validatePricing(rows, cut5(block.branch.gioMoCua), cut5(block.branch.gioDongCua))
     if (message) return setResult({ type: 'error', message })
@@ -3905,7 +4418,7 @@ function PricingPage({ user }) {
     try {
       const saved = await putRows(idCoSo, rows)
       applyServerRows(idCoSo, saved, next)
-      setResult({ type: 'success', message: `Đã xóa khung giờ ${item.time[0]}–${item.time[1]} (${kindText(item.kind)}).` })
+      setResult({ type: 'success', message: `Đã xóa khung giờ ${item.time[0]}–${item.time[1]} (${daysText(item.days)}).` })
     } catch (err) {
       setResult({ type: 'error', message: describeApiError(err) })
     } finally {
@@ -3917,6 +4430,7 @@ function PricingPage({ user }) {
   // nên gửi lại nguyên thông tin cơ sở, chỉ đổi hai trường giờ. Backend từ chối nếu còn khung giá nằm ngoài giờ mới.
   const saveHours = async () => {
     const { maCoSo: idCoSo, open: newOpen, close: newClose } = hoursDialog
+    if (idKhoa(idCoSo)) return setHoursDialog((d) => ({ ...d, error: 'Cơ sở đang bị khoá nên không sửa được giờ mở cửa.' }))
     if (!newOpen || !newClose) return setHoursDialog((d) => ({ ...d, error: 'Vui lòng chọn giờ mở cửa và giờ đóng cửa.' }))
     if (newOpen >= newClose) return setHoursDialog((d) => ({ ...d, error: 'Giờ đóng cửa phải sau giờ mở cửa.' }))
     const full = branches.find((b) => b.maCoSo === idCoSo)
@@ -3934,23 +4448,26 @@ function PricingPage({ user }) {
     }
     if (full.moTa) body.moTa = full.moTa
     setHoursDialog((d) => ({ ...d, busy: true, error: '' }))
+    let prep = { restore: null, reminder: '' }
     try {
+      prep = await prepareHoursChange(token, full, newOpen, newClose)
       const updated = await callApi(`/api/chu-san/co-so/${idCoSo}`, { method: 'PUT', token, body })
       setBranches((prev) => prev.map((b) => (b.maCoSo === idCoSo ? { ...b, ...updated } : b)))
+      setReloadKey((n) => n + 1) // tải lại bảng giá (có thể đã được cắt cho vừa giờ mới)
       setData((d) => (d[String(idCoSo)] ? { ...d, [String(idCoSo)]: { ...d[String(idCoSo)], branch: { ...d[String(idCoSo)].branch, gioMoCua: newOpen, gioDongCua: newClose } } } : d))
       setHoursDialog(null)
-      setResult({ type: 'success', message: `Đã lưu giờ mở cửa của ${full.tenCoSo}: ${newOpen}–${newClose}.` })
+      setResult({ type: prep.reminder ? 'warning' : 'success', message: `Đã lưu giờ mở cửa của ${full.tenCoSo}: ${newOpen}–${newClose}.${prep.reminder ? ` ${prep.reminder}` : ''}` })
     } catch (err) {
+      if (prep.restore) await prep.restore()
       setHoursDialog((d) => ({ ...d, busy: false, error: describeApiError(err) }))
     }
   }
 
-  // Sắp xếp trong từng cơ sở: thứ (T2–T6 trước, rồi T7–CN) → khung giờ. Các cơ sở giữ thứ tự cơ sở.
+  // Sắp xếp trong từng cơ sở: thứ (thứ đầu tiên trước) → khung giờ. Các cơ sở giữ thứ tự cơ sở.
   // Các dòng liền nhau cùng tên sự kiện được gộp chung một ô sự kiện.
   const groupsOf = (entries) => {
-    const dayKey = (k) => (k === 'weekday' ? 0 : k === 'both' ? 1 : 2)
     const sorted = [...entries].sort(
-      (a, b) => dayKey(a.kind) - dayKey(b.kind) || toMinutes(a.time[0]) - toMinutes(b.time[0]) || toMinutes(a.time[1]) - toMinutes(b.time[1]),
+      (a, b) => a.days[0] - b.days[0] || a.days.length - b.days.length || toMinutes(a.time[0]) - toMinutes(b.time[0]) || toMinutes(a.time[1]) - toMinutes(b.time[1]),
     )
     const groups = []
     sorted.forEach((it) => {
@@ -3958,7 +4475,7 @@ function PricingPage({ user }) {
       if (last && last.ten === (it.ten || '')) last.items.push(it)
       else groups.push({ ten: it.ten || '', items: [it] })
     })
-    return groups
+    return sortRows(groups, pricingCols.filter((c) => c.key !== 'coSo'), sortSel)
   }
 
   const openEdit = (block, item) =>
@@ -3967,13 +4484,19 @@ function PricingPage({ user }) {
       ten: item.ten,
       lockName: false,
       defaultBranchId: block.branch.maCoSo,
-      initial: { id: item.id, ten: item.ten, time: item.time, days: kindToDays(item.kind), gia: String(item.gia) },
+      initial: { id: item.id, ten: item.ten, time: item.time, days: item.days, gia: String(item.gia) },
     })
 
   const colCount = showAll ? 6 : 5
 
+  const dsKhoa = branches.filter((b) => isBranchBlocked(b) && (showAll || String(b.maCoSo) === selectedId))
   return (
     <Page>
+      {dsKhoa.length > 0 && (
+        <Alert type="warning">
+          Cơ sở {dsKhoa.map((b) => b.tenCoSo).join(', ')} đang bị khoá: bảng giá được giữ nguyên nhưng không sửa được.
+        </Alert>
+      )}
       <div className="filters filters-inline">
         <label className="field-inline">
           <span>Cơ sở: </span>
@@ -3981,8 +4504,8 @@ function PricingPage({ user }) {
             {branches.length === 0 && <option value="">Chưa có cơ sở</option>}
             {branches.length > 0 && <option value={ALL_BRANCHES_ID}>Hiển thị tất cả cơ sở</option>}
             {branches.map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
@@ -3999,6 +4522,7 @@ function PricingPage({ user }) {
               className="icon-btn icon-btn-wrench"
               title="Sửa giờ mở cửa của cơ sở"
               aria-label="Sửa giờ mở cửa của cơ sở"
+              disabled={idKhoa(single.branch.maCoSo)}
               onClick={() => setHoursDialog({ maCoSo: single.branch.maCoSo, open: cut5(single.branch.gioMoCua), close: cut5(single.branch.gioDongCua), error: '', busy: false })}
             >
               <WrenchIcon />
@@ -4012,11 +4536,11 @@ function PricingPage({ user }) {
           <table className="table table-pricing">
             <thead>
               <tr>
-                {showAll && <th>Cơ sở</th>}
-                <th>Tên sự kiện</th>
-                <th>Khung giờ</th>
-                <th>Thứ</th>
-                <th>Giá</th>
+                {showAll && <SortTh cols={pricingCols} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>}
+                <SortTh cols={pricingCols} k="ten" sel={sortSel} onSel={setSortSel}>Tên sự kiện</SortTh>
+                <SortTh cols={pricingCols} k="gio" sel={sortSel} onSel={setSortSel}>Khung giờ</SortTh>
+                <SortTh cols={pricingCols} k="thu" sel={sortSel} onSel={setSortSel}>Thứ</SortTh>
+                <SortTh cols={pricingCols} k="gia" sel={sortSel} onSel={setSortSel}>Giá</SortTh>
                 <th className="th-center">Thao tác</th>
               </tr>
             </thead>
@@ -4068,6 +4592,7 @@ function PricingPage({ user }) {
                                 className="icon-btn icon-btn-wrench"
                                 title="Sửa giờ mở cửa của cơ sở"
                                 aria-label="Sửa giờ mở cửa của cơ sở"
+                                disabled={idKhoa(block.branch.maCoSo)}
                                 onClick={() =>
                                   setHoursDialog({ maCoSo: block.branch.maCoSo, open: cut5(block.branch.gioMoCua), close: cut5(block.branch.gioDongCua), error: '', busy: false })
                                 }
@@ -4085,6 +4610,7 @@ function PricingPage({ user }) {
                                 className="icon-btn icon-btn-plus"
                                 title="Thêm khung giờ vào sự kiện này"
                                 aria-label="Thêm khung giờ vào sự kiện này"
+                                disabled={idKhoa(block.branch.maCoSo)}
                                 onClick={() => setDialog({ mode: 'add', ten: g.ten, lockName: true, defaultBranchId: block.branch.maCoSo, initial: { ten: g.ten } })}
                               >
                                 <PlusIcon />
@@ -4094,15 +4620,15 @@ function PricingPage({ user }) {
                           <td>
                             <span className="pill pill-sm">{it.time[0]}</span> - <span className="pill pill-sm">{it.time[1]}</span>
                           </td>
-                          <td>{kindText(it.kind)}</td>
+                          <td>{daysText(it.days)}</td>
                           <td>{formatVnd(Number(it.gia))}/giờ</td>
                           <td className="td-center">
                             <div className="row-actions row-actions-center">
                               {/* Cờ lê xanh dương: sửa giá, thứ hoặc thời gian */}
-                              <button type="button" className="icon-btn icon-btn-wrench" title="Sửa" aria-label="Sửa" onClick={() => openEdit(block, it)} disabled={saving}>
+                              <button type="button" className="icon-btn icon-btn-wrench" title="Sửa" aria-label="Sửa" onClick={() => openEdit(block, it)} disabled={saving || idKhoa(block.branch.maCoSo)}>
                                 <WrenchIcon />
                               </button>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeEntry(block, it)} disabled={saving}>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeEntry(block, it)} disabled={saving || idKhoa(block.branch.maCoSo)}>
                                 Xóa
                               </button>
                             </div>
@@ -4120,8 +4646,8 @@ function PricingPage({ user }) {
           <button
             type="button"
             className="btn btn-primary btn-lg"
-            onClick={() => setDialog({ mode: 'add', ten: '', lockName: false, defaultBranchId: showAll ? branches[0]?.maCoSo : Number(selectedId), initial: null })}
-            disabled={branches.length === 0 || loading}
+            onClick={() => setDialog({ mode: 'add', ten: '', lockName: false, defaultBranchId: showAll ? themDuoc[0]?.maCoSo : Number(selectedId), initial: null })}
+            disabled={themDuoc.length === 0 || loading || (!showAll && idKhoa(selectedId))}
           >
             Thêm khung giờ
           </button>
@@ -4155,7 +4681,7 @@ function PricingPage({ user }) {
               <input className="input" type="time" value={hoursDialog.close} onChange={(e) => setHoursDialog((d) => ({ ...d, close: e.target.value, error: '' }))} />
             </label>
           </div>
-          <p className="picker-hint">Các khung giá phải nằm trong giờ mở cửa mới; nếu còn khung nằm ngoài, hãy sửa hoặc xóa khung đó trước.</p>
+          <p className="picker-hint">Thu hẹp giờ (mở muộn hơn / đóng sớm hơn): các khung giá được tự cắt cho vừa giờ mới. Mở rộng giờ (mở sớm hơn / đóng muộn hơn): giữ nguyên khung giá, bạn cần bổ sung bảng giá cho phần mới và phải khoá tất cả sân của cơ sở trước.</p>
           {hoursDialog.error && <p className="dialog-error">{hoursDialog.error}</p>}
           <div className="dialog-two">
             <button type="button" className="dialog-ghost" onClick={() => setHoursDialog(null)} disabled={hoursDialog.busy}>
@@ -4171,7 +4697,7 @@ function PricingPage({ user }) {
       {dialog && (
         <AddPriceDialog
           key={dialog.initial?.id ?? `new-${dialog.ten}-${dialog.defaultBranchId}`}
-          branches={branches}
+          branches={themDuoc}
           defaultBranchId={dialog.defaultBranchId}
           mode={dialog.mode}
           initial={dialog.initial}
@@ -4195,10 +4721,15 @@ function ReplyDialog({ token, review, onClose, onSaved }) {
 
   const submit = async () => {
     const noiDung = text.trim()
-    if (!noiDung) return setError('Vui lòng nhập nội dung phản hồi, hoặc bấm Đóng nếu chưa muốn phản hồi.')
+    // Phản hồi là tuỳ chọn: để trống thì chỉ đóng cửa sổ (nếu đang có phản hồi cũ mà xoá trắng thì gỡ phản hồi đó)
+    if (!noiDung && !review.phanHoiChuSan) return onClose()
     setBusy(true)
     setError('')
     try {
+      if (!noiDung) {
+        await callApi(`/api/chu-san/danh-gia/${review.maDanhGia}/phan-hoi`, { method: 'DELETE', token, body: {} })
+        return onSaved(review.maDanhGia, null)
+      }
       await callApi(`/api/chu-san/danh-gia/${review.maDanhGia}/phan-hoi`, { method: 'PATCH', token, body: { noiDung } })
       onSaved(review.maDanhGia, noiDung)
     } catch (err) {
@@ -4225,7 +4756,7 @@ function ReplyDialog({ token, review, onClose, onSaved }) {
           Đóng
         </button>
         <button type="button" className="dialog-primary" onClick={submit} disabled={busy}>
-          {busy ? 'Đang gửi...' : 'Gửi phản hồi'}
+          {busy ? 'Đang gửi...' : text.trim() ? 'Gửi phản hồi' : review.phanHoiChuSan ? 'Gỡ phản hồi' : 'Xong'}
         </button>
       </div>
     </Dialog>
@@ -4233,6 +4764,7 @@ function ReplyDialog({ token, review, onClose, onSaved }) {
 }
 
 function ReviewsPage({ user }) {
+  const [sortSel, setSortSel] = useState('')
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
   const { branches, error: branchError } = useBranches(token, isOwner)
@@ -4276,6 +4808,12 @@ function ReviewsPage({ user }) {
   const average = reviews.length ? reviews.reduce((sum, r) => sum + r.soSao, 0) / reviews.length : 0
   const visible = reviews.filter((r) => stars === 'Tất cả' || r.soSao === Number(stars))
   const fmt = (iso) => new Date(iso).toLocaleDateString('vi-VN')
+  const reviewCols = [
+    { key: 'khach', label: 'Khách hàng', type: 'text', get: (r) => r.tenKhach },
+    { key: 'sao', label: 'Đánh giá', type: 'number', get: (r) => r.soSao },
+    { key: 'coSo', label: 'Cơ sở', type: 'text', get: (r) => r.tenCoSo },
+    { key: 'ngay', label: 'Ngày', type: 'date', get: (r) => r.ngayTao },
+  ]
 
   if (!isOwner) {
     return (
@@ -4294,8 +4832,8 @@ function ReviewsPage({ user }) {
           <select className="input" value={branchId} onChange={(e) => { setLoading(true); setBranchId(e.target.value) }}>
             <option value="all">Hiển thị tất cả cơ sở</option>
             {(branches ?? []).map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
@@ -4326,11 +4864,11 @@ function ReviewsPage({ user }) {
           <table className="table table-reviews">
             <thead>
               <tr>
-                <th>Khách hàng</th>
-                <th>Đánh giá</th>
-                <th>Cơ sở</th>
+                <SortTh cols={reviewCols} k="khach" sel={sortSel} onSel={setSortSel}>Khách hàng</SortTh>
+                <SortTh cols={reviewCols} k="sao" sel={sortSel} onSel={setSortSel}>Đánh giá</SortTh>
+                <SortTh cols={reviewCols} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
                 <th>Bình luận của khách hàng</th>
-                <th>Ngày</th>
+                <SortTh cols={reviewCols} k="ngay" sel={sortSel} onSel={setSortSel}>Ngày</SortTh>
                 <th>Phản hồi của chủ sân</th>
               </tr>
             </thead>
@@ -4349,7 +4887,7 @@ function ReviewsPage({ user }) {
                   </td>
                 </tr>
               )}
-              {!loading && visible.map((r) => (
+              {!loading && sortRows(visible, reviewCols, sortSel).map((r) => (
                 <tr key={r.maDanhGia}>
                   <td>{r.tenKhach}</td>
                   <td>
@@ -4449,7 +4987,16 @@ function RevenuePage({ filters }) {
 
 // Cửa sổ chi tiết khách: các lượt đặt (ngày, giờ bắt đầu, giờ kết thúc, cơ sở, sân).
 // API có sẵn: GET /api/chu-san/bao-cao/khach-hang/chi-tiet?maKhachHang= (hoặc soDienThoai=) &maCoSo=
+const DETAIL_SORT_COLS = (nhan) => [
+  { key: 'ngay', label: 'Ngày', type: 'date', get: (d) => ngayGioKey(d.ngay, d.gioBatDau) },
+  { key: 'gioBd', label: 'Giờ bắt đầu', type: 'time', get: (d) => cut5(d.gioBatDau) },
+  { key: 'gioKt', label: 'Giờ kết thúc', type: 'time', get: (d) => cut5(d.gioKetThuc) },
+  { key: 'coSo', label: 'Cơ sở', type: 'text', get: (d) => d.tenCoSo },
+  { key: 'san', label: 'Sân', type: 'text', get: (d) => d.tenSan },
+  { key: 'trangThai', label: 'Trạng thái', type: 'text', get: (d) => nhan[d.trangThai] ?? d.trangThai },
+]
 function CustomerDetailDialog({ token, customer, maCoSo, onClose }) {
+  const [sortSel, setSortSel] = useState('')
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   useEffect(() => {
@@ -4468,25 +5015,26 @@ function CustomerDetailDialog({ token, customer, maCoSo, onClose }) {
   }, [token, customer, maCoSo])
   const nhan = { confirmed: 'Đã đặt', completed: 'Đã chơi', cancelled: 'Đã huỷ', pending_payment: 'Chờ thanh toán', expired: 'Hết hạn' }
   return (
-    <Dialog title={`Chi tiết lượt đặt – ${customer.tenKhach}`} width={760} onClose={onClose}>
+    <Dialog title={`Chi tiết lượt đặt – ${customer.tenKhach}`} width={760} fit onClose={onClose}>
       <p className="picker-hint">{customer.soDienThoai}</p>
       {error && <p className="dialog-error">{error}</p>}
       {!data && !error && <p className="picker-hint">Đang tải...</p>}
       {data && (
-        <div className="table-scroll" style={{ maxHeight: 360, overflowY: 'auto' }}>
-          <table className="table">
+        <>
+        <div className="table-scroll dialog-table-scroll">
+          <table className="table table-detail">
             <thead>
               <tr>
-                <th>Ngày</th>
-                <th>Giờ bắt đầu</th>
-                <th>Giờ kết thúc</th>
-                <th>Cơ sở</th>
-                <th>Sân</th>
-                <th>Trạng thái</th>
+                <SortTh cols={DETAIL_SORT_COLS(nhan)} k="ngay" sel={sortSel} onSel={setSortSel}>Ngày</SortTh>
+                <SortTh cols={DETAIL_SORT_COLS(nhan)} k="gioBd" sel={sortSel} onSel={setSortSel}>Giờ bắt đầu</SortTh>
+                <SortTh cols={DETAIL_SORT_COLS(nhan)} k="gioKt" sel={sortSel} onSel={setSortSel}>Giờ kết thúc</SortTh>
+                <SortTh cols={DETAIL_SORT_COLS(nhan)} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
+                <SortTh cols={DETAIL_SORT_COLS(nhan)} k="san" sel={sortSel} onSel={setSortSel}>Sân</SortTh>
+                <SortTh cols={DETAIL_SORT_COLS(nhan)} k="trangThai" sel={sortSel} onSel={setSortSel}>Trạng thái</SortTh>
               </tr>
             </thead>
             <tbody>
-              {(data.cacDon ?? []).map((d) => (
+              {sortRows(data.cacDon ?? [], DETAIL_SORT_COLS(nhan), sortSel).map((d) => (
                 <tr key={d.maDatSan}>
                   <td>{toViDate(String(d.ngay).slice(0, 10))}</td>
                   <td>{cut5(d.gioBatDau)}</td>
@@ -4506,6 +5054,7 @@ function CustomerDetailDialog({ token, customer, maCoSo, onClose }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
       <div className="dialog-two">
         <button type="button" className="dialog-primary" onClick={onClose}>
@@ -4516,7 +5065,14 @@ function CustomerDetailDialog({ token, customer, maCoSo, onClose }) {
   )
 }
 
+const CUSTOMER_SORT_COLS = [
+  { key: 'khach', label: 'Khách', type: 'text', get: (c) => c.tenKhach },
+  { key: 'sdt', label: 'Số điện thoại', type: 'text', get: (c) => c.soDienThoai },
+  { key: 'luot', label: 'Số lượt đặt', type: 'number', get: (c) => Number(c.soLuotDat) },
+  { key: 'chi', label: 'Tổng chi tiêu', type: 'number', get: (c) => Number(c.tongChiTieu) },
+]
 function CustomersPage({ user }) {
+  const [sortSel, setSortSel] = useState('')
   const token = user.maTruyCap
   const isOwner = user.vaiTro === 'owner'
 
@@ -4569,8 +5125,8 @@ function CustomersPage({ user }) {
           <select className="input" value={branchId} onChange={(e) => { setLoading(true); setBranchId(e.target.value) }}>
             <option value="all">Hiển thị tất cả cơ sở</option>
             {(branches ?? []).map((b) => (
-              <option key={b.maCoSo} value={String(b.maCoSo)}>
-                {b.tenCoSo}
+              <option key={b.maCoSo} value={String(b.maCoSo)} disabled={isBranchBlocked(b)}>
+                {b.tenCoSo}{isBranchBlocked(b) ? ' (đã khoá)' : ''}
               </option>
             ))}
           </select>
@@ -4582,10 +5138,10 @@ function CustomersPage({ user }) {
           <table className="table table-customers">
             <thead>
               <tr>
-                <th>Khách</th>
-                <th>Số điện thoại</th>
-                <th>Số lượt đặt</th>
-                <th>Tổng chi tiêu</th>
+                <SortTh cols={CUSTOMER_SORT_COLS} k="khach" sel={sortSel} onSel={setSortSel}>Khách</SortTh>
+                <SortTh cols={CUSTOMER_SORT_COLS} k="sdt" sel={sortSel} onSel={setSortSel}>Số điện thoại</SortTh>
+                <SortTh cols={CUSTOMER_SORT_COLS} k="luot" sel={sortSel} onSel={setSortSel}>Số lượt đặt</SortTh>
+                <SortTh cols={CUSTOMER_SORT_COLS} k="chi" sel={sortSel} onSel={setSortSel}>Tổng chi tiêu</SortTh>
                 <th>Thao tác</th>
               </tr>
             </thead>
@@ -4604,7 +5160,7 @@ function CustomersPage({ user }) {
                   </td>
                 </tr>
               )}
-              {customers.map((c, i) => (
+              {sortRows(customers, CUSTOMER_SORT_COLS, sortSel).map((c, i) => (
                 <tr key={`${c.maKhachHang ?? 'vl'}-${c.soDienThoai}-${i}`}>
                   <td>{c.tenKhach}</td>
                   <td>{c.soDienThoai}</td>
@@ -4681,6 +5237,47 @@ function Placeholder({ title }) {
 const PROFILE_PAGE = { id: 'profile', label: 'Trang chủ sân' }
 
 // Tải ảnh bìa cơ sở lên (API có sẵn POST /api/chu-san/co-so/anh, multipart, trường tepAnh)
+// Gửi multipart (ảnh) tới API có sẵn, trả về phần duLieu
+async function postMultipart(token, path, body) {
+  let res
+  try {
+    res = await fetch(`${API_URL}${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body })
+  } catch {
+    throw new ApiError(0, 'Không kết nối được máy chủ. Vui lòng thử lại sau.')
+  }
+  let payload = null
+  try {
+    payload = await res.json()
+  } catch {
+    // phản hồi không phải JSON
+  }
+  if (!res.ok || !payload?.thanhCong) {
+    throw new ApiError(res.status, payload?.loi?.thongBao || 'Có lỗi xảy ra, vui lòng thử lại.', payload?.loi?.chiTiet)
+  }
+  return payload.duLieu
+}
+
+async function uploadAvatarImage(token, file) {
+  const body = new FormData()
+  body.append('tepAnh', file)
+  let res
+  try {
+    res = await fetch(`${API_URL}/api/tai-khoan/ca-nhan/anh`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body })
+  } catch {
+    throw new ApiError(0, 'Không kết nối được máy chủ. Vui lòng thử lại sau.')
+  }
+  let payload = null
+  try {
+    payload = await res.json()
+  } catch {
+    // phản hồi không phải JSON
+  }
+  if (!res.ok || !payload?.thanhCong) {
+    throw new ApiError(res.status, payload?.loi?.thongBao || 'Không tải được ảnh lên.', payload?.loi?.chiTiet)
+  }
+  return payload.duLieu
+}
+
 async function uploadBranchImage(token, file, maCoSo) {
   const body = new FormData()
   body.append('tepAnh', file)
@@ -4735,53 +5332,160 @@ function resizeToDataUrl(file, size = 256) {
   })
 }
 
-function ProfilePage({ user }) {
+// Cửa sổ sửa thông tin chủ sân. API có sẵn: PATCH /api/tai-khoan/ca-nhan { hoTen, email, soDienThoai, soDienThoaiPhu },
+// POST /api/tai-khoan/ca-nhan/anh (ảnh đại diện, trường tepAnh), PATCH /api/chu-san/ngan-hang { maNganHang, soTaiKhoan, chuTaiKhoan }
+// (đổi tài khoản nhận tiền, mọi trạng thái hồ sơ) và PUT /api/chu-san/dang-ky/doanh-nghiep { tenDoanhNghiep }
+// (backend chỉ cho sửa khi hồ sơ bị từ chối — hồ sơ đã duyệt thì backend chưa có API đổi tên doanh nghiệp).
+function EditProfileDialog({ token, person, owner, onClose, onSaved }) {
+  const nganHangHienTai = owner?.thongTinNganHang ?? {}
+  const choSuaTenDN = owner?.trangThaiDuyet === 'rejected'
+  const [tenDoanhNghiep, setTenDoanhNghiep] = useState(owner?.tenDoanhNghiep ?? '')
+  const [maNganHang, setMaNganHang] = useState(nganHangHienTai.maNganHang ?? '')
+  const [soTaiKhoan, setSoTaiKhoan] = useState(nganHangHienTai.soTaiKhoan ?? '')
+  const [chuTaiKhoan, setChuTaiKhoan] = useState(nganHangHienTai.chuTaiKhoan ?? '')
+  const dsNganHang = BANKS.some((b) => b.code === maNganHang) || !maNganHang ? BANKS : [...BANKS, { code: maNganHang, name: nganHangHienTai.tenNganHang ?? maNganHang }]
+  const [hoTen, setHoTen] = useState(person.hoTen ?? '')
+  const [email, setEmail] = useState(person.email ?? '')
+  const [soDienThoai, setSoDienThoai] = useState(person.soDienThoai ?? '')
+  const [soDienThoaiPhu, setSoDienThoaiPhu] = useState(person.soDienThoaiPhu ?? '')
+  const [file, setFile] = useState(null)
+  const [preview, setPreview] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!file) return undefined
+    const url = URL.createObjectURL(file)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  const submit = async () => {
+    const ten = hoTen.trim()
+    const mail = email.trim().toLowerCase()
+    if (!ten) return setError('Vui lòng nhập họ và tên.')
+    const loiEmail = getEmailError(mail)
+    if (loiEmail) return setError(loiEmail)
+    if (!soDienThoai) return setError('Vui lòng nhập số điện thoại.')
+    const tenDN = tenDoanhNghiep.trim()
+    const doiTenDN = choSuaTenDN && tenDN !== (owner?.tenDoanhNghiep ?? '')
+    if (doiTenDN && (tenDN.length < 2 || tenDN.length > 150)) return setError('Tên doanh nghiệp phải từ 2 đến 150 ký tự.')
+    const stk = soTaiKhoan.trim()
+    const chuTK = chuTaiKhoan.trim()
+    const doiNganHang = maNganHang !== (nganHangHienTai.maNganHang ?? '') || stk !== (nganHangHienTai.soTaiKhoan ?? '') || chuTK !== (nganHangHienTai.chuTaiKhoan ?? '')
+    if (doiNganHang) {
+      if (!maNganHang) return setError('Vui lòng chọn ngân hàng.')
+      if (!/^\d{6,20}$/.test(stk)) return setError('Số tài khoản phải gồm 6–20 chữ số.')
+      if (chuTK.length < 2) return setError('Vui lòng nhập tên chủ tài khoản (từ 2 ký tự).')
+    }
+    const body = {}
+    if (ten !== (person.hoTen ?? '')) body.hoTen = ten
+    if (mail !== (person.email ?? '')) body.email = mail
+    if (soDienThoai !== (person.soDienThoai ?? '')) body.soDienThoai = soDienThoai
+    if (soDienThoaiPhu !== (person.soDienThoaiPhu ?? '')) body.soDienThoaiPhu = soDienThoaiPhu // để trống = xoá số phụ
+    if (Object.keys(body).length === 0 && !file && !doiTenDN && !doiNganHang) return setError('Chưa có thay đổi nào để lưu.')
+    setBusy(true)
+    setError('')
+    try {
+      let updated = person
+      if (Object.keys(body).length > 0) updated = await callApi('/api/tai-khoan/ca-nhan', { method: 'PATCH', token, body })
+      if (file) {
+        const saved = await uploadAvatarImage(token, file)
+        updated = { ...updated, anhDaiDien: saved.anhDaiDien }
+      }
+      if (doiTenDN) await callApi('/api/chu-san/dang-ky/doanh-nghiep', { method: 'PUT', token, body: { tenDoanhNghiep: tenDN } })
+      if (doiNganHang) await callApi('/api/chu-san/ngan-hang', { method: 'PATCH', token, body: { maNganHang, soTaiKhoan: stk, chuTaiKhoan: chuTK } })
+      onSaved(updated)
+    } catch (err) {
+      setError(describeApiError(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog title="Sửa thông tin chủ sân" width={520} onClose={() => !busy && onClose()}>
+      <div className="dialog-field">
+        <span>Ảnh đại diện</span>
+        <div className="avatar-row">
+          <div className="avatar-box">
+            {preview || person.anhDaiDien ? <img src={preview || fileUrl(person.anhDaiDien)} alt="Ảnh đại diện" /> : <span>Không có ảnh</span>}
+          </div>
+          <label className="btn btn-ghost btn-sm file-btn">
+            {preview || person.anhDaiDien ? 'Đổi ảnh' : 'Thêm ảnh'}
+            <input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          </label>
+        </div>
+      </div>
+      <label className="dialog-field">
+        <span>Họ và tên</span>
+        <input className="input" value={hoTen} maxLength={100} onChange={(e) => setHoTen(e.target.value)} />
+      </label>
+      <label className="dialog-field">
+        <span>Email</span>
+        <input className="input" type="email" value={email} maxLength={120} onChange={(e) => setEmail(e.target.value)} />
+      </label>
+      <div className="dlg-grid-2">
+        <label className="dialog-field">
+          <span>Số điện thoại</span>
+          <input className="input" type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={11} value={soDienThoai} onChange={(e) => setSoDienThoai(onlyDigits(e.target.value))} />
+        </label>
+        <label className="dialog-field">
+          <span>Số điện thoại phụ (tuỳ chọn)</span>
+          <input className="input" type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={11} value={soDienThoaiPhu} onChange={(e) => setSoDienThoaiPhu(onlyDigits(e.target.value))} />
+        </label>
+      </div>
+      <label className="dialog-field">
+        <span>Tên doanh nghiệp</span>
+        <input className="input" value={tenDoanhNghiep} maxLength={150} disabled={!choSuaTenDN || busy} onChange={(e) => setTenDoanhNghiep(e.target.value)} />
+        {!choSuaTenDN && <small className="dialog-note">Hồ sơ đã được duyệt: hệ thống hiện chưa cho đổi tên doanh nghiệp.</small>}
+      </label>
+      <label className="dialog-field">
+        <span>Ngân hàng</span>
+        <select className="input" value={maNganHang} onChange={(e) => setMaNganHang(e.target.value)}>
+          <option value="">Chọn ngân hàng</option>
+          {dsNganHang.map((b) => (
+            <option key={b.code} value={b.code}>
+              {b.code} - {b.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="dlg-grid-2">
+        <label className="dialog-field">
+          <span>Số tài khoản</span>
+          <input className="input" type="text" inputMode="numeric" pattern="[0-9]*" maxLength={20} value={soTaiKhoan} onChange={(e) => setSoTaiKhoan(onlyDigits(e.target.value))} />
+        </label>
+        <label className="dialog-field">
+          <span>Chủ tài khoản</span>
+          <input className="input" value={chuTaiKhoan} maxLength={100} onChange={(e) => setChuTaiKhoan(e.target.value)} />
+        </label>
+      </div>
+      {error && <p className="dialog-error">{error}</p>}
+      <div className="dialog-two">
+        <button type="button" className="dialog-ghost" onClick={onClose} disabled={busy}>
+          Đóng
+        </button>
+        <button type="button" className="dialog-primary" onClick={submit} disabled={busy}>
+          {busy ? 'Đang lưu...' : 'Lưu'}
+        </button>
+      </div>
+    </Dialog>
+  )
+}
+
+function ProfilePage({ user, onUserChange }) {
   const token = user.maTruyCap
   const avatarId = user.maNguoiDung ?? user.email
   const [info, setInfo] = useState(null)
   const [form, setForm] = useState({ current: '', next: '', confirm: '' })
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
-  const [avatar, setAvatar] = useState(() => loadAvatar(avatarId))
+  const [avatar] = useState(() => loadAvatar(avatarId)) // ảnh cũ lưu trên trình duyệt (nếu có) chỉ dùng khi server chưa có ảnh
   const [imageMsg, setImageMsg] = useState(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [owner, setOwner] = useState(null) // hồ sơ chủ sân: tên doanh nghiệp + tài khoản nhận tiền (GET /api/chu-san/dang-ky)
+  const [ownerTick, setOwnerTick] = useState(0)
   const isOwner = user.vaiTro === 'owner'
-  const [warnings, setWarnings] = useState([]) // lịch sử cảnh cáo (thông báo owner_warning / owner_banned)
-  const tick = useAutoRefresh()
-
-  // Chưa có API riêng trả số lần cảnh cáo → lấy từ GET /api/thong-bao (admin xử lý khiếu nại sẽ gửi thông báo cho chủ sân)
-  useEffect(() => {
-    if (!isOwner) return
-    let cancelled = false
-    async function load() {
-      try {
-        const all = []
-        for (let page = 1; page <= 10; page += 1) {
-          const data = await callApi(`/api/thong-bao?trang=${page}&soLuong=50`, { token })
-          const list = data.cacThongBao ?? []
-          all.push(...list)
-          if (list.length < 50) break
-        }
-        if (cancelled) return
-        setWarnings(
-          all
-            .filter((n) => n.loaiThamChieu === 'complaint' && (n.loai === 'owner_warning' || n.loai === 'owner_banned'))
-            .sort((a, b) => new Date(b.ngayTao) - new Date(a.ngayTao)),
-        )
-      } catch {
-        /* không tải được thì giữ nguyên */
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [isOwner, token, tick])
-  const warningCount = Math.min(
-    MAX_WARNINGS,
-    warnings.some((n) => n.loai === 'owner_banned')
-      ? MAX_WARNINGS
-      : warnings.reduce((max, n) => Math.max(max, describeComplaint(n).warnings ?? 0), warnings.length),
-  )
 
   useEffect(() => {
     let cancelled = false
@@ -4795,23 +5499,18 @@ function ProfilePage({ user }) {
     }
   }, [token])
 
-  const changeAvatar = async (e) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    setImageMsg(null)
-    if (!file.type.startsWith('image/')) {
-      return setImageMsg({ type: 'error', message: 'Vui lòng chọn một tệp ảnh.' })
+  useEffect(() => {
+    if (!isOwner) return undefined
+    let cancelled = false
+    callApi('/api/chu-san/dang-ky', { token })
+      .then((data) => {
+        if (!cancelled) setOwner(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
     }
-    try {
-      const dataUrl = await resizeToDataUrl(file)
-      localStorage.setItem(avatarKey(avatarId), dataUrl)
-      setAvatar(dataUrl)
-      setImageMsg({ type: 'success', message: 'Đã cập nhật avatar.' })
-    } catch (err) {
-      setImageMsg({ type: 'error', message: err.message || 'Không lưu được ảnh, vui lòng thử lại.' })
-    }
-  }
+  }, [token, isOwner, ownerTick])
 
   const person = info ?? user
   const update = (key) => (e) => {
@@ -4856,16 +5555,16 @@ function ProfilePage({ user }) {
         <h2 className="card-title">Thông tin tài khoản</h2>
         {user.vaiTro === 'owner' && (
           <div className="avatar-block">
-            {/* Nhãn và nút thêm ảnh cùng một hàng; ảnh thu nhỏ nằm bên trái */}
+            {/* Đổi ảnh nằm trong cửa sổ "Sửa thông tin" */}
             <div className="avatar-row">
               <span className="avatar-label">Avatar của chủ sân</span>
-              <label className="btn btn-ghost btn-sm file-btn">
-                {avatar ? 'Đổi ảnh' : 'Thêm ảnh'}
-                <input type="file" accept="image/*" hidden onChange={changeAvatar} />
-              </label>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setImageMsg(null); setEditOpen(true) }} disabled={!info || (isOwner && !owner)}>
+                Sửa thông tin
+              </button>
             </div>
-            <div className="avatar-box">{avatar ? <img src={avatar} alt="Avatar của chủ sân" /> : <span>Không có ảnh</span>}</div>
-            <span className="field-hint">Ảnh chỉ được lưu trên trình duyệt này.</span>
+            <div className="avatar-box">
+              {info?.anhDaiDien || avatar ? <img src={info?.anhDaiDien ? fileUrl(info.anhDaiDien) : avatar} alt="Avatar của chủ sân" /> : <span>Không có ảnh</span>}
+            </div>
             {imageMsg && <Alert type={imageMsg.type}>{imageMsg.message}</Alert>}
           </div>
         )}
@@ -4884,14 +5583,27 @@ function ProfilePage({ user }) {
           </div>
           {isOwner && (
             <div>
-              <dt>Cảnh cáo</dt>
-              <dd className={warningCount >= MAX_WARNINGS ? 'warn-count warn-max' : 'warn-count'}>
-                {warningCount}/{MAX_WARNINGS}
-              </dd>
+              <dt>Số điện thoại phụ</dt>
+              <dd>{person.soDienThoaiPhu ?? '—'}</dd>
             </div>
           )}
+          {isOwner && (
+            <>
+              <div>
+                <dt>Tên doanh nghiệp</dt>
+                <dd>{owner?.tenDoanhNghiep || '—'}</dd>
+              </div>
+              <div>
+                <dt>Mã ngân hàng</dt>
+                <dd>{owner?.thongTinNganHang?.maNganHang || '—'}</dd>
+              </div>
+              <div>
+                <dt>Số tài khoản</dt>
+                <dd>{owner?.thongTinNganHang?.soTaiKhoan || '—'}</dd>
+              </div>
+            </>
+          )}
         </dl>
-        {isOwner && <span className="field-hint">Quá {MAX_WARNINGS} lần cảnh cáo, tài khoản và tất cả cơ sở sẽ bị tạm dừng hoạt động.</span>}
       </section>
 
       <form className="card profile-card" onSubmit={handleSubmit}>
@@ -4915,11 +5627,27 @@ function ProfilePage({ user }) {
         </button>
       </form>
       </div>
+      {editOpen && (
+        <EditProfileDialog
+          token={token}
+          person={person}
+          owner={owner}
+          onClose={() => setEditOpen(false)}
+          onSaved={(updated) => {
+            setOwnerTick((n) => n + 1)
+            setInfo((prev) => ({ ...(prev ?? user), ...updated }))
+            onUserChange?.({ hoTen: updated.hoTen, email: updated.email, soDienThoai: updated.soDienThoai })
+            setEditOpen(false)
+            setImageMsg({ type: 'success', message: 'Đã lưu thông tin chủ sân.' })
+          }}
+        />
+      )}
     </Page>
   )
 }
 
-function AdminApp({ user, onLogout }) {
+function AdminApp({ user, onLogout, onUserChange }) {
+  useDialogTableCss()
   const [active, setActive] = useState('courts')
 
   // Bộ lọc dùng chung giữa các trang
@@ -4931,10 +5659,11 @@ function AdminApp({ user, onLogout }) {
   const [bookings, setBookings] = useState(INITIAL_BOOKINGS)
   const [cancelHours, setCancelHours] = useState(12)
 
-  // Chủ sân CHƯA CÓ cơ sở nào thì chưa có sân và bảng giá nên các trang còn lại bị làm tối và không bấm được
-  // (chỉ dùng Quản lý cơ sở, Quản lý sân, Quản lý bảng giá, Trang chủ sân). Có ít nhất 1 cơ sở thì mở toàn bộ.
-  // API có sẵn: GET /api/chu-san/co-so. Kiểm tra lại mỗi khi chuyển trang.
-  const [hasBranch, setHasBranch] = useState(null) // null = đang kiểm tra
+  // Chủ sân chưa có đủ CƠ SỞ + SÂN + BẢNG GIÁ thì các trang còn lại bị làm tối và không bấm được
+  // (chỉ dùng Trang chủ sân, Quản lý cơ sở, Quản lý sân, Quản lý bảng giá). API có sẵn: GET /api/chu-san/co-so
+  // (mỗi cơ sở có soSan và giaThapNhat). Đủ khi có ít nhất 1 cơ sở có sân và đã có bảng giá.
+  const [setupReady, setSetupReady] = useState(null) // null = đang kiểm tra
+  const [setupTick, setSetupTick] = useState(0)
   useEffect(() => {
     if (user.vaiTro !== 'owner') return
     let cancelled = false
@@ -4942,17 +5671,24 @@ function AdminApp({ user, onLogout }) {
       .then((data) => {
         if (cancelled) return
         const list = Array.isArray(data) ? data : data ? [data] : []
-        setHasBranch(list.length > 0)
-        if (list.length === 0) setActive((cur) => (['branches', 'courts', 'pricing', 'profile'].includes(cur) ? cur : 'branches'))
+        const ready = list.some((b) => Number(b.soSan ?? 0) > 0 && b.giaThapNhat != null)
+        setSetupReady(ready)
+        if (!ready) setActive((cur) => (['branches', 'courts', 'pricing', 'profile'].includes(cur) ? cur : 'branches'))
       })
       .catch(() => {
-        if (!cancelled) setHasBranch(true) // không kiểm tra được thì không khoá
+        if (!cancelled) setSetupReady(true) // không kiểm tra được thì không khoá
       })
     return () => {
       cancelled = true
     }
-  }, [user.vaiTro, user.maTruyCap, active])
-  const setupLocked = user.vaiTro === 'owner' && hasBranch === false
+  }, [user.vaiTro, user.maTruyCap, active, setupTick])
+  // Khi đang bị khoá thì kiểm tra lại mỗi 4 giây để tự mở khoá ngay khi chủ sân vừa thêm đủ cơ sở/sân/bảng giá
+  useEffect(() => {
+    if (setupReady !== false) return undefined
+    const id = setInterval(() => setSetupTick((n) => n + 1), 4000)
+    return () => clearInterval(id)
+  }, [setupReady])
+  const setupLocked = user.vaiTro === 'owner' && setupReady === false
   const SETUP_PAGES = ['branches', 'courts', 'pricing', 'profile']
   const isDisabledPage = (id) => setupLocked && !SETUP_PAGES.includes(id)
 
@@ -4961,10 +5697,10 @@ function AdminApp({ user, onLogout }) {
   const current = MENU.find((m) => m.id === active) ?? PROFILE_PAGE
 
   const renderPage = () => {
-    if (isDisabledPage(active)) return <Alert type="warning">Hãy tạo cơ sở ở trang Quản lý cơ sở để dùng trang này.</Alert>
+    if (isDisabledPage(active)) return <Alert type="warning">Cần có đủ cơ sở, sân và bảng giá của sân thì mới dùng được trang này. Hãy hoàn tất ở Quản lý cơ sở, Quản lý sân và Quản lý bảng giá.</Alert>
     switch (active) {
       case 'profile':
-        return <ProfilePage user={user} />
+        return <ProfilePage user={user} onUserChange={onUserChange} />
       case 'overview':
         return <Overview user={user} onNavigate={setActive} />
       case 'calendar':
@@ -4978,7 +5714,7 @@ function AdminApp({ user, onLogout }) {
       case 'complaints':
         return <ComplaintsPage user={user} />
       case 'branches':
-        return <BranchesPage user={user} onCreated={() => setHasBranch(true)} />
+        return <BranchesPage user={user} onCreated={() => setSetupTick((n) => n + 1)} />
       case 'courts':
         return <CourtsPage user={user} />
       case 'pricing':
@@ -5014,7 +5750,7 @@ function AdminApp({ user, onLogout }) {
               key={m.id}
               className={`nav-item${m.id === active ? ' is-active' : ''}${isDisabledPage(m.id) ? ' is-disabled' : ''}`}
               disabled={isDisabledPage(m.id)}
-              title={isDisabledPage(m.id) ? 'Cần tạo cơ sở trước' : undefined}
+              title={isDisabledPage(m.id) ? 'Cần có cơ sở, sân và bảng giá trước' : undefined}
               onClick={() => setActive(m.id)}
             >
               <NavIcon id={m.id} />
@@ -5167,7 +5903,9 @@ async function registerApi(form) {
 
 // Chủ sân chỉ được vào trang quản trị khi hồ sơ đã được quản trị viên duyệt
 function getAccessBlockMessage(nguoiDung) {
-  if (nguoiDung.vaiTro !== 'owner' || nguoiDung.trangThaiDuyet === 'approved') return ''
+  // Trang này chỉ dành cho chủ sân: backend cho cả quản trị viên đăng nhập web nên web phải chặn lại
+  if (nguoiDung.vaiTro !== 'owner') return 'Tài khoản này không có quyền truy cập trang chủ sân.'
+  if (nguoiDung.trangThaiDuyet === 'approved') return ''
   if (nguoiDung.trangThaiDuyet === 'rejected') {
     return 'Hồ sơ đăng ký của bạn đã bị từ chối. Vui lòng liên hệ quản trị viên.'
   }
@@ -5358,6 +6096,10 @@ function LoginPage({ onLogin, onGoRegister, notice, defaultIdentity }) {
     try {
       const { nguoiDung, maTruyCap } = await loginApi(emailKey, password)
       clearFailedLogins(emailKey)
+      if (nguoiDung.vaiTro !== 'owner') {
+        setError('Tài khoản này không có quyền vào trang quản lý của chủ sân.')
+        return
+      }
       const blocked = getAccessBlockMessage(nguoiDung)
       if (blocked) {
         setWarning(blocked)
@@ -5695,7 +6437,7 @@ function clearSession() {
 function loadSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY))
-    if (saved?.maTruyCap && jwtExpiry(saved.maTruyCap) > Date.now()) return saved
+    if (saved?.maTruyCap && saved.vaiTro === 'owner' && jwtExpiry(saved.maTruyCap) > Date.now()) return saved
   } catch {
     // dữ liệu hỏng: coi như chưa đăng nhập
   }
@@ -5739,7 +6481,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (user) return <AdminApp user={user} onLogout={() => logout()} />
+  // Cập nhật tên / email hiển thị sau khi chủ sân sửa thông tin cá nhân
+  const updateUser = (patch) => {
+    const next = { ...user, ...patch }
+    saveSession(next)
+    setUser(next)
+  }
+
+  if (user) return <AdminApp user={user} onLogout={() => logout()} onUserChange={updateUser} />
 
   if (view === 'register') {
     return (

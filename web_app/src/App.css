@@ -3481,3 +3481,141 @@ a.btn {
   color:#000;
 }
 .step-toggle-btn.is-active { background: var(--green); border-color: var(--green); color: #fff; }
+
+/* ===== Vòng 15: Quản lý cơ sở (Sửa / Khoá / Xoá), ô toạ độ bản đồ, đơn của cơ sở bị khoá ===== */
+.branch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.btn-danger-text { color: #b42318; }
+.btn-danger-text:disabled { color: inherit; }
+.input-prefixed { display: flex; align-items: stretch; width: 100%; }
+.input-prefixed .input-prefix { display: inline-flex; align-items: center; padding: 0 10px; background: #eef2f0; border: 1px solid #c9d3cf; border-right: 0; border-radius: 10px 0 0 10px; font-size: 13px; color: #44524c; white-space: nowrap; }
+.input-prefixed .input { border-radius: 0 10px 10px 0; flex: 1; min-width: 0; }
+.branch-locked-tag { color: #b42318; font-size: 12px; }
+
+/* ===== Vòng 16: ảnh chứng từ hoàn tiền ===== */
+.refund-proof-thumb { display: block; width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #c9d3cf; margin-top: 4px; }
+.refund-proof-preview { display: block; max-width: 100%; max-height: 220px; object-fit: contain; margin: 8px auto; border-radius: 8px; border: 1px solid #c9d3cf; }
+
+
+/* Quản lý đặt sân: 10 cột (thêm SĐT, ngày đặt sân, ngày giờ thanh toán) → chiều rộng theo nội dung, cuộn ngang nếu hẹp */
+.table-bookings.table-bookings-wide {
+  table-layout: auto;
+  min-width: 1180px;
+}
+.table-bookings.table-bookings-wide th,
+.table-bookings.table-bookings-wide td {
+  width: auto !important;
+}
+.table-bookings.table-bookings-wide th:last-child,
+.table-bookings.table-bookings-wide td:last-child {
+  min-width: 150px;
+}
+.th-sort {
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.th-sort:hover {
+  text-decoration: underline;
+}
+/* Đã sử dụng sân: xanh dương nhạt, chữ đen */
+.status-used {
+  color: #000;
+  background: #9ec5f0;
+}
+
+/* ===== Tất cả bảng dữ liệu: cột cân bằng (chia đều), tiêu đề và nội dung canh lề trái ===== */
+.table-scroll .table {
+  table-layout: fixed;
+  width: 100%;
+}
+.table-scroll .table thead th,
+.table-scroll .table tbody td {
+  width: auto !important;
+  min-width: 0 !important;
+  text-align: left !important;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+.table-scroll .table td.table-empty {
+  text-align: center !important;
+}
+.table-scroll .table .row-actions,
+.table-scroll .table .row-actions-stack,
+.table-scroll .table .th-center {
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: left !important;
+}
+.table-scroll .table-bookings { min-width: 1400px; }
+.table-scroll .table-reviews { min-width: 1000px; }
+.table-scroll .table-refunds { min-width: 1000px; }
+.table-scroll .table-courts { min-width: 760px; }
+.table-scroll .table-pricing { min-width: 820px; }
+.table-scroll .table-customers { min-width: 760px; }
+.table-scroll .table-collect { min-width: 900px; }
+.table-scroll .table-detail { min-width: 720px; }
+
+/* Ô "Sắp xếp" phía trên mỗi bảng */
+.sort-bar {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 0 10px;
+}
+.sort-bar .sort-select {
+  min-width: 260px;
+  max-width: 100%;
+}
+.table-card > .sort-bar {
+  padding: 12px 16px 8px;
+}
+
+/* Tiêu đề cột bấm để sắp xếp */
+.table th .th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.table th .th-sort:hover {
+  text-decoration: underline;
+}
+.table th .sort-ind {
+  font-size: 11px;
+  opacity: 0.45;
+}
+.table th .sort-ind.on {
+  color: #19654d;
+  opacity: 1;
+}
+
+/* Nút thoát của các cửa sổ chọn khung giờ / chọn thứ; dấu × góc phải luôn nhìn thấy */
+.dialog-close {
+  color: #333;
+  padding: 0 4px;
+}
+.dialog-exit {
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* Doanh thu của cơ sở: cột biểu đồ bấm được + cửa sổ chi tiết từng sân */
+.chart-col.is-clickable { cursor: pointer; }
+.chart-col.is-clickable:hover .chart-bar { filter: brightness(1.08); }
+.table-revenue-detail tfoot td { font-weight: 700; border-top: 2px solid var(--border, #e3e8e5); background: #f4f7f5; }
+/* Bảng doanh thu các sân: tất cả tiêu đề và ô đều căn trái */
+.table-scroll .table.table-revenue-detail th,
+.table-scroll .table.table-revenue-detail td,
+.table-revenue-detail th .th-sort { text-align: left; }
