@@ -52,7 +52,8 @@ INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
   ('event_max_active_regs_per_customer','10','Số đăng ký sự kiện pending/accepted chưa diễn ra tối đa mỗi khách (G7)'),
   ('event_reminder_hours',     '24',       'Nhắc người đã đăng ký trước giờ diễn ra bấy nhiêu giờ (G7)'),
   ('event_max_fee',            '10000000', 'Phí sự kiện tối đa (đồng) (G7)'),
-  ('event_payment_hold_minutes','30',      'Hạn khách chuyển khoản + gửi ảnh (phút) sau khi đăng ký sự kiện được nhận (G7)'),
+  ('event_payment_hold_minutes','10',      'Hạn khách chuyển khoản + gửi ảnh (phút) sau khi đăng ký sự kiện được nhận; gửi ảnh xong thì ngừng đếm ngược (G7)'),
+  ('event_payment_accept_minutes','10',    'Thời gian khách được giữ chỗ để mở màn thanh toán sau khi được nhận (phút); bấm Xác nhận & thanh toán thì chuyển sang đếm ngược event_payment_hold_minutes (G7)'),
   ('event_commission_rate',    '0',        'Hoa hồng hệ thống (%) trên phí sự kiện; 0 = chưa thu (G7)');
 
 -- ---------------------------------------------------------------------
@@ -1686,3 +1687,10 @@ INSERT INTO CauHinhHeThong (KhoaCauHinh, GiaTri, MoTa) VALUES
  ('community_max_owned_teams','3','Số đội nhóm tối đa một người đang làm trưởng nhóm'),
  ('community_post_max_days','60','Số ngày tối đa từ hôm nay đến ngày chơi của bài tìm người')
 ON DUPLICATE KEY UPDATE MoTa=VALUES(MoTa);
+
+-- ---------------------------------------------------------------------
+-- Giới tính tài khoản khách (cột NguoiDung.GioiTinh cho phép NULL; tài khoản khách mẫu id 6-11 đều đã có)
+--   female: 6 Mai, 9 Hà · male: 7 Nam, 8 Phúc, 10 Hùng, 11 Vinh
+-- ---------------------------------------------------------------------
+UPDATE NguoiDung SET GioiTinh = 'female' WHERE VaiTro = 'customer' AND MaNguoiDung IN (6, 9);
+UPDATE NguoiDung SET GioiTinh = 'male'   WHERE VaiTro = 'customer' AND MaNguoiDung IN (7, 8, 10, 11);

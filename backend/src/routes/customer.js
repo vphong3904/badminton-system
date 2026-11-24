@@ -32,6 +32,7 @@ dinhTuyen.get('/dat-san/:maDatSan/hoa-don-nhap', kiemTraHopLe(kiemTraDuLieu.maDa
 dinhTuyen.get('/dat-san/:maDatSan/huy-xem-truoc', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.xemTruocHuy);
 // G3: khách quét QR check-in tại sân (mỗi đơn con check-in riêng).
 dinhTuyen.post('/dat-san/:maDatSan/tu-choi-chuyen-san', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.tuChoiChuyenSan);
+dinhTuyen.post('/dat-san/:maDatSan/dong-y-chuyen-san', kiemTraHopLe(kiemTraDuLieu.maDatSan), dieuKhien.dongYChuyenSan);
 dinhTuyen.post('/dat-san/:maDatSan/check-in', kiemTraHopLe(kiemTraCheckIn.checkIn), checkIn.checkInKhach);
 dinhTuyen.post('/dat-san/:maDatSan/huy', kiemTraHopLe(kiemTraDuLieu.huyDatSan), dieuKhien.huyDatSan);
 dinhTuyen.post('/dat-san/:maDatSan/danh-gia',

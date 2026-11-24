@@ -16,9 +16,9 @@ async function phatLichTheoSuKien(maSuKien, snapshot = null) {
     const [san] = await pool.query(`SELECT MaSan AS maSan FROM San WHERE MaCoSo=? AND ${SAN_CHUA_XOA()} ORDER BY MaSan`, [sk.maCoSo]);
     const cacSlot = [];
     for (const s of san) {
-      const [[khoa]] = await pool.query('SELECT MaKhoa FROM KhoaSan WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? LIMIT 1', [s.maSan, sk.ngay, sk.gioKetThuc, sk.gioBatDau]);
+      const [[khoa]] = await pool.query('SELECT MaKhoa, MaSuKien FROM KhoaSan WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? ORDER BY (MaSuKien IS NOT NULL) DESC LIMIT 1', [s.maSan, sk.ngay, sk.gioKetThuc, sk.gioBatDau]);
       const [[don]] = await pool.query("SELECT MaDatSan FROM DatSan WHERE MaSan=? AND NgayChoi=? AND TrangThai IN ('pending_payment','confirming','confirmed','checked_in') AND GioBatDau<? AND GioKetThuc>? LIMIT 1", [s.maSan, sk.ngay, sk.gioKetThuc, sk.gioBatDau]);
-      cacSlot.push({ maSan: Number(s.maSan), gioBatDau: String(sk.gioBatDau).slice(0,8), gioKetThuc: String(sk.gioKetThuc).slice(0,8), trangThai: khoa ? 'locked' : don ? 'booked' : 'available' });
+      cacSlot.push({ maSan: Number(s.maSan), gioBatDau: String(sk.gioBatDau).slice(0,8), gioKetThuc: String(sk.gioKetThuc).slice(0,8), trangThai: khoa ? (khoa.MaSuKien ? 'event' : 'locked') : don ? 'booked' : 'available' });
     }
     phatLichSan(sk.maCoSo, String(sk.ngay).slice(0,10), cacSlot);
   } catch (loi) { console.error('[realtime] Không phát được slot sự kiện:', loi.message); }

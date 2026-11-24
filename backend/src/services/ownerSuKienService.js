@@ -597,12 +597,18 @@ async function taoThanhToanChoDangKy(ketNoi, { maDangKy, phi }) {
   const [[cu]] = await ketNoi.query(
     `SELECT MaThanhToan AS maThanhToan, TrangThai AS trangThai, TrangThaiHoan AS trangThaiHoan
      FROM ThanhToanSuKien WHERE MaDangKy = ? FOR UPDATE`, [maDangKy]);
-  if (cu && (cu.trangThaiHoan === 'pending' || (cu.trangThai === 'success' && cu.trangThaiHoan !== 'refunded'))) {
-    throw AppError.biTrung(
-      'Khoản phí của lần đăng ký trước chưa được hoàn tất. Vui lòng hoàn phí trước khi nhận đăng ký lại', 'REFUND_PENDING');
+  // Khách hủy rồi đăng ký lại khi chủ sân CHƯA chuyển khoản hoàn: khôi phục khoản phí đã chuyển, khách không phải trả lần nữa
+  // và chủ sân không còn phải hoàn. (Hủy lúc đang chờ duyệt chứng từ thì khoản phí được đưa về `confirming`.)
+  if (cu && cu.trangThaiHoan === 'pending') {
+    await ketNoi.query(
+      `UPDATE ThanhToanSuKien SET TrangThai = IF(TrangThai = 'cancelled', 'confirming', TrangThai),
+         TrangThaiHoan = 'none', SoTienHoan = NULL WHERE MaThanhToan = ?`, [cu.maThanhToan]);
+    return cu.maThanhToan;
   }
+  // Đã trả và không có hoàn (hủy sát giờ): đăng ký lại vẫn tính là đã trả.
+  if (cu && cu.trangThai === 'success' && cu.trangThaiHoan === 'none') return cu.maThanhToan;
   const [soPhutGiu, tyLeHoaHong] = await Promise.all([
-    layCauHinhSo(ketNoi, 'event_payment_hold_minutes', 30),
+    layCauHinhSo(ketNoi, 'event_payment_accept_minutes', 10), // giữ chỗ 10' để vào màn Xác nhận & thanh toán
     layCauHinhSo(ketNoi, 'event_commission_rate', 0),
   ]);
   const phiNenTang = Math.round((phi * tyLeHoaHong) / 100);
@@ -610,7 +616,7 @@ async function taoThanhToanChoDangKy(ketNoi, { maDangKy, phi }) {
     await ketNoi.query(
       `UPDATE ThanhToanSuKien SET SoTien = ?, PhiNenTang = ?, TienChuSan = ?, TrangThai = 'pending',
          NoiDungChuyenKhoan = ?, HanThanhToan = DATE_ADD(NOW(), INTERVAL ? MINUTE), HanXacNhan = NULL,
-         LyDoLoi = NULL, NgayGuiAnh = NULL, MaNguoiXacNhan = NULL, NgayThanhToan = NULL,
+         LyDoLoi = NULL, NgayGuiAnh = NULL, NgayBatDauThanhToan = NULL, MaNguoiXacNhan = NULL, NgayThanhToan = NULL,
          TrangThaiHoan = 'none', NgayHoan = NULL WHERE MaThanhToan = ?`,
       [phi, phiNenTang, phi - phiNenTang, `SK${maDangKy}`, soPhutGiu, cu.maThanhToan]);
     return cu.maThanhToan;
@@ -652,7 +658,10 @@ async function docThanhToanDangKy(ketNoi, maDangKy) {
     `SELECT MaThanhToan AS maThanhToan, SoTien AS soTien, PhiNenTang AS phiNenTang, TienChuSan AS tienChuSan,
        TrangThai AS trangThai, NoiDungChuyenKhoan AS noiDungChuyenKhoan, HanThanhToan AS hanThanhToan,
        HanXacNhan AS hanXacNhan, LyDoLoi AS lyDoLoi, NgayGuiAnh AS ngayGuiAnh, NgayThanhToan AS ngayThanhToan,
-       TrangThaiHoan AS trangThaiHoan, NgayHoan AS ngayHoan
+       TrangThaiHoan AS trangThaiHoan, NgayHoan AS ngayHoan,
+       IF(TrangThaiHoan = 'none', NULL, COALESCE(SoTienHoan, SoTien)) AS soTienHoan,
+       TenNganHangHoan AS tenNganHangHoan, MaNganHangHoan AS maNganHangHoan,
+       SoTaiKhoanHoan AS soTaiKhoanHoan, ChuTaiKhoanHoan AS chuTaiKhoanHoan
      FROM ThanhToanSuKien WHERE MaDangKy = ?`, [maDangKy]);
   if (!tt) return null;
   const [cacChungTu] = await ketNoi.query(
@@ -682,7 +691,7 @@ async function lietKeDangKy(maChuSan, maSuKien, { trangThai, maHangMuc, trang = 
   const [cacDong] = await pool.query(
     `SELECT dk.MaDangKy AS maDangKy, dk.MaHangMuc AS maHangMuc, hm.TenHangMuc AS tenHangMuc, hm.LaDoi AS laDoi,
        dk.MaKhachHang AS maKhachHang, dk.TenKhach AS tenKhach, dk.SoDienThoai AS soDienThoai,
-       dk.TrinhDoKhai AS trinhDoKhai, dk.TenDongDoi AS tenDongDoi, dk.SdtDongDoi AS sdtDongDoi,
+       dk.GioiTinh AS gioiTinh, dk.TrinhDoKhai AS trinhDoKhai, dk.TenDongDoi AS tenDongDoi, dk.SdtDongDoi AS sdtDongDoi,
        dk.TrangThai AS trangThai, dk.NguoiHuy AS nguoiHuy, dk.LyDo AS lyDo,
        dk.NgayDangKy AS ngayDangKy, dk.NgayXuLy AS ngayXuLy, dk.NgayHuy AS ngayHuy
      FROM DangKySuKien dk LEFT JOIN HangMucSuKien hm ON hm.MaHangMuc = dk.MaHangMuc
@@ -852,7 +861,7 @@ async function xacNhanThanhToan(maChuSan, maDangKy) {
 // Từ chối ảnh chuyển khoản (lý do bắt buộc): confirming → pending, khách được gia hạn event_payment_hold_minutes gửi lại (DK-05).
 async function tuChoiThanhToan(maChuSan, maDangKy, lyDo) {
   const lyDoTuChoi = chuoiLyDo(lyDo, 'lyDo');
-  const soPhutGiu = await layCauHinhSo(pool, 'event_payment_hold_minutes', 30);
+  const soPhutGiu = await layCauHinhSo(pool, 'event_payment_hold_minutes', 10);
   await thucHienGiaoDich(async (ketNoi) => {
     const { sk, dk, tt } = await khoaThanhToanCanDuyet(ketNoi, maChuSan, maDangKy);
     await ketNoi.query(
@@ -903,7 +912,7 @@ async function layDangKyChoChu(maChuSan, maDangKy) {
   const [[dong]] = await pool.query(
     `SELECT dk.MaDangKy AS maDangKy, dk.MaSuKien AS maSuKien, dk.MaHangMuc AS maHangMuc, hm.TenHangMuc AS tenHangMuc,
        dk.MaKhachHang AS maKhachHang, dk.TenKhach AS tenKhach, dk.SoDienThoai AS soDienThoai,
-       dk.TrinhDoKhai AS trinhDoKhai, dk.TenDongDoi AS tenDongDoi, dk.SdtDongDoi AS sdtDongDoi,
+       dk.GioiTinh AS gioiTinh, dk.TrinhDoKhai AS trinhDoKhai, dk.TenDongDoi AS tenDongDoi, dk.SdtDongDoi AS sdtDongDoi,
        dk.TrangThai AS trangThai, dk.NguoiHuy AS nguoiHuy, dk.LyDo AS lyDo,
        dk.NgayDangKy AS ngayDangKy, dk.NgayXuLy AS ngayXuLy, dk.NgayHuy AS ngayHuy
      FROM DangKySuKien dk LEFT JOIN HangMucSuKien hm ON hm.MaHangMuc = dk.MaHangMuc WHERE dk.MaDangKy = ?`, [maDangKy]);

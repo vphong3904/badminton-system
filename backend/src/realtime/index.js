@@ -1,10 +1,10 @@
 // Khởi tạo Socket.IO (G8.0). Một instance Node, không Redis adapter.
 // Xác thực: JWT hiện có qua `auth: { token }` lúc bắt tay, kiểm tra y hệt middlewares/auth.js.
-// Phòng: user:{id} (tự vào) · admin (nếu vai trò admin) · phong:{id} (G8.2, `chat:vao`) · lich:{maCoSo}:{ngay}.
+// Phòng: user:{id} (tự vào) · chung (tự vào) · admin (nếu vai trò admin) · phong:{id} (G8.2, `chat:vao`) · lich:{maCoSo}:{ngay}.
 const { Server } = require('socket.io');
 const cauHinh = require('../config/env');
 const { xacThucToken } = require('../middlewares/auth');
-const { datIo, tenPhongNguoiDung, PHONG_ADMIN } = require('./phat');
+const { datIo, tenPhongNguoiDung, PHONG_ADMIN, PHONG_CHUNG } = require('./phat');
 const { dangKyXuLyLich } = require('./lich');
 const { dangKyXuLyChat } = require('./chat');
 
@@ -40,6 +40,7 @@ function khoiTaoRealtime(maychuHttp) {
   io.on('connection', (socket) => {
     const { maNguoiDung, vaiTro } = socket.data.nguoiDung;
     socket.join(tenPhongNguoiDung(maNguoiDung));
+    socket.join(PHONG_CHUNG);
     if (vaiTro === 'admin') socket.join(PHONG_ADMIN);
 
     // Token hết hạn khi đang kết nối: báo UNAUTHORIZED rồi ngắt; client lấy token mới và nối lại.

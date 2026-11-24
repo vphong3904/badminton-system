@@ -1,7 +1,10 @@
 const router=require('express').Router();
 const c=require('../controllers/communityController');
 const {xacThucNguoiDung,kiemTraVaiTro}=require('../middlewares/auth');
+const {taiAnhCongDong}=require('../middlewares/upload');
 router.use(xacThucNguoiDung,kiemTraVaiTro('customer'));
+// Tải ảnh bìa bài tìm người / ảnh đại diện nhóm: gọi lúc bấm Lưu, trả {duongDan} để gửi kèm khi tạo/sửa.
+router.post('/cong-dong/anh',taiAnhCongDong.single('tepAnh'),c.taiAnh);
 // Của tôi phải đứng trước /:id để tránh bị hiểu là mã.
 router.get('/tim-nguoi/cua-toi',c.cuaToiBai);
 router.get('/tim-nguoi',c.lietKeBai);

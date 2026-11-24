@@ -2,6 +2,8 @@ const { pool, thucHienGiaoDich } = require('../config/db');
 const cauHinh = require('../config/env');
 const { guiThongBao } = require('../services/notificationService');
 const { layCauHinhSo } = require('../services/cauHinhService');
+const suKien = require('../utils/suKien');
+const { phatDuLieuDoi } = require('../realtime/duLieu');
 
 const SO_DONG_TOI_DA_MOI_LAN = 200;
 let dangChay = false;
@@ -67,6 +69,55 @@ async function chayMotLan() {
       soThongBaoHetHan += 1;
     }
 
+    // Giống đặt sân (chotDonQuaGioChoi): khách đã gửi chứng từ mà đến HẾT GIỜ SỰ KIỆN chủ sân vẫn quên duyệt →
+    // hủy đăng ký, đưa khoản phí vào diện hoàn 100% (TrangThaiHoan='pending', chủ sân tự chuyển khoản hoàn).
+    // Quá HanXacNhan nhưng chưa hết giờ: chỉ cho khách khiếu nại "chậm duyệt", chủ sân vẫn duyệt muộn được.
+    const [cacKhoanQuaHanDuyet] = await ketNoi.query(
+      `SELECT t.MaThanhToan AS maThanhToan, dk.MaDangKy AS maDangKy, dk.MaKhachHang AS maKhachHang,
+         sk.MaChuSan AS maChuSan, sk.TieuDe AS tieuDe, t.SoTien AS soTien
+       FROM ThanhToanSuKien t
+       JOIN DangKySuKien dk ON dk.MaDangKy=t.MaDangKy
+       JOIN SuKien sk ON sk.MaSuKien=dk.MaSuKien
+       WHERE t.TrangThai='confirming' AND dk.TrangThai='accepted'
+         AND TIMESTAMP(sk.NgaySuKien, sk.GioKetThuc)<=NOW()
+       ORDER BY sk.NgaySuKien, t.MaThanhToan
+       LIMIT ? FOR UPDATE`,
+      [SO_DONG_TOI_DA_MOI_LAN]);
+
+    let soQuaHanDuyet = 0;
+    for (const muc of cacKhoanQuaHanDuyet) {
+      const [capNhat] = await ketNoi.query(
+        `UPDATE ThanhToanSuKien SET TrangThai='expired', TrangThaiHoan='pending'
+         WHERE MaThanhToan=? AND TrangThai='confirming'`,
+        [muc.maThanhToan]);
+      if (!capNhat.affectedRows) continue;
+      await ketNoi.query(
+        `UPDATE DangKySuKien
+         SET TrangThai='cancelled', NguoiHuy='system', LyDo=?, NgayHuy=NOW()
+         WHERE MaDangKy=? AND TrangThai='accepted'`,
+        [suKien.LY_DO_QUA_HAN_DUYET, muc.maDangKy]);
+      soQuaHanDuyet += 1;
+      const soTien = Number(muc.soTien).toLocaleString('vi-VN');
+      await guiThongBao(ketNoi, {
+        maNguoiDung: muc.maKhachHang,
+        loai: 'event_payment_expired',
+        tieuDe: 'Chủ sân chưa duyệt, bạn được hoàn 100% phí',
+        noiDung: `Chủ sân chưa xác nhận phí sự kiện "${muc.tieuDe}" đến hết giờ sự kiện. Khoản ${soTien}đ của bạn được hoàn 100%. Bạn cũng có thể khiếu nại vì chủ sân duyệt chậm trong mục Đăng ký của tôi.`,
+        loaiThamChieu: 'registration',
+        maThamChieu: muc.maDangKy,
+        khoa: `event_slow_review:${muc.maThanhToan}`,
+      });
+      await guiThongBao(ketNoi, {
+        maNguoiDung: muc.maChuSan,
+        loai: 'event_payment_expired',
+        tieuDe: 'Bạn quên duyệt phí sự kiện: cần hoàn 100% cho khách',
+        noiDung: `Phí sự kiện "${muc.tieuDe}" (${soTien}đ) chưa được xác nhận đến hết giờ sự kiện. Bạn cần tự chuyển khoản hoàn 100% cho khách, sau đó đánh dấu "đã hoàn phí".`,
+        loaiThamChieu: 'registration',
+        maThamChieu: muc.maDangKy,
+        khoa: `event_slow_review_owner:${muc.maThanhToan}`,
+      });
+    }
+
     // Nhắc một lần cho mỗi đăng ký (pending hoặc accepted) khi sự kiện bước vào cửa sổ nhắc.
     // NgayNhacNho + UNIQUE KhoaChongTrung là hai lớp chống gửi lặp khi job chạy nhiều lần.
     const gioNhac = await layCauHinhSo(ketNoi, 'event_reminder_hours', 24);
@@ -105,6 +156,7 @@ async function chayMotLan() {
       soSuKienDongDangKy: dongDangKy.affectedRows,
       soSuKienHoanThanh: hoanThanh.affectedRows,
       soPhiHetHan,
+      soQuaHanDuyet,
       soThongBaoHetHan,
       soThongBaoNhac,
     };
@@ -121,9 +173,12 @@ function batDauJob() {
     try {
       const ketQua = await chayMotLan();
       const tong = ketQua.soSuKienDongDangKy + ketQua.soSuKienHoanThanh
-        + ketQua.soPhiHetHan + ketQua.soThongBaoNhac;
+        + ketQua.soPhiHetHan + ketQua.soQuaHanDuyet + ketQua.soThongBaoNhac;
       if (tong) {
-        console.log(`[job-su-kien] đóng đăng ký ${ketQua.soSuKienDongDangKy}, finished ${ketQua.soSuKienHoanThanh}, hết hạn phí ${ketQua.soPhiHetHan}, nhắc ${ketQua.soThongBaoNhac}`);
+        // Trạng thái sự kiện / đăng ký đổi do job (đóng đăng ký, kết thúc, hết hạn phí…) → mọi màn tự tải lại.
+        phatDuLieuDoi('su-kien', { hanhDong: 'JOB' }, { chung: true });
+        phatDuLieuDoi('dang-ky-su-kien', { hanhDong: 'JOB' }, { chung: true });
+        console.log(`[job-su-kien] đóng đăng ký ${ketQua.soSuKienDongDangKy}, finished ${ketQua.soSuKienHoanThanh}, hết hạn phí ${ketQua.soPhiHetHan}, quá hạn duyệt ${ketQua.soQuaHanDuyet}, nhắc ${ketQua.soThongBaoNhac}`);
       }
     } catch (loi) {
       console.error('[job-su-kien] Lỗi:', loi.message);

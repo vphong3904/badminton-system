@@ -8,6 +8,7 @@ const AppError = require('../utils/AppError');
 //   uploads/avatar/  ảnh đại diện   tên: u<maNguoiDung>-<ms>-<4hex>.<jpg|png|webp>
 //   uploads/coso/    ảnh cơ sở      tên: cs<maCoSo>-<ms>-<4hex>.<jpg|png|webp>
 //   uploads/su-kien/ ảnh bìa sự kiện tên: sk<maSuKien>-<ms>-<4hex>.<jpg|png|webp>
+//   uploads/cong-dong/ ảnh bìa bài tìm người / ảnh đại diện nhóm  tên: cd<maNguoiDung>-<ms>-<4hex>.<jpg|png|webp>
 //   uploads/         (gốc) ảnh chứng từ chuyển khoản — giữ cách cũ
 // DB lưu đường dẫn tương đối `/tep-tai-len/<thuMuc>/<tên>`; chưa có ảnh → DB NULL, API trả ảnh mặc định.
 // Ảnh mặc định (có sẵn, KHÔNG BAO GIỜ xoá/ghi đè): avatar/default-user.jpg, coso/coso.jpg.
@@ -35,7 +36,9 @@ const taiTep = multer({
 });
 
 // Nhận file vào thư mục con với tên TẠM; tên chính thức đặt bởi luuAnh() khi đã biết mã (cơ sở / người dùng).
-const taoTaiAnh = (thuMuc) => multer({
+const taoTaiAnh = (thuMuc) => {
+  require('fs').mkdirSync(path.join(thuMucTepTaiLen, thuMuc), { recursive: true });
+  return multer({
   storage: multer.diskStorage({
     destination: path.join(thuMucTepTaiLen, thuMuc),
     filename: (_req, tep, goiLai) =>
@@ -44,9 +47,11 @@ const taoTaiAnh = (thuMuc) => multer({
   limits: GIOI_HAN,
   fileFilter: locAnh,
 });
+};
 const taiAnhDaiDien = taoTaiAnh('avatar');
 const taiAnhCoSo = taoTaiAnh('coso');
 const taiAnhSuKien = taoTaiAnh('su-kien');
+const taiAnhCongDong = taoTaiAnh('cong-dong');
 
 const layDuongDanTep = (tep) => (tep ? `${TIEN_TO_URL}/${tep.filename}` : null);
 
@@ -99,6 +104,6 @@ async function xoaAnhSuKien(duongDan) {
 }
 
 module.exports = {
-  taiTep, taiAnhDaiDien, taiAnhCoSo, taiAnhSuKien, layDuongDanTep, thuMucTepTaiLen,
+  taiTep, taiAnhDaiDien, taiAnhCoSo, taiAnhSuKien, taiAnhCongDong, layDuongDanTep, thuMucTepTaiLen,
   ANH_MAC_DINH, laAnhThat, luuAnh, xoaAnh, xoaAnhSuKien, taoTenAnh,
 };

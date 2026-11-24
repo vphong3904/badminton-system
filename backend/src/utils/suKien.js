@@ -214,10 +214,26 @@ function tinhTrangThaiHienThiSuKien({ trangThai, hanDangKy, soDaNhan, soToiDa },
   return { ma, nhan: NHAN_SU_KIEN[ma] ?? NHAN_SU_KIEN.cancelled };
 }
 
+// Hạng mục giải đấu giới hạn giới tính qua tên ("Đơn nam", "Đôi nữ"...). Tên có cả nam lẫn nữ
+// ("Đôi nam nữ", "Hỗn hợp") hoặc không nhắc giới tính → không giới hạn (null).
+function gioiTinhYeuCauCuaHangMuc(tenHangMuc) {
+  const ten = String(tenHangMuc || '').toLowerCase().replace(/đ/g, 'd')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (/\b(hon hop|mixed)\b/.test(ten)) return null;
+  const laNam = /\bnam\b/.test(ten);
+  const laNu = /\bnu\b/.test(ten);
+  if (laNam === laNu) return null;
+  return laNam ? 'male' : 'female';
+}
+
+// Lý do hệ thống ghi khi chủ sân quên duyệt chứng từ phí quá hạn (khách được hoàn 100%).
+const LY_DO_QUA_HAN_DUYET = 'Chu san qua han duyet phi su kien';
+
 module.exports = {
+  LY_DO_QUA_HAN_DUYET,
   BUOC_PHUT, PHI_TOI_DA_MAC_DINH, TRINH_DO, CHUYEN_SU_KIEN, CHUYEN_DANG_KY, NHAN_SU_KIEN,
   laTrinhDoHopLe, nhanTrinhDo, kiemTraKhoangTrinhDo, moTaKhoangTrinhDo, trinhDoNgoaiKhoang,
   thoiDiemVN, dinhDangGioVN, chuanHoaHanDangKy, kiemTraThoiGianSuKien, kiemTraSoLuongToiDa, kiemTraPhi,
   kiemTraChuyenTrangThaiSuKien, kiemTraChuyenTrangThaiDangKy, conCho, kiemTraMoDangKy,
-  tinhTrangThaiHienThiSuKien,
+  tinhTrangThaiHienThiSuKien, gioiTinhYeuCauCuaHangMuc,
 };

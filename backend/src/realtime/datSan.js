@@ -11,7 +11,8 @@ async function phatCapNhatDatSan(maDatSan) {
       `SELECT d.MaDatSan AS maDatSan,d.MaDon AS maDon,d.MaKhachHang AS maKhachHang,
          d.MaSan AS maSan,d.NgayChoi AS ngay,d.GioBatDau AS gioBatDau,d.GioKetThuc AS gioKetThuc,
          d.TrangThai AS trangThai,cs.MaCoSo AS maCoSo,cs.MaChuSan AS maChuSan,
-         CASE WHEN EXISTS (SELECT 1 FROM KhoaSan k WHERE k.MaSan=d.MaSan AND k.NgayKhoa=d.NgayChoi AND k.GioBatDau<d.GioKetThuc AND k.GioKetThuc>d.GioBatDau) THEN 'locked'
+         CASE WHEN EXISTS (SELECT 1 FROM KhoaSan k WHERE k.MaSan=d.MaSan AND k.NgayKhoa=d.NgayChoi AND k.MaSuKien IS NOT NULL AND k.GioBatDau<d.GioKetThuc AND k.GioKetThuc>d.GioBatDau) THEN 'event'
+              WHEN EXISTS (SELECT 1 FROM KhoaSan k WHERE k.MaSan=d.MaSan AND k.NgayKhoa=d.NgayChoi AND k.GioBatDau<d.GioKetThuc AND k.GioKetThuc>d.GioBatDau) THEN 'locked'
               WHEN EXISTS (SELECT 1 FROM DatSan d2 WHERE d2.MaSan=d.MaSan AND d2.NgayChoi=d.NgayChoi AND d2.TrangThai IN ('pending_payment','confirming','confirmed','checked_in') AND d2.GioBatDau<d.GioKetThuc AND d2.GioKetThuc>d.GioBatDau) THEN 'booked' ELSE 'available' END AS trangThaiSlot
        FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
        WHERE (d.MaLichCoDinh IS NOT NULL AND d.MaLichCoDinh=?) OR d.MaNhomDat=COALESCE(?,?) OR d.MaDatSan=?`, [goc.MaLichCoDinh, goc.MaNhomDat, maDatSan, maDatSan]);
@@ -37,9 +38,9 @@ async function phatMotSlot(maSan, ngay, gioBatDau, gioKetThuc) {
   try {
     const [[san]] = await pool.query('SELECT MaCoSo AS maCoSo FROM San WHERE MaSan=?', [maSan]);
     if (!san) return;
-    const [[khoa]] = await pool.query('SELECT MaKhoa FROM KhoaSan WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? LIMIT 1', [maSan, ngay, gioKetThuc, gioBatDau]);
+    const [[khoa]] = await pool.query('SELECT MaKhoa, MaSuKien FROM KhoaSan WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? ORDER BY (MaSuKien IS NOT NULL) DESC LIMIT 1', [maSan, ngay, gioKetThuc, gioBatDau]);
     const [[don]] = await pool.query("SELECT MaDatSan FROM DatSan WHERE MaSan=? AND NgayChoi=? AND TrangThai IN ('pending_payment','confirming','confirmed','checked_in') AND GioBatDau<? AND GioKetThuc>? LIMIT 1", [maSan, ngay, gioKetThuc, gioBatDau]);
-    phatLichSan(san.maCoSo, String(ngay).slice(0,10), [{ maSan: Number(maSan), gioBatDau: String(gioBatDau).slice(0,8), gioKetThuc: String(gioKetThuc).slice(0,8), trangThai: khoa ? 'locked' : don ? 'booked' : 'available' }]);
+    phatLichSan(san.maCoSo, String(ngay).slice(0,10), [{ maSan: Number(maSan), gioBatDau: String(gioBatDau).slice(0,8), gioKetThuc: String(gioKetThuc).slice(0,8), trangThai: khoa ? (khoa.MaSuKien ? 'event' : 'locked') : don ? 'booked' : 'available' }]);
   } catch (loi) { console.error('[realtime] Không phát được slot khóa sân:', loi.message); }
 }
 

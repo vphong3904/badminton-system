@@ -115,8 +115,7 @@ function sqlPhutDenGioChoiLucGui(d = 'd', t = 't') {
 //   gửi ảnh NGOÀI giờ mở cửa (CoSo.GioMoCua/GioDongCua) thì base tính từ LÚC MỞ CỬA kế tiếp
 //   (trước giờ mở → hôm nay; từ giờ đóng cửa trở đi → ngày mai). Giờ so sánh là NOW() của MySQL (+07:00).
 // Trả { han: 'YYYY-MM-DD HH:mm:ss', phut, gap, ngoaiGioMoCua }.
-async function tinhHanXacNhan(ketNoi, cungDot) {
-  const { phut, gap, gioChoiSom, gioMoCua, gioDongCua } = await tinhPhutXacNhan(ketNoi, cungDot);
+async function tinhHanTuThongSo(ketNoi, { phut, gioChoiSom, gioMoCua, gioDongCua }) {
   let han;
   let ngoaiGioMoCua = false;
   if (gioMoCua && gioDongCua) {
@@ -138,7 +137,26 @@ async function tinhHanXacNhan(ketNoi, cungDot) {
       [phut, gioChoiSom]);
     han = kq.han;
   }
+  return { han, ngoaiGioMoCua };
+}
+
+async function tinhHanXacNhan(ketNoi, cungDot) {
+  const { phut, gap, gioChoiSom, gioMoCua, gioDongCua } = await tinhPhutXacNhan(ketNoi, cungDot);
+  const { han, ngoaiGioMoCua } = await tinhHanTuThongSo(ketNoi, { phut, gioChoiSom, gioMoCua, gioDongCua });
   return { han, phut, gap, ngoaiGioMoCua };
+}
+
+// Sự kiện có phí dùng CÙNG quy tắc hạn xác nhận với đặt sân: base = gửi ảnh + confirm_minutes (gấp: confirm_urgent_minutes),
+// tính từ giờ mở cửa kế tiếp nếu gửi ngoài giờ, và không vượt quá giờ bắt đầu sự kiện.
+async function tinhHanXacNhanSuKien(ketNoi, maSuKien) {
+  const [[sk]] = await ketNoi.query(
+    `SELECT TIMESTAMP(sk.NgaySuKien, sk.GioBatDau) AS gioChoiSom, cs.GioMoCua AS gioMoCua, cs.GioDongCua AS gioDongCua,
+       TIMESTAMPDIFF(MINUTE, NOW(), TIMESTAMP(sk.NgaySuKien, sk.GioBatDau)) AS conPhut
+     FROM SuKien sk JOIN CoSo cs ON cs.MaCoSo = sk.MaCoSo WHERE sk.MaSuKien = ?`, [maSuKien]);
+  const { datGap: gap, soPhutXacNhan: phut } = danhGiaDatGap(sk?.conPhut, await docCauHinhDatGap(ketNoi));
+  const { han, ngoaiGioMoCua } = await tinhHanTuThongSo(ketNoi, {
+    phut, gioChoiSom: sk?.gioChoiSom ?? null, gioMoCua: sk?.gioMoCua ?? null, gioDongCua: sk?.gioDongCua ?? null });
+  return { han, phut, gap: !!gap, ngoaiGioMoCua };
 }
 
 async function demChungTu(ketNoi, maThanhToan) {
@@ -238,6 +256,7 @@ module.exports = {
   danhGiaDatGap,
   sqlPhutDenGioChoiLucGui,
   tinhHanXacNhan,
+  tinhHanXacNhanSuKien,
   demChungTu,
   themChungTu,
   chotKetQuaChungTu,

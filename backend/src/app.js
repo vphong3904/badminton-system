@@ -10,6 +10,7 @@ const xuLyBatDongBo = require('./utils/asyncHandler');
 const { thanhCong } = require('./utils/response');
 const { thuMucTepTaiLen } = require('./middlewares/upload');
 const { khongTimThayDuongDan, xuLyLoi } = require('./middlewares/errorHandler');
+const { tuDongPhat } = require('./realtime/tuDongPhat');
 
 const ungDung = express();
 ungDung.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -46,6 +47,8 @@ ungDung.get('/api/suc-khoe/co-so-du-lieu', xuLyBatDongBo(async (_yeuCau, phanHoi
   await pool.query('SELECT 1');
   thanhCong(phanHoi, { tenCoSoDuLieu: 'db_sancaulong', trangThai: 'ok' });
 }));
+// Realtime: sau mỗi yêu cầu ghi thành công → phát `du-lieu:doi` (xem realtime/tuDongPhat.js).
+ungDung.use('/api', tuDongPhat);
 ungDung.use('/api', require('./routes/suKien'));
 ungDung.use('/api/tai-khoan', require('./routes/auth'));
 ungDung.use('/api/khach', require('./routes/customer'));

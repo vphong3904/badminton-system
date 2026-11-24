@@ -75,14 +75,20 @@ exports.dangKy = xuLyBatDongBo(async (req, res) => {
   daTao(res, await dichVuKhach.dangKySuKien(
     req.nguoiDung.maNguoiDung, req.params.maSuKien, req.body));
 });
+exports.xemTruocHuyDangKy = xuLyBatDongBo(async (req, res) => {
+  thanhCong(res, await dichVuKhach.xemTruocHuyDangKy(req.nguoiDung.maNguoiDung, req.params.maDangKy));
+});
 exports.rutDangKy = xuLyBatDongBo(async (req, res) => {
-  thanhCong(res, await dichVuKhach.rutDangKy(req.nguoiDung.maNguoiDung, req.params.maDangKy));
+  thanhCong(res, await dichVuKhach.rutDangKy(req.nguoiDung.maNguoiDung, req.params.maDangKy, req.body?.taiKhoanHoan ?? null));
 });
 exports.dangKyCuaToi = xuLyBatDongBo(async (req, res) => {
   thanhCong(res, await dichVuKhach.lietKeDangKyCuaToi(req.nguoiDung.maNguoiDung, req.query));
 });
 exports.hoaDon = xuLyBatDongBo(async (req, res) => {
   thanhCong(res, await dichVuKhach.layHoaDonSuKien(req.nguoiDung.maNguoiDung, req.params.maDangKy));
+});
+exports.batDauThanhToan = xuLyBatDongBo(async (req, res) => {
+  thanhCong(res, await dichVuKhach.batDauThanhToanSuKien(req.nguoiDung.maNguoiDung, req.params.maDangKy));
 });
 exports.guiChungTu = xuLyBatDongBo(async (req, res) => {
   thanhCong(res, await dichVuKhach.guiChungTuSuKien(

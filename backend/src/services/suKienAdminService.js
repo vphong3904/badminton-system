@@ -124,6 +124,20 @@ async function taoBaoCaoSuKien(maNguoiBaoCao, { maSuKien, lyDo, noiDung }) {
        FROM SuKien WHERE MaSuKien=? FOR UPDATE`, [maSuKien]);
     if (!sk) throw AppError.khongTimThay('Không tìm thấy sự kiện');
 
+    // "Chậm duyệt": chỉ khiếu nại được khi chủ sân đã quên duyệt chứng từ phí của chính khách này quá hạn.
+    if (lyDo === 'slow_approval') {
+      const [[quaHan]] = await ketNoi.query(
+        `SELECT dk.MaDangKy AS maDangKy FROM DangKySuKien dk
+           JOIN ThanhToanSuKien tt ON tt.MaDangKy = dk.MaDangKy
+         WHERE dk.MaSuKien=? AND dk.MaKhachHang=?
+           AND ((tt.TrangThai='confirming' AND tt.HanXacNhan IS NOT NULL AND tt.HanXacNhan < NOW())
+             OR (dk.NguoiHuy='system' AND dk.LyDo=?))
+         LIMIT 1`, [maSuKien, maNguoiBaoCao, require('../utils/suKien').LY_DO_QUA_HAN_DUYET]);
+      if (!quaHan) {
+        throw AppError.duLieuKhongHopLe('Chỉ khiếu nại được khi chủ sân chưa duyệt phí của bạn quá hạn xác nhận.');
+      }
+    }
+
     const [[daBaoCao]] = await ketNoi.query(
       `SELECT MaBaoCao AS maBaoCao FROM BaoCaoViPham
        WHERE MaNguoiBaoCao=? AND LoaiDoiTuong='event' AND MaDoiTuong=?`, [maNguoiBaoCao, maSuKien]);
@@ -135,8 +149,8 @@ async function taoBaoCaoSuKien(maNguoiBaoCao, { maSuKien, lyDo, noiDung }) {
     const maBaoCao = Number(ketQua.insertId);
     await guiChoQuanTri(ketNoi, {
       loai: 'complaint_received',
-      tieuDe: 'Báo cáo vi phạm sự kiện mới',
-      noiDung: `Có báo cáo mới về sự kiện “${sk.tieuDe}” (#${maSuKien}). Vui lòng kiểm tra trong mục Cộng đồng.`,
+      tieuDe: lyDo === 'slow_approval' ? 'Khiếu nại sự kiện: chủ sân duyệt chậm' : 'Báo cáo vi phạm sự kiện mới',
+      noiDung: `Có ${lyDo === 'slow_approval' ? 'khiếu nại (chủ sân duyệt chậm)' : 'báo cáo mới'} về sự kiện “${sk.tieuDe}” (#${maSuKien}). Vui lòng kiểm tra trong mục Cộng đồng.`,
       loaiThamChieu: 'event', maThamChieu: Number(maSuKien),
       khoa: `event_report_received:${maBaoCao}`,
     });

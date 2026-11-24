@@ -112,6 +112,9 @@ const soDienThoaiPhu = z.union([z.string(), z.null()]).optional().transform((g, 
 });
 const matKhauMoi = tuHamKiem(kiemTraMatKhauMoi, (g) => g, 'Vui lòng nhập mật khẩu.');
 const ghiChu = tuHamKiem(kiemTraGhiChu, (g) => g.trim(), 'Ghi chú tối đa 500 ký tự.');
+// Giới tính: male = Nam, female = Nữ. Cột DB cho phép NULL (tài khoản cũ), nhưng FE bắt buộc chọn khi đăng ký.
+const THONG_BAO_GIOI_TINH = 'Vui lòng chọn giới tính (Nam hoặc Nữ).';
+const gioiTinh = z.enum(['male', 'female'], { error: THONG_BAO_GIOI_TINH });
 
 module.exports = {
   MAU_DI_DONG,
@@ -125,4 +128,6 @@ module.exports = {
   soDienThoaiPhu,
   matKhauMoi,
   ghiChu,
+  THONG_BAO_GIOI_TINH,
+  gioiTinh,
 };

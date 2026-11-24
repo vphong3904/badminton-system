@@ -49,9 +49,11 @@ khach.use(
 khach.get('/su-kien', kiemTraHopLe(kiemTraDuLieu.danhSachKhach), dieuKhien.lietKeCongKhai);
 khach.get('/su-kien/:maSuKien', kiemTraHopLe(kiemTraDuLieu.chiTietKhach), dieuKhien.chiTietCongKhai);
 khach.post('/su-kien/:maSuKien/dang-ky', kiemTraHopLe(kiemTraDuLieu.dangKyKhach), dieuKhien.dangKy);
-khach.delete('/dang-ky-su-kien/:maDangKy', kiemTraHopLe(kiemTraDuLieu.rutDangKy), dieuKhien.rutDangKy);
+khach.get('/dang-ky-su-kien/:maDangKy/huy-xem-truoc', kiemTraHopLe(kiemTraDuLieu.rutDangKy), dieuKhien.xemTruocHuyDangKy);
+khach.delete('/dang-ky-su-kien/:maDangKy', kiemTraHopLe(kiemTraDuLieu.huyDangKy), dieuKhien.rutDangKy);
 khach.get('/dang-ky-su-kien', kiemTraHopLe(kiemTraDuLieu.dangKyCuaToi), dieuKhien.dangKyCuaToi);
 khach.get('/dang-ky-su-kien/:maDangKy/thanh-toan', kiemTraHopLe(kiemTraDuLieu.rutDangKy), dieuKhien.hoaDon);
+khach.post('/dang-ky-su-kien/:maDangKy/thanh-toan/bat-dau', kiemTraHopLe(kiemTraDuLieu.rutDangKy), dieuKhien.batDauThanhToan);
 khach.post('/dang-ky-su-kien/:maDangKy/thanh-toan/chung-tu',
   taiTep.single('anhChungTu'), kiemTraChungTuVaDonDep, dieuKhien.guiChungTu);
 

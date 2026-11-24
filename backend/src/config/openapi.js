@@ -260,7 +260,7 @@ module.exports = {
         'Đặt nhiều sân / nhiều khung giờ trong MỘT cơ sở, MỘT ngày, thanh toán 1 QR. Tất cả hoặc không: '
         + 'các mục liền kề cùng sân được gộp thành cụm, mỗi cụm là 1 đơn con (cùng maNhomDat, cùng hetHanGiuCho). '
         + '400 cụm ngắn hơn tối thiểu (chiTiet.cacCumNgan[]: maSan/ngay/gioBatDau/gioKetThuc/soPhut/soPhutToiThieu); '
-        + '409 CONFLICT kèm chiTiet.cacCumTrung (đủ mọi cụm trùng, lyDo booked|locked) và không giữ cụm nào; '
+        + '409 CONFLICT kèm chiTiet.cacCumTrung (đủ mọi cụm trùng, lyDo booked|locked|event) và không giữ cụm nào; '
         + '429 ABUSE_HOLD_BLOCKED khi khách hủy/để hết hạn ≥ abuse_threshold đợt trong abuse_window_hours (chiTiet: soLan/nguong/gioCuaSo/chanDen)',
         'Khách hàng',
         { auth: true, body: 'DatNhieuSan', responses: { 404: response.Loi, 409: response.Loi, 429: response.Loi, 503: response.Loi } }),
@@ -288,7 +288,14 @@ module.exports = {
       post: endpoint(
         'Từ chối việc chủ sân chuyển sân (G9.E6): huỷ các buổi ĐÃ BỊ CHUYỂN SÂN (MaSanCu khác NULL), còn hiệu lực, chưa tới giờ chơi của đợt chứa đơn, '
         + 'hoàn 100% NGAY (HoanTien.Loai=closure, hạn 30 phút), không áp chính sách 24h/12h, không bắt nhập tài khoản nhận hoàn. '
-        + 'Lỗi 409: BOOKING_NOT_MOVED, BOOKING_STARTED, PAYMENT_CONFIRMING, REFUND_PENDING, PARTIAL_CANCEL_UNPAID',
+        + 'Lỗi 409: BOOKING_NOT_MOVED, BOOKING_STARTED, PAYMENT_CONFIRMING, REFUND_PENDING, PARTIAL_CANCEL_UNPAID, MOVE_ALREADY_ACCEPTED (đã đồng ý)',
+        'Khách hàng',
+        { auth: true, params: maDatSan, responses: { 409: response.Loi } }),
+    },
+    '/api/khach/dat-san/{maDatSan}/dong-y-chuyen-san': {
+      post: endpoint(
+        'Khách ĐỒNG Ý việc chủ sân chuyển sân (G9.H): ghi nhận cho mọi buổi của đợt đã bị chuyển sân, còn hiệu lực, chưa tới giờ chơi; sau đó không còn từ chối được '
+        + '(chủ sân chuyển lại thì reset). Không đổi tiền/trạng thái đơn. Lỗi 409: BOOKING_NOT_MOVED, BOOKING_STARTED, MOVE_ALREADY_ACCEPTED',
         'Khách hàng',
         { auth: true, params: maDatSan, responses: { 409: response.Loi } }),
     },
@@ -490,10 +497,11 @@ module.exports = {
       delete: endpoint('Xoá MỀM sân (G9.F3: DaXoa=1, vẫn giữ đơn/báo cáo cũ; sân đã từng có đơn xoá được; phải đóng trước; 409 HAS_ACTIVE_BOOKINGS / HAS_ACTIVE_EVENTS nếu còn đơn, lịch cố định hoặc sự kiện sắp diễn ra; sân đã xoá → 404; tên sân được dùng lại)', 'Chủ sân', { auth: true, params: maSan, body: 'LyDoDongXoa', responses: { 409: response.Loi } }),
     },
     '/api/chu-san/khoa-san': {
-      get: endpoint('Liệt kê khung giờ khóa sân', 'Chủ sân', {
+      get: endpoint('Liệt kê khung giờ khóa sân. Mỗi dòng có loai = su-kien (sân giữ cho sự kiện, kèm maSuKien/tieuDeSuKien) | thu-cong', 'Chủ sân', {
         auth: true,
         query: [
           thamSoTruyVan('maSan', 'Mã sân'),
+          thamSoTruyVan('maCoSo', 'Mã cơ sở (lọc các sân của cơ sở)'),
           thamSoTruyVan('tuNgay', 'Thời gian bắt đầu lọc'),
           thamSoTruyVan('denNgay', 'Thời gian kết thúc lọc'),
         ],
@@ -1021,7 +1029,9 @@ module.exports = {
     '/api/khach/su-kien/{maSuKien}': { get: endpoint('Khách xem chi tiết công khai, chỉ hiển thị số lượng người đăng ký', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maSuKien')] }) },
     '/api/khach/su-kien/{maSuKien}/dang-ky': { post: endpoint('Khách đăng ký sự kiện', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maSuKien')], body: 'DangKySuKien', responses: { 409: response.Loi } }) },
     '/api/khach/dang-ky-su-kien': { get: endpoint('Khách xem danh sách đăng ký của chính mình', 'Sự kiện', { auth: true, query: [thamSoTruyVan('trangThai', 'pending | accepted | cancelled | rejected'), thamSoTruyVan('trang', 'Trang'), thamSoTruyVan('soLuong', '1–50')] }) },
-    '/api/khach/dang-ky-su-kien/{maDangKy}': { delete: endpoint('Khách rút đăng ký trước giờ bắt đầu', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], responses: { 409: response.Loi } }) },
+    '/api/khach/dang-ky-su-kien/{maDangKy}/huy-xem-truoc': { get: endpoint('Xem trước hủy đăng ký sự kiện: số tiền hoàn theo chính sách (>=24h 100%, 12-24h 50%, <12h không hoàn), không ghi DB', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], responses: { 409: response.Loi } }) },
+    '/api/khach/dang-ky-su-kien/{maDangKy}': { delete: endpoint('Khách hủy (rút) đăng ký trước giờ bắt đầu; phí đã trả được hoàn theo chính sách hoàn tiền; có hoàn thì BẮT BUỘC body {taiKhoanHoan:{maNganHang, soTaiKhoan, chuTaiKhoan}} (thiếu → 400)', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], responses: { 409: response.Loi } }) },
+    '/api/khach/dang-ky-su-kien/{maDangKy}/thanh-toan/bat-dau': { post: endpoint('Khách bấm Xác nhận & thanh toán: bắt đầu đếm ngược 10 phút (một lần)', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')], responses: { 409: response.Loi } }) },
     '/api/khach/dang-ky-su-kien/{maDangKy}/thanh-toan': { get: endpoint('Khách xem hóa đơn phí sự kiện và QR VietQR', 'Sự kiện', { auth: true, params: [thamSoDuongDan('maDangKy')] }) },
     '/api/khach/dang-ky-su-kien/{maDangKy}/thanh-toan/chung-tu': {
       post: {
@@ -1075,6 +1085,7 @@ module.exports = {
           hoTen: { type: 'string', minLength: 2, maxLength: 100, description: 'Chỉ chữ cái, khoảng trắng và . \' -', example: 'Nguyen Van A' },
           soDienThoai: { type: 'string', pattern: '^0[35789][0-9]{8}$', description: 'Số di động VN; nhận cả +84 và tự chuẩn hoá về 0xxxxxxxxx', example: '0901234567' },
           email: { type: 'string', format: 'email', example: 'khach@example.com' },
+          gioiTinh: { type: 'string', enum: ['male', 'female'], description: 'male = Nam, female = Nữ. App bắt buộc chọn; BE nhận thiếu (client cũ) và lưu NULL' },
         },
       },
       DangKyChuSan: {
@@ -1118,6 +1129,7 @@ module.exports = {
           hoTen: { type: 'string' },
           soDienThoai: { type: 'string' },
           email: { type: 'string', format: 'email' },
+          gioiTinh: { type: 'string', enum: ['male', 'female'], description: 'male = Nam, female = Nữ' },
         },
       },
       DatSan: {
@@ -1195,7 +1207,7 @@ module.exports = {
         type: 'object', required: ['maSuKien', 'lyDo'],
         properties: {
           maSuKien: { type: 'integer', minimum: 1 },
-          lyDo: { type: 'string', enum: ['misleading', 'fraud', 'inappropriate', 'other'] },
+          lyDo: { type: 'string', enum: ['misleading', 'fraud', 'inappropriate', 'other', 'slow_approval'] },
           noiDung: { type: 'string', maxLength: 500 },
         },
       },
@@ -1505,7 +1517,7 @@ module.exports = {
           loaiDoiTuong: { type: 'string', enum: ['event','player_post','team'], default: 'event' },
           maSuKien: { type: 'integer', description: 'Dùng cho event (tương thích API cũ)' },
           maDoiTuong: { type: 'integer', description: 'Mã bài hoặc đội nhóm' },
-          lyDo: { type: 'string', enum: ['misleading','fraud','inappropriate','other'] }, noiDung: { type: 'string', maxLength: 500 },
+          lyDo: { type: 'string', enum: ['misleading','fraud','inappropriate','other','slow_approval'] }, noiDung: { type: 'string', maxLength: 500 },
         },
       },
       XuLyBaoCaoCongDong: { type: 'object', required: ['quyetDinh','ghiChu'], properties: { quyetDinh: { type: 'string', enum: ['upheld','rejected'] }, hanhDong: { type: 'string', enum: ['hide','remove','none'] }, ghiChu: { type: 'string', minLength: 3, maxLength: 500 } } },

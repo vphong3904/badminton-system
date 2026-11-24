@@ -113,6 +113,20 @@ exports.dangKyKhach = {
   }),
 };
 exports.rutDangKy = { params: z.object({ maDangKy: maSo }) };
+// Hủy đăng ký: có tiền hoàn thì body PHẢI có taiKhoanHoan (BE kiểm tra lại theo số tiền hoàn thật).
+exports.huyDangKy = {
+  params: z.object({ maDangKy: maSo }),
+  body: z.object({
+    taiKhoanHoan: z.object({
+      maNganHang: z.string({ error: 'Vui lòng chọn ngân hàng.' }).trim().min(2, 'Vui lòng chọn ngân hàng.').max(20),
+      soTaiKhoan: z.string({ error: 'Số tài khoản chỉ gồm 6–30 chữ số.' })
+        .transform((giaTri) => giaTri.replace(/[\s-]/g, ''))
+        .pipe(z.string().regex(/^\d{6,30}$/, 'Số tài khoản chỉ gồm 6–30 chữ số.')),
+      chuTaiKhoan: z.string({ error: 'Vui lòng nhập tên chủ tài khoản.' }).trim()
+        .min(2, 'Vui lòng nhập tên chủ tài khoản.').max(100, 'Tên chủ tài khoản tối đa 100 ký tự.'),
+    }).optional(),
+  }).default({}),
+};
 exports.dangKyCuaToi = {
   query: z.object({ trangThai: z.enum(['pending', 'accepted', 'cancelled', 'rejected']).optional(), ...phanTrang }),
 };

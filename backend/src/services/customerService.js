@@ -456,10 +456,10 @@ async function taoDatNhieuSan(maNguoiDung, duLieu) {
       let lyDo = donTrung ? 'booked' : null;
       if (!lyDo) {
         const [[khoaTrung]] = await ketNoi.query(
-          `SELECT MaKhoa FROM KhoaSan
+          `SELECT MaKhoa, MaSuKien FROM KhoaSan
            WHERE MaSan=? AND NgayKhoa=? AND GioBatDau<? AND GioKetThuc>? LIMIT 1 FOR UPDATE`,
           [cum.maSan, cum.ngay, cum.gioKetThuc, cum.gioBatDau]);
-        if (khoaTrung) lyDo = 'locked';
+        if (khoaTrung) lyDo = khoaTrung.MaSuKien ? 'event' : 'locked';
       }
       if (lyDo) {
         cacCumTrung.push({
@@ -844,7 +844,9 @@ async function layLichNgay(maCoSo, ngay) {
     [maCoSo, ngay]);
   const [cacKhoa] = await pool.query(
     `SELECT k.MaSan AS maSan, k.GioBatDau AS gioBatDau, k.GioKetThuc AS gioKetThuc,
+       (k.MaSuKien IS NOT NULL) AS laSuKien,
        CASE WHEN k.MaSuKien IS NOT NULL AND sk.BiAn=1 THEN 'Sân được giữ cho sự kiện'
+         WHEN k.MaSuKien IS NOT NULL THEN CONCAT('Sự kiện: ', sk.TieuDe)
          ELSE k.LyDo END AS lyDo
      FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
        LEFT JOIN SuKien sk ON sk.MaSuKien=k.MaSuKien
@@ -856,11 +858,12 @@ async function layLichNgay(maCoSo, ngay) {
      ORDER BY GioBatDau`,
     [maCoSo, thuTuNgay(ngay)]);
   const gioNgan = (gio) => String(gio).slice(0, 5);
+  // loai: 'booked' (đơn) · 'locked' (chủ sân khóa tay) · 'event' (sân được giữ cho sự kiện — app tô màu tím, chú thích "Sự kiện").
   const khungBan = (danhSach, loai, maSan) => danhSach
     .filter((muc) => muc.maSan === maSan)
     .map((muc) => ({
       gioBatDau: gioNgan(muc.gioBatDau), gioKetThuc: gioNgan(muc.gioKetThuc), loai,
-      ...(loai === 'locked' && muc.lyDo ? { lyDo: muc.lyDo } : {}),
+      ...(loai !== 'booked' && muc.lyDo ? { lyDo: muc.lyDo } : {}),
     }));
   return {
     maCoSo: coSo.maCoSo,
@@ -878,7 +881,8 @@ async function layLichNgay(maCoSo, ngay) {
       tamDong: !!Number(san.tamDong),
       cacKhungBan: san.tamDong ? [] : [
         ...khungBan(cacDon, 'booked', san.maSan),
-        ...khungBan(cacKhoa, 'locked', san.maSan),
+        ...khungBan(cacKhoa.filter((k) => !Number(k.laSuKien)), 'locked', san.maSan),
+        ...khungBan(cacKhoa.filter((k) => Number(k.laSuKien)), 'event', san.maSan),
       ],
     })),
     bangGia: bangGia.map((khung) => ({
@@ -908,6 +912,7 @@ async function lietKeDatSan(maNguoiDung) {
        s.MaSan AS maSan, s.TenSan AS tenSan,
        -- G9.E: đơn bị chủ sân chuyển sân (sân cũ lấy cả sân đã xoá mềm để vẫn hiện tên)
        d.MaSanCu AS maSanCu, sc.TenSan AS tenSanCu, d.NgayChuyenSan AS ngayChuyenSan,
+       d.NgayKhachDongYChuyen AS ngayDongYChuyenSan,
        (TIMESTAMP(d.NgayChoi, d.GioBatDau) <= NOW()) AS daDenGio,
        -- còn buổi nào của đợt hiệu lực mà KHÔNG nằm trong phạm vi từ chối chuyển sân (chưa chuyển / đã tới giờ)
        EXISTS (SELECT 1 FROM DatSan y WHERE d.MaSanCu IS NOT NULL
@@ -981,7 +986,10 @@ async function lietKeDatSan(maNguoiDung) {
     // chưa tới giờ chơi, chưa gửi ảnh chờ duyệt, không còn khoản hoàn dở, chưa trả tiền thì không còn buổi nào ngoài phạm vi chuyển).
     const hieuLuc = ['pending_payment', 'confirmed'].includes(don.trangThai);
     const dangHoanDo = ['waiting_info', 'processing', 'not_received', 'escalated'].includes(don.trangThaiHoanTienChiTiet);
-    const coTheTuChoiChuyenSan = don.maSanCu != null && hieuLuc && !Number(daDenGio)
+    // G9.H: khách đã bấm "Đồng ý chuyển sân" thì chốt, không còn nút từ chối (chủ sân chuyển lại thì reset).
+    const daDongYChuyenSan = don.maSanCu != null && don.ngayDongYChuyenSan != null;
+    const coTheDongYChuyenSan = don.maSanCu != null && hieuLuc && !Number(daDenGio) && !daDongYChuyenSan;
+    const coTheTuChoiChuyenSan = don.maSanCu != null && hieuLuc && !Number(daDenGio) && !daDongYChuyenSan
       && don.trangThaiThanhToan !== 'confirming' && !dangHoanDo
       && !(don.trangThaiThanhToan === 'pending' && Number(conBuoiNgoaiPhamViChuyen));
     // G9: hạn hoàn để nêu cho khách (null khi đơn không có khoản hoàn hoặc late_proof do Admin xử lý).
@@ -1020,6 +1028,8 @@ async function lietKeDatSan(maNguoiDung) {
         coTheSuaDanhGia: daDanhGia && !Number(danhGiaBiAn) && !!Number(trongHanSuaDanhGia),
       }),
       daChuyenSan: don.maSanCu != null,
+      daDongYChuyenSan,
+      coTheDongYChuyenSan,
       coTheTuChoiChuyenSan,
       loaiHoanTien: loaiHoanTienTho || null,
       hanHoanPhut,
@@ -1351,6 +1361,7 @@ async function tuChoiChuyenSan(maNguoiDung, maDatSan) {
     const [cacBuoiDot] = await ketNoi.query(
       `SELECT d.MaDatSan AS maDatSan, DATE_FORMAT(d.NgayChoi, '%Y-%m-%d') AS ngay, TIME_FORMAT(d.GioBatDau, '%H:%i') AS gioBatDau,
          TIME_FORMAT(d.GioKetThuc, '%H:%i') AS gioKetThuc, d.TongTien AS tongTien, d.TrangThai AS trangThai, d.MaSanCu AS maSanCu,
+         d.NgayKhachDongYChuyen AS ngayDongY,
          (TIMESTAMP(d.NgayChoi, d.GioBatDau) <= NOW()) AS daDenGio, s.TenSan AS tenSan
        FROM DatSan d JOIN San s ON s.MaSan = d.MaSan
        WHERE ${don.maLichCoDinh ? 'd.MaLichCoDinh = ?' : 'COALESCE(d.MaNhomDat, d.MaDatSan) = ? AND d.MaLichCoDinh IS NULL'}
@@ -1366,6 +1377,9 @@ async function tuChoiChuyenSan(maNguoiDung, maDatSan) {
     }
     if (Number(buoiNay.daDenGio)) {
       throw AppError.biTrung('Đơn đã đến giờ chơi hoặc đã qua, không thể từ chối chuyển sân.', 'BOOKING_STARTED');
+    }
+    if (buoiNay.ngayDongY) {
+      throw AppError.biTrung('Bạn đã đồng ý việc chuyển sân này nên không thể từ chối nữa.', 'MOVE_ALREADY_ACCEPTED');
     }
     if (thanhToan?.trangThai === 'confirming') {
       throw AppError.biTrung(
@@ -1459,6 +1473,60 @@ async function tuChoiChuyenSan(maNguoiDung, maDatSan) {
       thongBao: soTienHoan > 0
         ? 'Đã huỷ đơn. Chủ sân sẽ hoàn 100% tiền cho bạn; bạn có thể bổ sung tài khoản nhận hoàn để được chuyển nhanh.'
         : 'Đã huỷ đơn do bạn từ chối chuyển sân.',
+    };
+  });
+}
+
+// G9.H: khách ĐỒNG Ý việc chủ sân chuyển sân. Ghi nhận cho mọi buổi của ĐỢT đã bị chuyển sân, còn hiệu lực, chưa tới giờ chơi;
+// sau đó không còn từ chối được (chủ sân chuyển lại thì reset). Không đổi tiền/trạng thái đơn.
+// Lỗi 409: BOOKING_NOT_MOVED, BOOKING_STARTED, MOVE_ALREADY_ACCEPTED.
+async function dongYChuyenSan(maNguoiDung, maDatSan) {
+  return thucHienGiaoDich(async (ketNoi) => {
+    const [[don]] = await ketNoi.query(
+      `SELECT d.MaDatSan AS maDatSan, d.MaDon AS maDon, d.MaLichCoDinh AS maLichCoDinh, d.TrangThai AS trangThai,
+         d.MaSanCu AS maSanCu, d.NgayKhachDongYChuyen AS ngayDongY, COALESCE(d.MaNhomDat, d.MaDatSan) AS maNhom,
+         (TIMESTAMP(d.NgayChoi, d.GioBatDau) <= NOW()) AS daDenGio
+       FROM DatSan d WHERE d.MaDatSan=? AND d.MaKhachHang=? FOR UPDATE`, [maDatSan, maNguoiDung]);
+    if (!don) throw AppError.khongTimThay('Không tìm thấy đơn đặt sân');
+    if (!['pending_payment', 'confirmed'].includes(don.trangThai)) {
+      throw AppError.biTrung('Đơn đặt sân không thể đồng ý chuyển sân ở trạng thái hiện tại');
+    }
+    if (don.maSanCu == null) {
+      throw AppError.biTrung('Đơn này chưa bị chủ sân chuyển sân nên không có gì để đồng ý.', 'BOOKING_NOT_MOVED');
+    }
+    if (Number(don.daDenGio)) {
+      throw AppError.biTrung('Đơn đã đến giờ chơi hoặc đã qua, không cần đồng ý chuyển sân.', 'BOOKING_STARTED');
+    }
+    if (don.ngayDongY) {
+      throw AppError.biTrung('Bạn đã đồng ý việc chuyển sân này rồi.', 'MOVE_ALREADY_ACCEPTED');
+    }
+    const [cacBuoi] = await ketNoi.query(
+      `SELECT d.MaDatSan AS maDatSan FROM DatSan d
+       WHERE ${don.maLichCoDinh ? 'd.MaLichCoDinh = ?' : 'COALESCE(d.MaNhomDat, d.MaDatSan) = ? AND d.MaLichCoDinh IS NULL'}
+         AND d.TrangThai IN ('pending_payment','confirmed') AND d.MaSanCu IS NOT NULL
+         AND d.NgayKhachDongYChuyen IS NULL AND TIMESTAMP(d.NgayChoi, d.GioBatDau) > NOW() FOR UPDATE`,
+      [don.maLichCoDinh ?? don.maNhom]);
+    const cacMa = cacBuoi.map((b) => Number(b.maDatSan));
+    if (!cacMa.length) throw AppError.biTrung('Không còn buổi nào cần đồng ý chuyển sân.', 'BOOKING_NOT_MOVED');
+    await ketNoi.query(
+      `UPDATE DatSan SET NgayKhachDongYChuyen = NOW() WHERE MaDatSan IN (${cacMa.map(() => '?').join(',')})`, cacMa);
+    const [[thongTin]] = await ketNoi.query(
+      `SELECT d.MaDon AS maDon, d.TenKhach AS tenKhach, cs.TenCoSo AS tenCoSo, cs.MaChuSan AS maChuSan
+       FROM DatSan d JOIN San s ON s.MaSan=d.MaSan JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo WHERE d.MaDatSan=?`, [maDatSan]);
+    if (thongTin) {
+      await guiThongBao(ketNoi, {
+        maNguoiDung: thongTin.maChuSan, loai: 'booking_moved', tieuDe: 'Khách đồng ý chuyển sân',
+        noiDung: `${thongTin.tenKhach} đã đồng ý việc chuyển sân của ${cacMa.length} buổi thuộc đơn ${thongTin.maDon} - ${thongTin.tenCoSo}.`,
+        loaiThamChieu: 'booking', maThamChieu: cacMa[0], khoa: `dong_y_chuyen_san_owner:${cacMa[0]}:${Date.now()}`,
+      });
+    }
+    await nhatKy.ghiNhatKy(ketNoi, {
+      maNguoiThucHien: maNguoiDung, hanhDong: 'dong_y_chuyen_san', doiTuong: 'DatSan', maDoiTuong: Number(maDatSan),
+      chiTiet: `Khách đồng ý chuyển sân ${cacMa.length} buổi của đơn ${thongTin?.maDon} (${cacMa.join(',')})`,
+    });
+    return {
+      daDongY: true, maDatSan: Number(maDatSan), maDon: thongTin?.maDon ?? don.maDon, cacBuoiDaDongY: cacMa,
+      thongBao: 'Đã ghi nhận bạn đồng ý việc chuyển sân.',
     };
   });
 }
@@ -1687,6 +1755,7 @@ module.exports = {
   layHoaDonNhap,
   huyDatSan,
   tuChoiChuyenSan,
+  dongYChuyenSan,
   xemTruocHuy,
   capNhatTaiKhoanHoan,
   layDanhSachDanhGia,

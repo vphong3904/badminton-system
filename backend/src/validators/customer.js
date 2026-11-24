@@ -221,7 +221,7 @@ exports.baoCaoSuKien = {
     maSuKien: maSo.optional(),
     loaiDoiTuong: z.enum(['event', 'player_post', 'team']).optional(),
     maDoiTuong: maSo.optional(),
-    lyDo: z.enum(['misleading', 'fraud', 'inappropriate', 'other'], { error: 'Vui lòng chọn lý do báo cáo.' }),
+    lyDo: z.enum(['misleading', 'fraud', 'inappropriate', 'other', 'slow_approval'], { error: 'Vui lòng chọn lý do báo cáo.' }),
     noiDung: z.string().trim().max(500, 'Nội dung tối đa 500 ký tự.').optional(),
   }).superRefine((d, ctx) => {
     const loai = d.loaiDoiTuong || 'event';

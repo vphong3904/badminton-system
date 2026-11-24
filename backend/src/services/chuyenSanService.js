@@ -142,7 +142,7 @@ async function chuyenMotBuoi(ketNoi, san, don, { maSanMoi = null, uuTien = null 
   }
   if (!sanDich) return null;
   await ketNoi.query(
-    'UPDATE DatSan SET MaSanCu = ?, NgayChuyenSan = NOW(), MaSan = ? WHERE MaDatSan = ?',
+    'UPDATE DatSan SET MaSanCu = ?, NgayChuyenSan = NOW(), NgayKhachDongYChuyen = NULL, MaSan = ? WHERE MaDatSan = ?',
     [san.maSan, sanDich.maSan, don.maDatSan]);
   return { ...don, maSanCu: san.maSan, tenSanCu: san.tenSan, maSanMoi: sanDich.maSan, tenSanMoi: sanDich.tenSan };
 }

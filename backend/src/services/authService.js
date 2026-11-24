@@ -19,6 +19,7 @@ function taoThongTinNguoiDung(nguoiDung) {
     email: nguoiDung.email,
     trangThai: nguoiDung.trangThai,
     anhDaiDien: nguoiDung.anhDaiDien ?? ANH_MAC_DINH.avatar,
+    gioiTinh: nguoiDung.gioiTinh ?? null, // 'male' | 'female' | null (chưa khai)
   };
   if (nguoiDung.vaiTro === 'owner') {
     thongTin.trangThaiDuyet = nguoiDung.trangThaiDuyet;
@@ -43,11 +44,12 @@ async function dangKy(vaiTro, duLieuDangKy) {
   try {
     const maNguoiDung = await thucHienGiaoDich(async (ketNoi) => {
       const [ketQua] = await ketNoi.query(
-        `INSERT INTO NguoiDung (VaiTro, MatKhauMaHoa, HoTen, SoDienThoai, Email)
-         VALUES (?,?,?,?,?)`,
+        `INSERT INTO NguoiDung (VaiTro, MatKhauMaHoa, HoTen, SoDienThoai, Email, GioiTinh)
+         VALUES (?,?,?,?,?,?)`,
         [
           vaiTro, matKhauMaHoa, duLieuDangKy.hoTen,
           duLieuDangKy.soDienThoai, duLieuDangKy.email,
+          vaiTro === 'customer' ? (duLieuDangKy.gioiTinh ?? null) : null, // chủ sân không khai giới tính
         ]);
       if (vaiTro === 'owner') await taoHoSoChuSan(ketNoi, ketQua.insertId, duLieuDangKy);
       return ketQua.insertId;
@@ -111,7 +113,8 @@ async function layNguoiDung(maNguoiDung) {
   const [[nguoiDung]] = await pool.query(
     `SELECT nd.MaNguoiDung AS maNguoiDung, nd.VaiTro AS vaiTro,
        nd.HoTen AS hoTen, nd.SoDienThoai AS soDienThoai, nd.SoDienThoaiPhu AS soDienThoaiPhu,
-       nd.Email AS email, nd.TrangThai AS trangThai, nd.AnhDaiDien AS anhDaiDien, hs.TrangThaiDuyet AS trangThaiDuyet,
+       nd.Email AS email, nd.TrangThai AS trangThai, nd.AnhDaiDien AS anhDaiDien, nd.GioiTinh AS gioiTinh,
+       hs.TrangThaiDuyet AS trangThaiDuyet,
        hs.TenDoanhNghiep AS tenDoanhNghiep, hs.LyDoTuChoi AS lyDoTuChoi
      FROM NguoiDung nd
      LEFT JOIN HoSoChuSan hs ON hs.MaNguoiDung = nd.MaNguoiDung
@@ -127,6 +130,7 @@ async function capNhatThongTin(maNguoiDung, duLieuCapNhat) {
     soDienThoai: 'SoDienThoai',
     soDienThoaiPhu: 'SoDienThoaiPhu',
     email: 'Email',
+    gioiTinh: 'GioiTinh',
   };
   const cacTruongCapNhat = Object.keys(duLieuCapNhat)
     .filter((truong) => cotDuocCapNhat[truong]);

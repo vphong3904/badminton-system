@@ -636,10 +636,18 @@ async function lietKeKhoaSan(maChuSan, boLoc) {
   let truyVan = `SELECT k.MaKhoa AS maKhoa, k.MaSan AS maSan,
       CONCAT(DATE_FORMAT(k.NgayKhoa, '%Y-%m-%d'), ' ', TIME_FORMAT(k.GioBatDau, '%H:%i')) AS thoiGianBatDau,
       CONCAT(DATE_FORMAT(k.NgayKhoa, '%Y-%m-%d'), ' ', TIME_FORMAT(k.GioKetThuc, '%H:%i')) AS thoiGianKetThuc,
-      k.LyDo AS lyDo
+      k.LyDo AS lyDo,
+      -- loai: 'su-kien' (sân được giữ cho sự kiện → lịch tô màu tím, chú thích "Sự kiện", không xoá tay được) | 'thu-cong'
+      IF(k.MaSuKien IS NULL, 'thu-cong', 'su-kien') AS loai,
+      k.MaSuKien AS maSuKien, sk.TieuDe AS tieuDeSuKien, s.MaCoSo AS maCoSo
     FROM KhoaSan k JOIN San s ON s.MaSan=k.MaSan
       JOIN CoSo cs ON cs.MaCoSo=s.MaCoSo
+      LEFT JOIN SuKien sk ON sk.MaSuKien=k.MaSuKien
     WHERE cs.MaChuSan=? AND ${SAN_CHUA_XOA('s')}`;
+  if (boLoc.maCoSo) {
+    truyVan += ' AND s.MaCoSo=?';
+    thamSo.push(boLoc.maCoSo);
+  }
   if (boLoc.maSan) {
     truyVan += ' AND k.MaSan=?';
     thamSo.push(boLoc.maSan);

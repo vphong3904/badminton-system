@@ -8,6 +8,8 @@ const tienTo = {
   lich: 'lich:',
 };
 const PHONG_ADMIN = 'admin';
+// Phòng chung: mọi socket đã đăng nhập đều tự vào (dùng cho thay đổi công khai: sự kiện, cơ sở, sân, đánh giá…).
+const PHONG_CHUNG = 'chung';
 // Độ trễ khi KHÔNG bắt được thời điểm commit (vd guiThongBao chạy chung ketNoi của giao dịch).
 const TRE_SAU_GIAO_DICH_MS = 300;
 
@@ -58,6 +60,16 @@ function phatLichSan(maCoSo, ngay, cacSlot) {
   });
 }
 
+// Phát MỘT lần tới nhiều phòng (socket thuộc nhiều phòng cũng chỉ nhận 1 bản).
+function phatNhieuPhong(cacPhong, suKien, duLieu) {
+  if (!io || !Array.isArray(cacPhong) || cacPhong.length === 0) return;
+  try {
+    io.to(cacPhong).emit(suKien, duLieu);
+  } catch (loi) {
+    console.error(`[realtime] phát "${suKien}" tới nhiều phòng lỗi:`, loi.message);
+  }
+}
+
 // Phát tới mọi Admin đang kết nối (vd `bao-cao:moi`).
 function phatChoAdmin(suKien, duLieu) {
   phat(PHONG_ADMIN, suKien, duLieu);
@@ -96,7 +108,7 @@ function ngatKetNoiNguoiDung(maNguoiDung, { troMs = 0 } = {}) {
 
 module.exports = {
   datIo, layIo,
-  tenPhongNguoiDung, tenPhongChat, tenPhongLich, PHONG_ADMIN, TRE_SAU_GIAO_DICH_MS,
+  tenPhongNguoiDung, tenPhongChat, tenPhongLich, PHONG_ADMIN, PHONG_CHUNG, TRE_SAU_GIAO_DICH_MS, phatNhieuPhong,
   phatChoNguoiDung, phatChoPhong, xoaNguoiDungKhoiPhong, phatLichSan, phatChoAdmin, phatSauGiaoDich,
   ngatKetNoiNguoiDung,
 };

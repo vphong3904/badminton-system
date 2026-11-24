@@ -170,6 +170,7 @@ exports.xemTruocKhoaSan = {
 exports.danhSachKhoaSan = {
   query: z.object({
     maSan: maSo.optional(),
+    maCoSo: maSo.optional(),
     tuNgay: z.string().optional(),
     denNgay: z.string().optional(),
   }),

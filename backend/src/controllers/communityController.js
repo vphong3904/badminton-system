@@ -3,6 +3,13 @@ const xuLy=require('../utils/asyncHandler');
 const {thanhCong}=require('../utils/response');
 const {phatChoPhong,phatChoNguoiDung,xoaNguoiDungKhoiPhong}=require('../realtime/phat');
 const uid=req=>req.nguoiDung.maNguoiDung;
+const {luuAnh}=require('../middlewares/upload');
+const AppError=require('../utils/AppError');
+exports.taiAnh=xuLy(async(req,res)=>{
+  if(!req.file)throw AppError.duLieuKhongHopLe('Thiếu file ảnh (trường tepAnh)');
+  const duongDan=await luuAnh(req.file,'cong-dong',`cd${uid(req)}`);
+  thanhCong(res,{duongDan},201);
+});
 // Bài tìm người chơi
 exports.lietKeBai=xuLy(async(req,res)=>thanhCong(res,await dichVu.lietKeBai(req.query,uid(req))));
 exports.cuaToiBai=xuLy(async(req,res)=>thanhCong(res,await dichVu.cuaToiBai(uid(req))));
