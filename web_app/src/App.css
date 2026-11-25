@@ -3717,7 +3717,11 @@ a.btn {
   text-align: center;
 }
 
-/* ===== Quản lý đặt sân: cột Sân thu nhỏ, mở rộng Ngày giờ thanh toán và Thao tác ===== */
+.row-actions-grid .row-actions-span {
+  grid-column: 1 / -1;
+}
+
+/* ===== Quản lý đặt sân: 10 cột (Thời gian chơi gộp ngày – giờ bắt đầu – giờ kết thúc, thêm Ghi chú của khách) ===== */
 .table-scroll .table.table-bookings.table-bookings-fit {
   table-layout: fixed;
   min-width: 1500px;
@@ -3727,48 +3731,73 @@ a.btn {
   padding-left: 10px;
   padding-right: 10px;
   text-align: left !important;
-}
-.table-bookings-fit td {
   overflow-wrap: anywhere;
 }
-/* Không xuống dòng ở cột Ngày giờ thanh toán, Giờ, Ngày */
-.table-bookings-fit td:nth-child(8),
-.table-bookings-fit td:nth-child(4),
-.table-bookings-fit td:nth-child(5) {
+/* Độ rộng cột (selector đủ mạnh để thắng luật chung '.table-scroll .table ... width:auto !important'; tổng = 100%) */
+.table-scroll .table.table-bookings-fit thead th:nth-child(1), .table-scroll .table.table-bookings-fit tbody td:nth-child(1) { width: 10% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(2), .table-scroll .table.table-bookings-fit tbody td:nth-child(2) { width: 7% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(3), .table-scroll .table.table-bookings-fit tbody td:nth-child(3) { width: 5% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(4), .table-scroll .table.table-bookings-fit tbody td:nth-child(4) { width: 9% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(5), .table-scroll .table.table-bookings-fit tbody td:nth-child(5) { width: 9% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(6), .table-scroll .table.table-bookings-fit tbody td:nth-child(6) { width: 11% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(7), .table-scroll .table.table-bookings-fit tbody td:nth-child(7) { width: 12% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(8), .table-scroll .table.table-bookings-fit tbody td:nth-child(8) { width: 17% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(9), .table-scroll .table.table-bookings-fit tbody td:nth-child(9) { width: 9% !important; }
+.table-scroll .table.table-bookings-fit thead th:nth-child(10), .table-scroll .table.table-bookings-fit tbody td:nth-child(10) { width: 11% !important; }
+.table-bookings-fit td.cell-play-time,
+.table-bookings-fit td:nth-child(7) {
   white-space: nowrap;
 }
-/* Có cột Ngày (Mọi ngày): 11 cột */
-.table-scroll .table-bookings-fit.has-day th:nth-child(1), .table-scroll .table-bookings-fit.has-day td:nth-child(1) { width: 10% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(2), .table-scroll .table-bookings-fit.has-day td:nth-child(2) { width: 8% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(3), .table-scroll .table-bookings-fit.has-day td:nth-child(3) { width: 5% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(4), .table-scroll .table-bookings-fit.has-day td:nth-child(4) { width: 7% !important; white-space: nowrap; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(5), .table-scroll .table-bookings-fit.has-day td:nth-child(5) { width: 6% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(6), .table-scroll .table-bookings-fit.has-day td:nth-child(6) { width: 6% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(7), .table-scroll .table-bookings-fit.has-day td:nth-child(7) { width: 9% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(8), .table-scroll .table-bookings-fit.has-day td:nth-child(8) { width: 8% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(9), .table-scroll .table-bookings-fit.has-day td:nth-child(9) { width: 13% !important; white-space: nowrap; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(10), .table-scroll .table-bookings-fit.has-day td:nth-child(10) { width: 11% !important; }
-.table-scroll .table-bookings-fit.has-day th:nth-child(11), .table-scroll .table-bookings-fit.has-day td:nth-child(11) { width: 17% !important; }
-/* Không có cột Ngày: 10 cột */
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(1), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(1) { width: 11% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(2), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(2) { width: 9% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(3), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(3) { width: 5% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(4), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(4) { width: 7% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(5), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(5) { width: 7% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(6), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(6) { width: 10% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(7), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(7) { width: 9% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(8), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(8) { width: 14% !important; white-space: nowrap; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(9), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(9) { width: 11% !important; }
-.table-scroll .table-bookings-fit:not(.has-day) th:nth-child(10), .table-scroll .table-bookings-fit:not(.has-day) td:nth-child(10) { width: 17% !important; }
-/* Cột Ngày giờ thanh toán là cột 9 (có cột Ngày) hoặc 8 (không có): không xuống dòng */
-.table-bookings-fit.has-day td:nth-child(4),
-.table-bookings-fit.has-day td:nth-child(9) { white-space: nowrap; }
-.table-bookings-fit:not(.has-day) td:nth-child(8) { white-space: nowrap; }
-.table-bookings-fit.has-day td:nth-child(8) { white-space: normal; }
-/* Thao tác: nút lưới 2x2, nút đơn chiếm cả hàng */
-.table-bookings-fit .row-actions.row-actions-grid {
-  max-width: none;
+/* Ghi chú của khách: tối đa 3 dòng, rê chuột để xem đủ nội dung */
+.table-bookings-fit td.cell-note-wrap,
+.table-bookings-fit td.cell-note {
+  font-size: 13px;
+  line-height: 1.35;
 }
-.row-actions-grid .row-actions-span {
-  grid-column: 1 / -1;
+.table-bookings-fit .cell-note-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Cột Số điện thoại và Sân gọn lại: chữ nhỏ hơn, đệm hẹp hơn */
+.table-bookings-fit th:nth-child(2), .table-bookings-fit td:nth-child(2),
+.table-bookings-fit th:nth-child(3), .table-bookings-fit td:nth-child(3) {
+  padding-left: 6px;
+  padding-right: 6px;
+  font-size: 13px;
+}
+.table-bookings-fit td:nth-child(2) { white-space: nowrap; }
+
+/* Ghi chú: nút mở rộng xem đủ nội dung */
+.cell-note-more {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1f7a5d;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.note-full {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid #dfe6e2;
+  border-radius: 8px;
+  background: #f6faf8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+/* Thời gian chơi – Ngày đặt sân – Cơ sở – Ngày giờ thanh toán đứng sát nhau; phần trống dành cho Ghi chú */
+.table-bookings-fit th:nth-child(n+4):nth-child(-n+7), .table-bookings-fit td:nth-child(n+4):nth-child(-n+7) {
+  padding-left: 6px;
+  padding-right: 6px;
 }

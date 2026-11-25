@@ -79,7 +79,26 @@ function eachDay(fromIso, toIso) {
 const MAX_RANGE_DAYS = 90
 // Cơ sở bị khoá (chủ sân khoá = closed, quản trị viên khoá = locked): khách không đặt được, các chức năng liên quan bị vô hiệu
 const isBranchBlocked = (b) => b?.trangThai === 'closed' || b?.trangThai === 'locked'
-const MAPS_PREFIX = 'https://maps.google.com/?q='
+// Link bản đồ: chủ sân tự dán link Google Maps (không còn gắn cứng phần https://maps.google.com/?q=).
+// Luật khớp backend (validators/owner.js + utils/toaDoBanDo.js: laLinkGoogleMaps): http(s), tối đa 500 ký tự, host Google Maps / link rút gọn.
+function checkMapLink(value) {
+  const v = String(value ?? '').trim()
+  if (!v) return 'Vui lòng nhập link Google Maps.'
+  if (v.length > 500) return 'Link bản đồ tối đa 500 ký tự.'
+  let url
+  try {
+    url = new URL(v)
+  } catch {
+    return 'Link không hợp lệ. Hãy dán link Google Maps, ví dụ https://maps.app.goo.gl/...'
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'Link phải bắt đầu bằng http:// hoặc https://.'
+  const host = url.hostname
+  const laRutGon = /^(maps\.app\.goo\.gl|goo\.gl)$/i.test(host)
+  const laMaps = /^maps\.google\.[a-z.]+$/i.test(host)
+  const laGoogleMaps = /^(www\.)?google\.[a-z.]+$/i.test(host) && url.pathname.startsWith('/maps')
+  if (!laRutGon && !laMaps && !laGoogleMaps) return 'Vui lòng dán link Google Maps (ví dụ https://maps.app.goo.gl/...).'
+  return ''
+}
 const BOOKING_STATUSES = ['Chờ thanh toán', 'Đã chuyển khoản', 'Đã thanh toán', 'Đã sử dụng sân', 'Chờ hoàn tiền', 'Đã huỷ']
 
 // Trạng thái hiển thị = gộp trạng thái đơn (DatSan.TrangThai) và trạng thái thanh toán (ThanhToan.TrangThai) của backend:
@@ -1849,11 +1868,10 @@ const BOOKING_SORT_COLS = [
   { key: 'sdt', label: 'Số điện thoại', type: 'text', get: (d) => d.soDienThoaiLienHe },
   { key: 'san', label: 'Sân', type: 'text', get: (d) => d.tenSan },
   { key: 'ngayDat', label: 'Ngày đặt sân', type: 'date', get: (d) => d.ngayTao },
-  { key: 'ngayChoi', label: 'Ngày chơi', type: 'date', get: (d) => ngayGioKey(d.ngay, d.gioBatDau) },
-  { key: 'gioBd', label: 'Giờ bắt đầu', type: 'time', get: (d) => String(d.gioBatDau ?? '').slice(0, 5) },
-  { key: 'gioKt', label: 'Giờ kết thúc', type: 'time', get: (d) => String(d.gioKetThuc ?? '').slice(0, 5) },
+  { key: 'thoiGian', label: 'Thời gian chơi', type: 'date', get: (d) => ngayGioKey(d.ngay, d.gioBatDau) },
   { key: 'coSo', label: 'Cơ sở', type: 'text', get: (d) => d.tenCoSo },
   { key: 'thanhToan', label: 'Ngày giờ thanh toán', type: 'date', get: (d) => d.ngayGuiAnh },
+  { key: 'ghiChu', label: 'Ghi chú', type: 'text', get: (d) => d.ghiChu },
   { key: 'trangThai', label: 'Trạng thái', type: 'text', get: (d) => d.hienThi },
 ]
 const BOOKING_BADGE = {
@@ -2154,6 +2172,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
   const [reload, setReload] = useState(0)
   const [preview, setPreview] = useState('') // đường dẫn ảnh chuyển khoản đang xem
   const [cancelTarget, setCancelTarget] = useState(null) // đơn đang mở cửa sổ huỷ
+  const [noteView, setNoteView] = useState(null) // đơn đang mở cửa sổ xem ghi chú đầy đủ
   const [cancelReason, setCancelReason] = useState('')
   const [cancelType, setCancelType] = useState('problem') // 'problem' | 'other'
   const [transferTarget, setTransferTarget] = useState(null) // đơn đang mở cửa sổ Chuyển sân
@@ -2285,7 +2304,7 @@ function BookingsPage({ user, filters, onGoRefunds }) {
     ? [...sortRows(visibleBase.filter(canHuyNgay), BOOKING_SORT_COLS, sortSel), ...sortRows(visibleBase.filter((d) => !canHuyNgay(d)), BOOKING_SORT_COLS, sortSel)]
     : visibleBase
   const soDonCanHuy = visible.filter((d) => d.coSoKhoa && coTheHuyDon(d, nowTick)).length
-  const colCount = allDays ? 11 : 10
+  const colCount = 10
 
   if (!isOwner) {
     return (
@@ -2345,18 +2364,17 @@ function BookingsPage({ user, filters, onGoRefunds }) {
 
       <section className="card table-card">
         <div className="table-scroll">
-          <table className={`table table-bookings table-bookings-fit${allDays ? ' has-day' : ''}`}>
+          <table className={`table table-bookings table-bookings-fit`}>
             <thead>
               <tr>
                 <SortTh cols={BOOKING_SORT_COLS} k="khach" sel={sortSel} onSel={setSortSel}>Khách</SortTh>
                 <SortTh cols={BOOKING_SORT_COLS} k="sdt" sel={sortSel} onSel={setSortSel}>Số điện thoại</SortTh>
                 <SortTh cols={BOOKING_SORT_COLS} k="san" sel={sortSel} onSel={setSortSel}>Sân</SortTh>
-                {allDays && <SortTh cols={BOOKING_SORT_COLS} k="ngayChoi" sel={sortSel} onSel={setSortSel}>Ngày</SortTh>}
-                <SortTh cols={BOOKING_SORT_COLS} k="gioBd" sel={sortSel} onSel={setSortSel}>Giờ bắt đầu</SortTh>
-                <SortTh cols={BOOKING_SORT_COLS} k="gioKt" sel={sortSel} onSel={setSortSel}>Giờ kết thúc</SortTh>
-                <SortTh cols={BOOKING_SORT_COLS} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="thoiGian" sel={sortSel} onSel={setSortSel}>Thời gian chơi</SortTh>
                 <SortTh cols={BOOKING_SORT_COLS} k="ngayDat" sel={sortSel} onSel={setSortSel}>Ngày đặt sân</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="coSo" sel={sortSel} onSel={setSortSel}>Cơ sở</SortTh>
                 <SortTh cols={BOOKING_SORT_COLS} k="thanhToan" sel={sortSel} onSel={setSortSel}>Ngày giờ thanh toán</SortTh>
+                <SortTh cols={BOOKING_SORT_COLS} k="ghiChu" sel={sortSel} onSel={setSortSel}>Ghi chú</SortTh>
                 <SortTh cols={BOOKING_SORT_COLS} k="trangThai" sel={sortSel} onSel={setSortSel}>Trạng thái</SortTh>
                 <th>Thao tác</th>
               </tr>
@@ -2383,15 +2401,24 @@ function BookingsPage({ user, filters, onGoRefunds }) {
                       <td>{d.tenKhach}</td>
                       <td>{d.soDienThoaiLienHe ?? '—'}</td>
                       <td>{d.tenSan}</td>
-                      {allDays && <td>{toViDate(String(d.ngay).slice(0, 10))}</td>}
-                      <td>{d.gioBatDau.slice(0, 5)}</td>
-                      <td>{d.gioKetThuc.slice(0, 5)}</td>
+                      <td className="cell-play-time">
+                        {d.gioBatDau.slice(0, 5)} – {d.gioKetThuc.slice(0, 5)}
+                        {allDays && <div className="cell-sub">{toViDate(String(d.ngay).slice(0, 10))}</div>}
+                      </td>
+                      <td>{d.ngayTao ? toViDate(String(d.ngayTao).slice(0, 10)) : '—'}</td>
                       <td>
                         {d.tenCoSo ?? '—'}
                         {d.coSoKhoa && <span className="branch-locked-tag"> (cơ sở bị khoá)</span>}
                       </td>
-                      <td>{d.ngayTao ? toViDate(String(d.ngayTao).slice(0, 10)) : '—'}</td>
                       <td>{d.ngayGuiAnh ? `${toViDate(String(d.ngayGuiAnh).slice(0, 10))} ${String(d.ngayGuiAnh).slice(11, 16)}` : '—'}</td>
+                      <td className="cell-note" title={d.ghiChu ? String(d.ghiChu) : undefined}>
+                        <div className="cell-note-text">{d.ghiChu ? String(d.ghiChu) : '—'}</div>
+                        {d.ghiChu && (
+                          <button type="button" className="cell-note-more" onClick={() => setNoteView(d)}>
+                            Mở rộng
+                          </button>
+                        )}
+                      </td>
                       <td>
                         <span
                           className={`status-badge status-${BOOKING_BADGE[d.hienThi] ?? 'unpaid'}`}
@@ -2492,6 +2519,21 @@ function BookingsPage({ user, filters, onGoRefunds }) {
             setReload((n) => n + 1)
           }}
         />
+      )}
+
+      {/* Cửa sổ xem đầy đủ ghi chú của khách */}
+      {noteView && (
+        <Dialog title="Ghi chú của khách" width={520} onClose={() => setNoteView(null)}>
+          <p className="picker-hint">
+            {noteView.tenKhach} · {noteView.tenSan} · {toViDate(String(noteView.ngay).slice(0, 10))} {noteView.gioBatDau.slice(0, 5)} – {noteView.gioKetThuc.slice(0, 5)}
+          </p>
+          <div className="note-full">{String(noteView.ghiChu)}</div>
+          <div className="dialog-two">
+            <button type="button" className="dialog-primary" onClick={() => setNoteView(null)}>
+              Đóng
+            </button>
+          </div>
+        </Dialog>
       )}
 
       {/* Cửa sổ nhập lý do huỷ đơn */}
@@ -2971,7 +3013,7 @@ const EMPTY_BRANCH_FORM = {
   quanHuyen: '',
   soDienThoai: '',
   zalo: '',
-  linkBanDo: '', // chỉ nhập toạ độ "vĩ độ, kinh độ"; phần https://maps.google.com/?q= được gắn cứng
+  linkBanDo: '', // link Google Maps do chủ sân dán
   moTa: '',
   gioMoCua: '06:00',
   gioDongCua: '22:00',
@@ -3007,17 +3049,15 @@ function validateBranchForm(f) {
     return { error: 'Số điện thoại không hợp lệ (di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0).' }
   }
   if (zalo.length > 30) return { error: 'Zalo tối đa 30 ký tự.' }
-  const toa = /^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/.exec(f.linkBanDo.trim())
-  if (!toa) return { error: 'Toạ độ bản đồ nhập theo dạng "vĩ độ, kinh độ", ví dụ 10.8012, 106.6399.' }
-  if (Math.abs(Number(toa[1])) > 90) return { error: 'Vĩ độ phải từ -90 đến 90.' }
-  if (Math.abs(Number(toa[2])) > 180) return { error: 'Kinh độ phải từ -180 đến 180.' }
+  const loiLink = checkMapLink(f.linkBanDo)
+  if (loiLink) return { error: loiLink }
   if (moTa.length > 2000) return { error: 'Mô tả tối đa 2000 ký tự.' }
   if (!f.gioMoCua || !f.gioDongCua) return { error: 'Vui lòng chọn giờ mở cửa và giờ đóng cửa.' }
   if (f.gioMoCua >= f.gioDongCua) return { error: 'Giờ đóng cửa phải sau giờ mở cửa.' }
   const soPhut = Number(f.soPhutDatToiThieu)
   if (!Number.isInteger(soPhut) || soPhut < 30 || soPhut % 30 !== 0) return { error: 'Thời gian đặt tối thiểu phải là bội số của 30 phút.' }
 
-  const linkBanDo = `${MAPS_PREFIX}${toa[1]},${toa[2]}`
+  const linkBanDo = String(f.linkBanDo).trim()
   const body = { tenCoSo, diaChi, tinhThanh, quanHuyen, soDienThoai, linkBanDo, gioMoCua: f.gioMoCua, gioDongCua: f.gioDongCua, soPhutDatToiThieu: soPhut }
   if (zalo) body.zalo = zalo
   if (moTa) body.moTa = moTa
@@ -3038,14 +3078,8 @@ function branchFieldErrors(f) {
   if (!text(f.quanHuyen)) e.quanHuyen = 'Vui lòng chọn Quận/Huyện.'
   if (!text(f.soDienThoai)) e.soDienThoai = 'Vui lòng nhập số điện thoại.'
   else if (!CONTACT_PHONE_RE.test(normalizeContactPhone(f.soDienThoai))) e.soDienThoai = 'Số điện thoại không hợp lệ (di động 10 số hoặc số bàn 11 số, bắt đầu bằng 0).'
-  const toaDo = text(f.linkBanDo)
-  if (!toaDo) e.linkBanDo = 'Vui lòng nhập toạ độ bản đồ.'
-  else {
-    const m = /^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/.exec(toaDo)
-    if (!m) e.linkBanDo = 'Toạ độ nhập theo dạng "vĩ độ, kinh độ", ví dụ 10.8012, 106.6399.'
-    else if (Math.abs(Number(m[1])) > 90) e.linkBanDo = 'Vĩ độ phải từ -90 đến 90.'
-    else if (Math.abs(Number(m[2])) > 180) e.linkBanDo = 'Kinh độ phải từ -180 đến 180.'
-  }
+  const loiLink = checkMapLink(f.linkBanDo)
+  if (loiLink) e.linkBanDo = loiLink
   if (!f.gioMoCua) e.gioMoCua = 'Vui lòng chọn giờ mở cửa.'
   if (!f.gioDongCua) e.gioDongCua = 'Vui lòng chọn giờ đóng cửa.'
   else if (f.gioMoCua && f.gioMoCua >= f.gioDongCua) e.gioDongCua = 'Giờ đóng cửa phải sau giờ mở cửa.'
@@ -3220,8 +3254,6 @@ function BranchesPage({ user, onCreated }) {
   }
 
   const openEdit = (b) => {
-    const m = /(?:@|[?&](?:q|query|ll|center)=)(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i.exec(b.linkBanDo ?? '')
-    const toa = b.viDo != null && b.kinhDo != null ? `${b.viDo}, ${b.kinhDo}` : m ? `${m[1]}, ${m[2]}` : ''
     setEditing(b)
     setForm({
       tenCoSo: b.tenCoSo ?? '',
@@ -3230,7 +3262,7 @@ function BranchesPage({ user, onCreated }) {
       quanHuyen: b.quanHuyen ?? '',
       soDienThoai: b.soDienThoai ?? '',
       zalo: b.zalo ?? '',
-      linkBanDo: toa,
+      linkBanDo: b.linkBanDo ?? '',
       moTa: b.moTa ?? '',
       gioMoCua: cut5(b.gioMoCua) || '06:00',
       gioDongCua: cut5(b.gioDongCua) || '22:00',
@@ -3407,11 +3439,8 @@ function BranchesPage({ user, onCreated }) {
                 <input className="input" inputMode="numeric" pattern="[0-9]*" value={form.zalo} onChange={(e) => setForm((f) => ({ ...f, zalo: onlyDigits(e.target.value) }))} maxLength={30} />
               </label>
               <label className="dialog-field branch-wide">
-                <span>Toạ độ bản đồ (Google Maps) </span>
-                <span className="input-prefixed">
-                  <span className="input-prefix">{MAPS_PREFIX}</span>
-                  <input id="branch-linkBanDo" className="input" value={form.linkBanDo} onChange={(e) => setForm((f) => ({ ...f, linkBanDo: e.target.value.replace(/[^0-9.,\-\s]/g, '') }))} onBlur={blurField('linkBanDo')} {...invalidProps('linkBanDo')} placeholder="10.8012, 106.6399" inputMode="decimal" />
-                </span>
+                <span>Link bản đồ (Google Maps) </span>
+                <input id="branch-linkBanDo" className="input" type="text" value={form.linkBanDo} onChange={(e) => setForm((f) => ({ ...f, linkBanDo: e.target.value }))} onBlur={(e) => { setForm((f) => ({ ...f, linkBanDo: f.linkBanDo.trim() })); blurField('linkBanDo')(e) }} maxLength={500} placeholder="Dán link Google Maps, ví dụ https://maps.app.goo.gl/..." {...invalidProps('linkBanDo')} />
                 {errMsg('linkBanDo')}
               </label>
               <label className="dialog-field">
