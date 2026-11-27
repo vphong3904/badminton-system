@@ -2042,15 +2042,6 @@ a.btn {
   text-align: center;
 }
 
-.picker-step {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
 .step-btn {
   padding: 2px 10px;
   cursor: pointer;
@@ -3466,22 +3457,6 @@ a.btn {
 }
 
 
-/* ===== Chọn bước 30 / 60 phút: hai nút cùng hiển thị ===== */
-.step-toggle { display: inline-flex; gap: 6px; }
-.step-toggle-btn {
-  min-width: 56px;
-  height: 34px;
-  padding: 0 14px;
-  font: inherit;
-  font-weight: 600;
-  background: #fff;
-  border: 1px solid #b9c4cc;
-  border-radius: 8px;
-  cursor: pointer;
-  color:#000;
-}
-.step-toggle-btn.is-active { background: var(--green); border-color: var(--green); color: #fff; }
-
 /* ===== Vòng 15: Quản lý cơ sở (Sửa / Khoá / Xoá), ô toạ độ bản đồ, đơn của cơ sở bị khoá ===== */
 .branch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .btn-danger-text { color: #b42318; }
@@ -3800,4 +3775,69 @@ a.btn {
 .table-bookings-fit th:nth-child(n+4):nth-child(-n+7), .table-bookings-fit td:nth-child(n+4):nth-child(-n+7) {
   padding-left: 6px;
   padding-right: 6px;
+}
+
+/* Ảnh cơ sở chọn trong form thêm/sửa: xem trước 1 ảnh, cỡ như thẻ cơ sở */
+.branch-image-preview { display: block; width: 100%; max-width: 610px; max-height: 430px; object-fit: cover; border-radius: 12px; border: 1px solid #d8dedb; }
+
+
+/* ============================================================
+   Ảnh Chủ sân vừa chọn: ảnh nhỏ / bình thường giữ nguyên kích thước,
+   ảnh lớn hoặc quá dài thì chỉ lấy phần GIỮA ảnh (cắt bớt phần thừa ở trên/dưới)
+   ============================================================ */
+.image-center-crop {
+  display: flex;
+  align-items: center;      /* ảnh cao hơn khung -> cắt đều trên và dưới, giữ phần giữa */
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 610px;
+  max-height: 430px;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.image-center-crop img {
+  display: block;
+  flex: none;
+  width: auto;
+  height: auto;
+  max-width: 100%;           /* ảnh rộng hơn khung thì thu nhỏ vừa chiều ngang, không phóng to ảnh nhỏ */
+  border-radius: 12px;
+}
+
+/* ============================================================
+   Bảng dữ liệu tự co theo kích thước màn hình (không còn thanh trượt ngang trên laptop).
+   Chữ trong ô tự xuống dòng; chỉ khi màn hình rất hẹp (điện thoại / cửa sổ nhỏ) mới cho trượt ngang.
+   ============================================================ */
+.table-scroll .table,
+.table-scroll .table-bookings,
+.table-scroll .table-reviews,
+.table-scroll .table-refunds,
+.table-scroll .table-courts,
+.table-scroll .table-pricing,
+.table-scroll .table-customers,
+.table-scroll .table-collect,
+.table-scroll .table-detail,
+.table-scroll .table.table-bookings.table-bookings-fit,
+.table.table-bookings.table-bookings-wide,
+.table-reviews,
+.table-refunds,
+.table-pricing,
+.table {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+.table-scroll,
+.table-card {
+  max-width: 100%;
+}
+.table-scroll .table td,
+.table-scroll .table th {
+  overflow-wrap: anywhere;
+}
+/* Màn hình hẹp hơn 900px: cho phép trượt ngang để chữ không bị dồn quá nhỏ */
+@media (max-width: 900px) {
+  .table-scroll .table {
+    min-width: 760px !important;
+  }
 }

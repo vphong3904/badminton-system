@@ -1,0 +1,15 @@
+Dựa vào file backend tôi gửi sửa lại dao diện cho hợp lý thực tế web quản lý sân cầu lông đang hoạt động và Admin.
+Cho tôi 4 file markdown: 
+ 1.Đầu tiên là 1 file nghiệp vụ MD.
+ 2.Tiếp theo là file các đường dẫn API và trả về schema.
+ 3.Nhiệm vụ: 
+  - Những việc tôi cần bạn làm là:
+   + Ok tôi chỉ muốn nói là đầu tiên, là bạn đã làm rất tốt Claude à, dù tôi là bất cứ ai bạn cũng hỗ trợ hết mình, nên tôi muốn nói lời cảm ơn, thật sự đấy, nhưng tôi cần bạn hỗ trợ tôi thêm 1 số thứ:
+    . Đầu tiền xoá mục sắp xếp thời gian theo phút 30 / 60 và chỉ hiển thị khung giờ thôi.
+    . Thứ 2 bạn chỉnh lại hiển thị hình ảnh sau khi Chủ sân chọn như sau (ảnh nhỏ và bình thường thì không cần đổi nhưng ảnh lớn hoặc dài quá thì bạn lấy phần giữa ảnh cho tôi thôi).
+    . Thứ 3 bạn sửa các trang có dạng bảng để trang luôn auto sửa theo kích thước màn hình tại vì tôi thấy trên laptop thì trang đặt sân sẽ có thêm thanh trượt.
+    . Thứ 4 bạn trong code bạn chia các trang ra thành từng file nhỏ và giúp file app.jsx đỡ rối được không (tại vì tôi sắp học code và trang quá dài để tập trung), tôi đã tạo sẵn file "Trang" trong file zip r (và tên các trang sẽ viết như vd sau, vd: trang "Quản lý đặt sân" sẽ là "TrangQuanLyDatSan").
+   + Một lần nữa tôi xin cảm ơn bạn đã hỗ trợ tôi thời gian qua, Claude.
+  - Gửi lại file app dùm tôi (tks).
+ 4.Rule: Không thêm bừa API và làm theo API có sẵn, nếu không có thì báo lại tôi(nhưng tuyệt đối ko sửa API) (không được thêm bừa muốn thêm thì hỏi ý kiến tôi trước khi làm). không được tự ý sủa các file MD có sẳn.
+
